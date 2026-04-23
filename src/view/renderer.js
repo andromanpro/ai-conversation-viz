@@ -1,6 +1,7 @@
 import { CFG, COLORS } from '../core/config.js';
 import { worldToScreen } from './camera.js';
 import { controlPoint, bezierPoint } from './particles.js';
+import { toolIcon } from './tool-icons.js';
 
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
@@ -104,13 +105,19 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const visible = n => n.ts <= cutoff && n.bornAt != null;
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
+  const hasSearch = state.searchMatches && state.searchMatches.size > 0;
   const dimMul = node => {
+    if (hasSearch) return state.searchMatches.has(node.id) ? 1 : CFG.searchDimAlpha;
     if (!hasPath) return 1;
     return state.pathSet.has(node.id) ? 1 : CFG.focusDimAlpha;
   };
-  const edgeDim = e => hasPath
-    ? (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id) ? 1 : CFG.focusDimAlpha)
-    : 1;
+  const edgeDim = e => {
+    if (hasSearch) {
+      return (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
+    }
+    if (!hasPath) return 1;
+    return (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id)) ? 1 : CFG.focusDimAlpha;
+  };
 
   // ---- EDGES (curved)
   ctx.lineWidth = 0.8;
@@ -139,17 +146,24 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const useGradient = state.nodes.length < CFG.useGradientFillBelow;
   for (const n of state.nodes) {
     if (!visible(n)) continue;
+    const isMatch = hasSearch && state.searchMatches.has(n.id);
     const ag = alpha(n) * dimMul(n);
     const ss = sizeScale(n);
     const s = worldToScreen(n.x, n.y, cam);
     const boost = 0.3 + 0.7 * n.recency;
     const pulse = (Math.sin(tSec * CFG.pulseFreq + n.phase) + 1) * 0.5;
-    const r = (n.r * ss + pulse * 0.8 * boost * ss) * cam.scale;
+    const searchPulse = isMatch ? (0.5 + 0.5 * Math.sin(tSec * CFG.searchPulseFreq + n.phase)) : 0;
+    const r = (n.r * ss * (1 + searchPulse * 0.25) + pulse * 0.8 * boost * ss) * cam.scale;
     if (r <= 0) continue;
 
-    ctx.fillStyle = glowRgba(n.role, (0.18 + 0.12 * pulse * boost) * ag);
+    const glowR = r * CFG.nodeGlowRadiusMul;
+    const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
+    const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
+    glowGrad.addColorStop(0, glowRgba(n.role, innerA));
+    glowGrad.addColorStop(1, glowRgba(n.role, 0));
+    ctx.fillStyle = glowGrad;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, r * 2.2, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
     ctx.fill();
 
     if (useGradient) {
@@ -163,6 +177,16 @@ export function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    // Tool icon внутри tool_use ноды
+    if (n.role === 'tool_use' && r >= CFG.toolIconMinR) {
+      const fs = Math.max(CFG.toolIconMinFontPx, Math.round(r * CFG.toolIconFontMul));
+      ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = `rgba(20, 14, 4, ${Math.min(1, ag * 0.92)})`;
+      ctx.fillText(toolIcon(n.toolName), s.x, s.y + fs * 0.05);
+    }
   }
 
   // ---- HOVER RING
@@ -184,6 +208,21 @@ export function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // Активный search-результат — подсветка
+  if (state.searchActive) {
+    const activeNode = state.byId.get(state.searchActive);
+    if (activeNode && visible(activeNode)) {
+      const s = worldToScreen(activeNode.x, activeNode.y, cam);
+      const r = activeNode.r * cam.scale + 10;
+      const pulse = (Math.sin(tSec * CFG.searchPulseFreq) + 1) * 0.5;
+      ctx.strokeStyle = `rgba(236, 160, 64, ${0.6 + 0.4 * pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   ctx.restore();

@@ -1,6 +1,6 @@
 import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
-import { resetStory } from './story-mode.js';
+import { resetStory, syncChatToTimeline } from './story-mode.js';
 
 let sliderEl, labelEl, playBtn;
 let playing = false;
@@ -23,6 +23,7 @@ function onSliderInput() {
   state.timelineMax = parseFloat(sliderEl.value) / 100;
   if (playing) stopPlay();
   updateLabel();
+  syncChatToTimeline(state);
 }
 
 export function togglePlay() {

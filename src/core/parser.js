@@ -91,3 +91,49 @@ export function parseJSONL(text) {
 function safeStringify(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
+
+/**
+ * Парсит одну JSONL-строку. Возвращает массив raw-нод (0-N шт):
+ *  - 0 если строка пустая/невалидная/служебный type
+ *  - 1 для user
+ *  - 1+N для assistant (основная + N tool_use подноды)
+ */
+export function parseLine(line, seedCounter) {
+  const trimmed = (line || '').trim();
+  if (!trimmed) return [];
+  let obj;
+  try { obj = JSON.parse(trimmed); } catch { return []; }
+  const t = obj.type;
+  if (t !== 'user' && t !== 'assistant') return [];
+
+  const { text: msgText, toolUses } = classifyContent(obj.message && obj.message.content);
+  const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
+  const parentId = obj.parentUuid || null;
+
+  const out = [{
+    id: baseId,
+    parentId,
+    role: t,
+    ts,
+    text: msgText,
+    textLen: msgText.length,
+  }];
+  if (t === 'assistant') {
+    for (let i = 0; i < toolUses.length; i++) {
+      const tu = toolUses[i];
+      const inputStr = safeStringify(tu.input);
+      const subText = `${tu.name}\n${inputStr}`;
+      out.push({
+        id: `${baseId}#tu${i}`,
+        parentId: baseId,
+        role: 'tool_use',
+        ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+        text: subText,
+        textLen: subText.length,
+        toolName: tu.name,
+      });
+    }
+  }
+  return out;
+}

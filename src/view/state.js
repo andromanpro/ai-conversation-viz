@@ -11,6 +11,8 @@ export const state = {
   pathSet: new Set(),
   stars: [],
   cameraTarget: null,
+  searchMatches: new Set(),
+  searchActive: null,
 };
 
 export function resetInteractionState() {

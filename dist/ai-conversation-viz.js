@@ -58,6 +58,17 @@ const CFG = {
   storyCharMs: 22,
   storyMaxTypeMs: 1300,
   toolUseTsStepMs: 300,
+  toolIconMinR: 6,
+  toolIconMinFontPx: 9,
+  toolIconFontMul: 1.25,
+  nodeGlowRadiusMul: 1.9,
+  nodeGlowAlphaBase: 0.08,
+  nodeGlowAlphaPulse: 0.04,
+  nodeGlowInnerStop: 0.4,
+  searchDimAlpha: 0.22,
+  searchPulseFreq: 3.5,
+  livePollMs: 800,
+  liveReconnectMs: 2500,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,
@@ -190,9 +201,110 @@ function safeStringify(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
+/**
+ * Парсит одну JSONL-строку. Возвращает массив raw-нод (0-N шт):
+ *  - 0 если строка пустая/невалидная/служебный type
+ *  - 1 для user
+ *  - 1+N для assistant (основная + N tool_use подноды)
+ */
+function parseLine(line, seedCounter) {
+  const trimmed = (line || '').trim();
+  if (!trimmed) return [];
+  let obj;
+  try { obj = JSON.parse(trimmed); } catch { return []; }
+  const t = obj.type;
+  if (t !== 'user' && t !== 'assistant') return [];
+
+  const { text: msgText, toolUses } = classifyContent(obj.message && obj.message.content);
+  const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
+  const parentId = obj.parentUuid || null;
+
+  const out = [{
+    id: baseId,
+    parentId,
+    role: t,
+    ts,
+    text: msgText,
+    textLen: msgText.length,
+  }];
+  if (t === 'assistant') {
+    for (let i = 0; i < toolUses.length; i++) {
+      const tu = toolUses[i];
+      const inputStr = safeStringify(tu.input);
+      const subText = `${tu.name}\n${inputStr}`;
+      out.push({
+        id: `${baseId}#tu${i}`,
+        parentId: baseId,
+        role: 'tool_use',
+        ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+        text: subText,
+        textLen: subText.length,
+        toolName: tu.name,
+      });
+    }
+  }
+  return out;
+}
+
 
 // --- src/core/graph.js ---
 
+
+function computeRadius(n) {
+  const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
+  const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
+  return n.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
+}
+
+function recomputeRecency(nodes) {
+  if (!nodes.length) return;
+  let tMin = Infinity, tMax = -Infinity;
+  for (const n of nodes) {
+    if (n.ts < tMin) tMin = n.ts;
+    if (n.ts > tMax) tMax = n.ts;
+  }
+  const dt = Math.max(1, tMax - tMin);
+  for (const n of nodes) {
+    n.recency = (n.ts - tMin) / dt;
+    n.r = computeRadius(n);
+  }
+}
+
+/**
+ * Добавляет raw-ноды (от parseLine) в уже существующий state.
+ * Дедупит по id. Связи строятся по parentId, если он есть в byId.
+ * Возвращает список РЕАЛЬНО добавленных нод.
+ */
+function appendRawNodes(state, rawNodes, viewport) {
+  if (!rawNodes || !rawNodes.length) return [];
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+  const added = [];
+  for (const src of rawNodes) {
+    if (state.byId.has(src.id)) continue;
+    const parent = src.parentId ? state.byId.get(src.parentId) : null;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = CFG.springLen * (CFG.birthSpreadMin + Math.random() * (CFG.birthSpreadMax - CFG.birthSpreadMin));
+    const node = {
+      ...src,
+      x: parent ? parent.x + Math.cos(angle) * dist : cx + (Math.random() - 0.5) * 60,
+      y: parent ? parent.y + Math.sin(angle) * dist : cy + (Math.random() - 0.5) * 60,
+      vx: 0, vy: 0,
+      r: CFG.minR,
+      recency: 1,
+      phase: Math.random() * Math.PI * 2,
+    };
+    state.nodes.push(node);
+    state.byId.set(node.id, node);
+    if (parent) {
+      state.edges.push({ source: parent.id, target: node.id, a: parent, b: node });
+    }
+    added.push(node);
+  }
+  recomputeRecency(state.nodes);
+  return added;
+}
 function buildGraph(parsed, viewport) {
   const { width, height } = viewport;
   const cx = width / 2, cy = height / 2;
@@ -340,6 +452,8 @@ const state = {
   pathSet: new Set(),
   stars: [],
   cameraTarget: null,
+  searchMatches: new Set(),
+  searchActive: null,
 };
 function resetInteractionState() {
   state.selected = null;
@@ -610,7 +724,47 @@ function drawStarfield(ctx, stars, camera, viewport, tSec) {
 }
 
 
+// --- src/view/tool-icons.js ---
+
+// Unicode-символы (одноцветные, без emoji — стабильный рендер в canvas)
+const TOOL_ICON_MAP = {
+  bash: '▶',
+  powershell: '▶',
+  shell: '▶',
+  read: '≡',
+  grep: '⌕',
+  glob: '✱',
+  find: '⌕',
+  write: '✎',
+  edit: '✎',
+  multiedit: '✎',
+  notebookedit: '✎',
+  task: '◇',
+  agent: '◇',
+  skill: '✦',
+  webfetch: '↗',
+  websearch: '↗',
+  todowrite: '☑',
+  exitplanmode: '✓',
+  enterplanmode: '☰',
+  askuserquestion: '?',
+  schedulewakeup: '⏱',
+  toolsearch: '⌘',
+};
+function toolIcon(toolName) {
+  if (!toolName) return '•';
+  const key = String(toolName).toLowerCase().replace(/[^a-z]/g, '');
+  if (TOOL_ICON_MAP[key]) return TOOL_ICON_MAP[key];
+  // Попробуем распознать по содержимому (mcp__server__foo_bar → foo_bar)
+  const tail = key.replace(/^mcp/, '').replace(/^[a-z]+?(?=[A-Z])/, '');
+  if (TOOL_ICON_MAP[tail]) return TOOL_ICON_MAP[tail];
+  // Fallback — первая буква в uppercase
+  return String(toolName).trim().charAt(0).toUpperCase() || '•';
+}
+
+
 // --- src/view/renderer.js ---
+
 
 
 
@@ -714,13 +868,19 @@ function draw(ctx, state, tSec, viewport, extras) {
   const visible = n => n.ts <= cutoff && n.bornAt != null;
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
+  const hasSearch = state.searchMatches && state.searchMatches.size > 0;
   const dimMul = node => {
+    if (hasSearch) return state.searchMatches.has(node.id) ? 1 : CFG.searchDimAlpha;
     if (!hasPath) return 1;
     return state.pathSet.has(node.id) ? 1 : CFG.focusDimAlpha;
   };
-  const edgeDim = e => hasPath
-    ? (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id) ? 1 : CFG.focusDimAlpha)
-    : 1;
+  const edgeDim = e => {
+    if (hasSearch) {
+      return (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
+    }
+    if (!hasPath) return 1;
+    return (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id)) ? 1 : CFG.focusDimAlpha;
+  };
 
   // ---- EDGES (curved)
   ctx.lineWidth = 0.8;
@@ -749,17 +909,24 @@ function draw(ctx, state, tSec, viewport, extras) {
   const useGradient = state.nodes.length < CFG.useGradientFillBelow;
   for (const n of state.nodes) {
     if (!visible(n)) continue;
+    const isMatch = hasSearch && state.searchMatches.has(n.id);
     const ag = alpha(n) * dimMul(n);
     const ss = sizeScale(n);
     const s = worldToScreen(n.x, n.y, cam);
     const boost = 0.3 + 0.7 * n.recency;
     const pulse = (Math.sin(tSec * CFG.pulseFreq + n.phase) + 1) * 0.5;
-    const r = (n.r * ss + pulse * 0.8 * boost * ss) * cam.scale;
+    const searchPulse = isMatch ? (0.5 + 0.5 * Math.sin(tSec * CFG.searchPulseFreq + n.phase)) : 0;
+    const r = (n.r * ss * (1 + searchPulse * 0.25) + pulse * 0.8 * boost * ss) * cam.scale;
     if (r <= 0) continue;
 
-    ctx.fillStyle = glowRgba(n.role, (0.18 + 0.12 * pulse * boost) * ag);
+    const glowR = r * CFG.nodeGlowRadiusMul;
+    const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
+    const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
+    glowGrad.addColorStop(0, glowRgba(n.role, innerA));
+    glowGrad.addColorStop(1, glowRgba(n.role, 0));
+    ctx.fillStyle = glowGrad;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, r * 2.2, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
     ctx.fill();
 
     if (useGradient) {
@@ -773,6 +940,16 @@ function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    // Tool icon внутри tool_use ноды
+    if (n.role === 'tool_use' && r >= CFG.toolIconMinR) {
+      const fs = Math.max(CFG.toolIconMinFontPx, Math.round(r * CFG.toolIconFontMul));
+      ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = `rgba(20, 14, 4, ${Math.min(1, ag * 0.92)})`;
+      ctx.fillText(toolIcon(n.toolName), s.x, s.y + fs * 0.05);
+    }
   }
 
   // ---- HOVER RING
@@ -794,6 +971,21 @@ function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // Активный search-результат — подсветка
+  if (state.searchActive) {
+    const activeNode = state.byId.get(state.searchActive);
+    if (activeNode && visible(activeNode)) {
+      const s = worldToScreen(activeNode.x, activeNode.y, cam);
+      const r = activeNode.r * cam.scale + 10;
+      const pulse = (Math.sin(tSec * CFG.searchPulseFreq) + 1) * 0.5;
+      ctx.strokeStyle = `rgba(236, 160, 64, ${0.6 + 0.4 * pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   ctx.restore();
@@ -886,6 +1078,7 @@ function onSliderInput() {
   state.timelineMax = parseFloat(sliderEl.value) / 100;
   if (playing) stopPlay();
   updateLabel();
+  syncChatToTimeline(state);
 }
 function togglePlay() {
   if (playing) stopPlay(); else startPlay();
@@ -989,6 +1182,7 @@ function resetTimeline() {
 
 
 
+
 let streamEl, phoneEl;
 
 const seen = new Set();
@@ -1007,7 +1201,15 @@ function buildBubble(node) {
 
   const roleEl = document.createElement('div');
   roleEl.className = 'chat-role ' + node.role;
-  roleEl.textContent = node.role === 'tool_use' ? (node.toolName || 'tool') : node.role;
+  if (node.role === 'tool_use') {
+    const icon = document.createElement('span');
+    icon.className = 'chat-tool-icon';
+    icon.textContent = toolIcon(node.toolName);
+    roleEl.appendChild(icon);
+    roleEl.appendChild(document.createTextNode(' ' + (node.toolName || 'tool')));
+  } else {
+    roleEl.textContent = node.role;
+  }
 
   const textEl = document.createElement('div');
   textEl.className = 'chat-text typing';
@@ -1059,6 +1261,7 @@ function collectNew(state) {
 function postBubble(node) {
   if (!streamEl) return;
   const { wrap, textEl, fullText } = buildBubble(node);
+  wrap.dataset.nodeId = node.id;
   streamEl.appendChild(wrap);
   requestAnimationFrame(() => {
     wrap.classList.add('show');
@@ -1066,10 +1269,74 @@ function postBubble(node) {
     typeOut(textEl, fullText);
   });
   while (streamEl.children.length > CFG.storyMaxHistory) {
-    streamEl.removeChild(streamEl.firstChild);
+    const removed = streamEl.firstChild;
+    seen.delete(removed?.dataset?.nodeId);
+    streamEl.removeChild(removed);
   }
+  seen.add(node.id);
   activeNodeId = node.id;
   if (phoneEl) phoneEl.classList.add('active');
+}
+
+function postBubbleInstant(node) {
+  if (!streamEl) return;
+  const { wrap, textEl, fullText } = buildBubble(node);
+  wrap.dataset.nodeId = node.id;
+  wrap.classList.add('show');
+  textEl.textContent = fullText;
+  textEl.classList.remove('typing');
+  streamEl.appendChild(wrap);
+  seen.add(node.id);
+  activeNodeId = node.id;
+  if (phoneEl) phoneEl.classList.add('active');
+}
+
+function cutoffTs(state) {
+  if (!state.nodes.length) return Infinity;
+  let tsMin = Infinity, tsMax = -Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+  }
+  return tsMin + (tsMax - tsMin) * state.timelineMax;
+}
+function syncChatToTimeline(state) {
+  if (!streamEl) return;
+  const cutoff = cutoffTs(state);
+  // Определяем целевой набор id (все ноды с ts <= cutoff)
+  const targetIds = new Set();
+  for (const n of state.nodes) {
+    if (n.ts <= cutoff) targetIds.add(n.id);
+  }
+  // Удаляем те bubble которые больше не должны быть
+  for (const child of [...streamEl.children]) {
+    const id = child.dataset.nodeId;
+    if (!targetIds.has(id)) {
+      child.remove();
+      seen.delete(id);
+    }
+  }
+  // Добавляем недостающие — мгновенно, без typewriter
+  const toAdd = [];
+  for (const n of state.nodes) {
+    if (!targetIds.has(n.id)) continue;
+    if (seen.has(n.id)) continue;
+    toAdd.push(n);
+  }
+  toAdd.sort((a, b) => a.ts - b.ts);
+  for (const n of toAdd) postBubbleInstant(n);
+  // Обрезка по лимиту
+  while (streamEl.children.length > CFG.storyMaxHistory) {
+    const removed = streamEl.firstChild;
+    seen.delete(removed?.dataset?.nodeId);
+    streamEl.removeChild(removed);
+  }
+  // Скролл вниз чтобы видно было новейшие
+  streamEl.scrollTop = streamEl.scrollHeight;
+  if (phoneEl) {
+    if (streamEl.children.length > 0) phoneEl.classList.add('active');
+    else phoneEl.classList.remove('active');
+  }
 }
 function tickStory(nowMs, state) {
   const active = isPlaying() && state.nodes.length > 0;
@@ -1083,6 +1350,231 @@ function resetStory() {
   activeNodeId = null;
   if (streamEl) streamEl.innerHTML = '';
   if (phoneEl) phoneEl.classList.remove('active');
+}
+
+
+// --- src/ui/search.js ---
+
+
+let barEl, inputEl, countEl, closeEl;
+let matches = [];
+let currentIndex = 0;
+let getViewport = () => ({ cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
+function initSearch(getViewportFn) {
+  if (getViewportFn) getViewport = getViewportFn;
+  barEl = document.getElementById('search-bar');
+  inputEl = document.getElementById('search-input');
+  countEl = document.getElementById('search-count');
+  closeEl = document.getElementById('search-close');
+  if (!barEl) return;
+  inputEl.addEventListener('input', runSearch);
+  inputEl.addEventListener('keydown', onInputKey);
+  closeEl.addEventListener('click', closeSearch);
+  window.addEventListener('keydown', onGlobalKey);
+  updateCount();
+}
+
+function onGlobalKey(ev) {
+  const typingInField = document.activeElement === inputEl;
+  if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'f' || ev.key === 'F')) {
+    ev.preventDefault();
+    openSearch();
+  } else if (ev.key === '/' && !typingInField) {
+    ev.preventDefault();
+    openSearch();
+  } else if (ev.key === 'Escape' && barEl && barEl.classList.contains('show')) {
+    closeSearch();
+  }
+}
+
+function onInputKey(ev) {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    goto(ev.shiftKey ? -1 : 1);
+  } else if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closeSearch();
+  }
+}
+
+function openSearch() {
+  if (!barEl) return;
+  barEl.classList.add('show');
+  inputEl.focus();
+  inputEl.select();
+}
+
+function closeSearch() {
+  if (!barEl) return;
+  barEl.classList.remove('show');
+  inputEl.value = '';
+  matches = [];
+  currentIndex = 0;
+  state.searchMatches = new Set();
+  state.searchActive = null;
+  updateCount();
+}
+function matchNodes(q, nodes) {
+  const query = String(q || '').trim().toLowerCase();
+  if (!query) return [];
+  const out = [];
+  for (const n of nodes) {
+    const hay = ((n.text || '') + ' ' + (n.toolName || '')).toLowerCase();
+    if (hay.includes(query)) out.push(n.id);
+  }
+  return out;
+}
+
+function runSearch() {
+  matches = matchNodes(inputEl.value, state.nodes);
+  state.searchMatches = new Set(matches);
+  if (matches.length > 0) {
+    currentIndex = 0;
+    focusMatch();
+  } else {
+    state.searchActive = null;
+  }
+  updateCount();
+}
+
+function goto(dir) {
+  if (!matches.length) return;
+  currentIndex = (currentIndex + dir + matches.length) % matches.length;
+  focusMatch();
+  updateCount();
+}
+
+function focusMatch() {
+  const id = matches[currentIndex];
+  const node = state.byId.get(id);
+  if (!node) return;
+  state.searchActive = id;
+  state.selected = node;
+  const vp = getViewport();
+  const cx = vp.cx != null ? vp.cx : window.innerWidth / 2;
+  const cy = vp.cy != null ? vp.cy : window.innerHeight / 2;
+  state.cameraTarget = {
+    x: node.x - cx / state.camera.scale,
+    y: node.y - cy / state.camera.scale,
+    scale: state.camera.scale,
+  };
+}
+
+function updateCount() {
+  if (!countEl) return;
+  if (!inputEl || !inputEl.value) {
+    countEl.textContent = '—';
+  } else if (!matches.length) {
+    countEl.textContent = '0 matches';
+  } else {
+    countEl.textContent = `${currentIndex + 1} / ${matches.length}`;
+  }
+}
+
+
+// --- src/ui/live.js ---
+
+
+
+
+
+
+let urlInput, btnStart, btnStop, statusEl;
+let pollingId = null;
+let lastByteLen = 0;
+let lastUrl = '';
+let getViewport = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  cx: window.innerWidth / 2,
+  cy: window.innerHeight / 2,
+});
+function initLive(getViewportFn) {
+  if (getViewportFn) getViewport = getViewportFn;
+  urlInput = document.getElementById('live-url');
+  btnStart = document.getElementById('btn-live-start');
+  btnStop = document.getElementById('btn-live-stop');
+  statusEl = document.getElementById('live-status');
+  if (!btnStart) return;
+  btnStart.addEventListener('click', startWatching);
+  btnStop.addEventListener('click', stopWatching);
+  urlInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); startWatching(); }
+  });
+  setStatus('idle');
+}
+
+function startWatching() {
+  const url = urlInput.value.trim();
+  if (!url) return;
+  lastUrl = url;
+  lastByteLen = 0;
+  setStatus('connecting…');
+  pullOnce();
+  if (pollingId) clearInterval(pollingId);
+  pollingId = setInterval(pullOnce, CFG.livePollMs);
+  btnStart.style.display = 'none';
+  btnStop.style.display = '';
+}
+
+function stopWatching() {
+  if (pollingId) clearInterval(pollingId);
+  pollingId = null;
+  setStatus('stopped');
+  if (btnStart) btnStart.style.display = '';
+  if (btnStop) btnStop.style.display = 'none';
+}
+
+async function pullOnce() {
+  if (!lastUrl) return;
+  try {
+    const sep = lastUrl.includes('?') ? '&' : '?';
+    const resp = await fetch(lastUrl + sep + '_t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) { setStatus('http ' + resp.status); return; }
+    const text = await resp.text();
+    const byteLen = text.length;
+    if (byteLen < lastByteLen) {
+      // файл был обрезан/пересоздан — начинаем заново
+      lastByteLen = 0;
+    }
+    const newText = text.slice(lastByteLen);
+    lastByteLen = byteLen;
+
+    const lines = newText.split(/\r?\n/);
+    const newRaw = [];
+    let counter = state.nodes.length;
+    for (const line of lines) {
+      const parsed = parseLine(line, counter++);
+      for (const p of parsed) newRaw.push(p);
+    }
+    if (newRaw.length) {
+      const added = appendRawNodes(state, newRaw, getViewport());
+      ensureParticles(state.edges);
+      state.timelineMax = 1; // показываем актуальное
+      updateStatsHUD();
+      setStatus(`+${added.length} @ ${timeNow()} (${state.nodes.length} total)`);
+    } else {
+      setStatus(`up-to-date · ${byteLen}b`);
+    }
+  } catch (e) {
+    setStatus('err: ' + e.message);
+  }
+}
+
+function updateStatsHUD() {
+  const el = document.getElementById('stats');
+  if (el) {
+    el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>live</span>`;
+  }
+}
+
+function timeNow() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+}
+
+function setStatus(s) {
+  if (statusEl) statusEl.textContent = s;
 }
 
 
@@ -1362,6 +1854,8 @@ function hideError() {
 
 
 
+
+
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 
@@ -1397,6 +1891,8 @@ initDetail();
 initTooltip();
 initTimeline();
 initStory();
+initSearch(getViewport);
+initLive(getViewport);
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
 

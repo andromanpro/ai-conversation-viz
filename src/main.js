@@ -10,6 +10,8 @@ import { initDetail } from './ui/detail-panel.js';
 import { initTooltip } from './ui/tooltip.js';
 import { initTimeline, tickPlay, isPlaying } from './ui/timeline.js';
 import { initStory, tickStory, getFrontierNodeId, resetStory } from './ui/story-mode.js';
+import { initSearch } from './ui/search.js';
+import { initLive } from './ui/live.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -46,6 +48,8 @@ initDetail();
 initTooltip();
 initTimeline();
 initStory();
+initSearch(getViewport);
+initLive(getViewport);
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
 
