@@ -59,6 +59,75 @@ export function computeBBox(nodes) {
   return { minX, minY, maxX, maxY, w, h, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
 }
 
+export function computeRadialLayout(nodes, byId, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+
+  // Построим дерево: parentId → [childId]
+  const children = new Map();
+  const roots = [];
+  for (const n of nodes) children.set(n.id, []);
+  for (const n of nodes) {
+    if (n.parentId && byId.has(n.parentId)) {
+      children.get(n.parentId).push(n.id);
+    } else {
+      roots.push(n.id);
+    }
+  }
+  // Children сортируем по ts
+  for (const arr of children.values()) {
+    arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+  }
+
+  // Считаем leaves в каждом subtree
+  const leaves = new Map();
+  const countLeaves = (id) => {
+    const kids = children.get(id) || [];
+    if (!kids.length) { leaves.set(id, 1); return 1; }
+    let sum = 0;
+    for (const k of kids) sum += countLeaves(k);
+    leaves.set(id, sum);
+    return sum;
+  };
+  for (const r of roots) countLeaves(r);
+
+  const ring = CFG.radialRingGap;
+  const assign = (id, depth, angleStart, angleEnd) => {
+    const mid = (angleStart + angleEnd) / 2;
+    const radius = depth * ring;
+    positions.set(id, {
+      x: cx + Math.cos(mid) * radius,
+      y: cy + Math.sin(mid) * radius,
+    });
+    const kids = children.get(id) || [];
+    if (!kids.length) return;
+    const total = leaves.get(id);
+    let cur = angleStart;
+    for (const k of kids) {
+      const share = leaves.get(k) / total;
+      const next = cur + (angleEnd - angleStart) * share;
+      assign(k, depth + 1, cur, next);
+      cur = next;
+    }
+  };
+
+  if (roots.length === 1) {
+    assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
+  } else {
+    const slice = (Math.PI * 2) / roots.length;
+    for (let i = 0; i < roots.length; i++) {
+      assign(roots[i], 0, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+    }
+  }
+  return positions;
+}
+
+export function easeInOutQuad(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
 export function fitToView(nodes, viewport) {
   const bbox = computeBBox(nodes);
   const areaW = viewport.safeW != null ? viewport.safeW : viewport.width;

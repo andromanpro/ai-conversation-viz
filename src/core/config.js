@@ -68,6 +68,8 @@ export const CFG = {
   minimapEveryNFrames: 3,
   minimapNodeR: 1.3,
   minimapPadding: 8,
+  radialRingGap: 130,
+  layoutTransitionMs: 900,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,

@@ -17,6 +17,7 @@ import { initFilter } from './ui/filter.js';
 import { initMinimap, tickMinimap } from './ui/minimap.js';
 import { initStats, tickStats, recomputeStats } from './ui/stats-hud.js';
 import { initShare, applyUrlParamsLate } from './ui/share.js';
+import { initLayoutToggle, tickLayoutTransition, isRadialActive } from './ui/layout-toggle.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -59,6 +60,7 @@ initFilter();
 initMinimap(getViewport);
 initStats();
 initShare();
+initLayoutToggle(getViewport);
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
 initKeyboard(getViewport);
@@ -84,7 +86,9 @@ function frame(tms) {
   const vp = getViewport();
 
   tickPlay();
-  if (state.running) stepPhysics(state.nodes, state.edges, vp);
+  tickLayoutTransition();
+  const physicsDisabled = isRadialActive();
+  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)

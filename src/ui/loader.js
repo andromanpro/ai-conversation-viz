@@ -3,6 +3,7 @@ import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
 import { fitToView, prewarm } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
+import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
 import { hideTooltip } from './tooltip.js';
 import { resetTimeline } from './timeline.js';
@@ -51,7 +52,13 @@ function initDragDrop() {
 export function loadText(text) {
   try {
     hideError();
-    const parsed = parseJSONL(text);
+    const norm = normalizeToClaudeJsonl(text);
+    if (norm.format !== 'claude-jsonl' && norm.format !== 'unknown') {
+      setLoadFormat(norm.format);
+    } else {
+      setLoadFormat(null);
+    }
+    const parsed = parseJSONL(norm.text);
     if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
     const vp = _getViewport();
     const g = buildGraph(parsed, vp);
@@ -98,8 +105,21 @@ function updateStatsHUD() {
   const s = state.stats;
   const el = document.getElementById('stats');
   if (!s) { el.textContent = '—'; return; }
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>`;
+  const fmtEl = document.getElementById('load-format');
+  const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
+  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}`;
   el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}`;
+}
+
+function setLoadFormat(fmt) {
+  let el = document.getElementById('load-format');
+  if (!el) {
+    el = document.createElement('span');
+    el.id = 'load-format';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  el.textContent = fmt || '';
 }
 
 function showError(msg) {

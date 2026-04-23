@@ -74,6 +74,8 @@ const CFG = {
   minimapEveryNFrames: 3,
   minimapNodeR: 1.3,
   minimapPadding: 8,
+  radialRingGap: 130,
+  layoutTransitionMs: 900,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,
@@ -253,6 +255,119 @@ function parseLine(line, seedCounter) {
 }
 
 
+// --- src/core/adapters.js ---
+
+// Формат-адаптеры. На входе — сырой текст файла, на выходе
+// либо уже Claude JSONL (`type: user/assistant + parentUuid`),
+// либо пустая строка. loader.js использует detectFormat()
+// и вызывает соответствующий toClaudeJsonl().
+function detectFormat(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return 'unknown';
+  if (trimmed[0] === '[' || trimmed[0] === '{') {
+    try {
+      const obj = JSON.parse(trimmed);
+      const sample = Array.isArray(obj) ? obj[0] : obj;
+      if (sample && sample.mapping) return 'chatgpt-export';
+      if (Array.isArray(obj) && obj.length && obj[0].role && obj[0].content != null) return 'anthropic-messages';
+    } catch { /* might be JSONL */ }
+  }
+  // Первая непустая строка — валидный JSON c типом/полями Claude Code
+  for (const line of trimmed.split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s) continue;
+    try {
+      const obj = JSON.parse(s);
+      if (obj.type === 'user' || obj.type === 'assistant'
+          || obj.type === 'queue-operation' || obj.type === 'last-prompt'
+          || obj.parentUuid !== undefined) {
+        return 'claude-jsonl';
+      }
+    } catch {}
+    break;
+  }
+  return 'unknown';
+}
+function chatgptToClaudeJsonl(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch { return ''; }
+  const conversations = Array.isArray(obj) ? obj : [obj];
+  const out = [];
+  for (const conv of conversations) {
+    const mapping = conv && conv.mapping;
+    if (!mapping) continue;
+    const convId = conv.id || conv.conversation_id || '';
+    for (const [id, node] of Object.entries(mapping)) {
+      const msg = node && node.message;
+      if (!msg || !msg.author) continue;
+      const role = msg.author.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const c = msg.content || {};
+      const parts = Array.isArray(c.parts) ? c.parts : (c.text ? [c.text] : []);
+      const textJoined = parts
+        .map(p => (typeof p === 'string' ? p : (p && p.text) || ''))
+        .filter(Boolean)
+        .join('\n');
+      if (!textJoined) continue;
+      const ts = msg.create_time
+        ? new Date(msg.create_time * 1000).toISOString()
+        : new Date().toISOString();
+      const parentId = node.parent || null;
+      out.push(JSON.stringify({
+        type: role,
+        uuid: convId ? `${convId}:${id}` : id,
+        parentUuid: parentId ? (convId ? `${convId}:${parentId}` : parentId) : null,
+        timestamp: ts,
+        message: { role, content: textJoined },
+      }));
+    }
+  }
+  return out.join('\n');
+}
+function anthropicMessagesToClaudeJsonl(text) {
+  let arr;
+  try { arr = JSON.parse(text); } catch { return ''; }
+  if (!Array.isArray(arr)) return '';
+  const out = [];
+  const baseTs = Date.now();
+  let prevId = null;
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
+    const role = m.role;
+    if (role !== 'user' && role !== 'assistant') continue;
+    let textBlock = '';
+    if (typeof m.content === 'string') textBlock = m.content;
+    else if (Array.isArray(m.content)) {
+      textBlock = m.content
+        .filter(b => b && b.type === 'text')
+        .map(b => b.text)
+        .join('\n');
+    }
+    const id = `msg-${i}`;
+    const ts = new Date(baseTs + i * 15000).toISOString();
+    out.push(JSON.stringify({
+      type: role,
+      uuid: id,
+      parentUuid: prevId,
+      timestamp: ts,
+      message: { role, content: textBlock },
+    }));
+    prevId = id;
+  }
+  return out.join('\n');
+}
+function normalizeToClaudeJsonl(text) {
+  const fmt = detectFormat(text);
+  if (fmt === 'chatgpt-export') {
+    return { format: fmt, text: chatgptToClaudeJsonl(text) };
+  }
+  if (fmt === 'anthropic-messages') {
+    return { format: fmt, text: anthropicMessagesToClaudeJsonl(text) };
+  }
+  return { format: fmt, text };
+}
+
+
 // --- src/core/graph.js ---
 
 
@@ -420,6 +535,73 @@ function computeBBox(nodes) {
   const w = maxX - minX, h = maxY - minY;
   return { minX, minY, maxX, maxY, w, h, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
 }
+function computeRadialLayout(nodes, byId, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+
+  // Построим дерево: parentId → [childId]
+  const children = new Map();
+  const roots = [];
+  for (const n of nodes) children.set(n.id, []);
+  for (const n of nodes) {
+    if (n.parentId && byId.has(n.parentId)) {
+      children.get(n.parentId).push(n.id);
+    } else {
+      roots.push(n.id);
+    }
+  }
+  // Children сортируем по ts
+  for (const arr of children.values()) {
+    arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+  }
+
+  // Считаем leaves в каждом subtree
+  const leaves = new Map();
+  const countLeaves = (id) => {
+    const kids = children.get(id) || [];
+    if (!kids.length) { leaves.set(id, 1); return 1; }
+    let sum = 0;
+    for (const k of kids) sum += countLeaves(k);
+    leaves.set(id, sum);
+    return sum;
+  };
+  for (const r of roots) countLeaves(r);
+
+  const ring = CFG.radialRingGap;
+  const assign = (id, depth, angleStart, angleEnd) => {
+    const mid = (angleStart + angleEnd) / 2;
+    const radius = depth * ring;
+    positions.set(id, {
+      x: cx + Math.cos(mid) * radius,
+      y: cy + Math.sin(mid) * radius,
+    });
+    const kids = children.get(id) || [];
+    if (!kids.length) return;
+    const total = leaves.get(id);
+    let cur = angleStart;
+    for (const k of kids) {
+      const share = leaves.get(k) / total;
+      const next = cur + (angleEnd - angleStart) * share;
+      assign(k, depth + 1, cur, next);
+      cur = next;
+    }
+  };
+
+  if (roots.length === 1) {
+    assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
+  } else {
+    const slice = (Math.PI * 2) / roots.length;
+    for (let i = 0; i < roots.length; i++) {
+      assign(roots[i], 0, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+    }
+  }
+  return positions;
+}
+function easeInOutQuad(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
 function fitToView(nodes, viewport) {
   const bbox = computeBBox(nodes);
   const areaW = viewport.safeW != null ? viewport.safeW : viewport.width;
@@ -460,6 +642,7 @@ const state = {
   searchMatches: new Set(),
   searchActive: null,
   hiddenRoles: new Set(),
+  layoutMode: 'force', // 'force' | 'radial'
 };
 function resetInteractionState() {
   state.selected = null;
@@ -1912,6 +2095,82 @@ function tickStats() {
 }
 
 
+// --- src/ui/layout-toggle.js ---
+
+
+
+
+let btn;
+let transition = null;
+let getViewport = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  cx: window.innerWidth / 2,
+  cy: window.innerHeight / 2,
+});
+function initLayoutToggle(getViewportFn) {
+  if (getViewportFn) getViewport = getViewportFn;
+  btn = document.getElementById('btn-layout');
+  if (btn) btn.addEventListener('click', toggleLayout);
+  updateBtnLabel();
+}
+
+function toggleLayout() {
+  if (transition) return;
+  const toMode = state.layoutMode === 'radial' ? 'force' : 'radial';
+  const from = new Map();
+  for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
+  let to;
+  if (toMode === 'radial') {
+    to = computeRadialLayout(state.nodes, state.byId, getViewport());
+  } else {
+    // В force — возвращаем в текущие (физика потом расставит органично),
+    // но лёгкий jitter чтобы оторваться от идеальных окружностей
+    to = new Map();
+    for (const n of state.nodes) {
+      to.set(n.id, { x: n.x + (Math.random() - 0.5) * 20, y: n.y + (Math.random() - 0.5) * 20 });
+    }
+  }
+  transition = { from, to, startTime: performance.now(), duration: CFG.layoutTransitionMs, toMode };
+  // Фитим камеру под новую раскладку
+  setTimeout(() => {
+    if (state.nodes.length) {
+      const cam = fitToView(state.nodes, getViewport());
+      state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
+    }
+  }, CFG.layoutTransitionMs + 50);
+}
+function tickLayoutTransition() {
+  if (!transition) return;
+  const now = performance.now();
+  const t = Math.min(1, (now - transition.startTime) / transition.duration);
+  const e = easeInOutQuad(t);
+  for (const n of state.nodes) {
+    const from = transition.from.get(n.id);
+    const to = transition.to.get(n.id);
+    if (!from || !to) continue;
+    n.x = from.x + (to.x - from.x) * e;
+    n.y = from.y + (to.y - from.y) * e;
+    n.vx = 0;
+    n.vy = 0;
+  }
+  if (t >= 1) {
+    state.layoutMode = transition.toMode;
+    transition = null;
+    updateBtnLabel();
+  }
+}
+function isRadialActive() {
+  return state.layoutMode === 'radial' || (transition && transition.toMode === 'radial');
+}
+
+function updateBtnLabel() {
+  if (!btn) return;
+  btn.textContent = state.layoutMode === 'radial' ? 'Force' : 'Radial';
+  btn.classList.toggle('accent', state.layoutMode === 'radial');
+}
+
+
 // --- src/ui/interaction.js ---
 
 
@@ -2069,6 +2328,7 @@ function onKey(ev) {
 
 
 
+
 let _getViewport;
 let _onReady = () => {};
 function initLoader(getViewportFn, onReady) {
@@ -2111,7 +2371,13 @@ function initDragDrop() {
 function loadText(text) {
   try {
     hideError();
-    const parsed = parseJSONL(text);
+    const norm = normalizeToClaudeJsonl(text);
+    if (norm.format !== 'claude-jsonl' && norm.format !== 'unknown') {
+      setLoadFormat(norm.format);
+    } else {
+      setLoadFormat(null);
+    }
+    const parsed = parseJSONL(norm.text);
     if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
     const vp = _getViewport();
     const g = buildGraph(parsed, vp);
@@ -2158,8 +2424,21 @@ function updateStatsHUD() {
   const s = state.stats;
   const el = document.getElementById('stats');
   if (!s) { el.textContent = '—'; return; }
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>`;
+  const fmtEl = document.getElementById('load-format');
+  const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
+  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}`;
   el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}`;
+}
+
+function setLoadFormat(fmt) {
+  let el = document.getElementById('load-format');
+  if (!el) {
+    el = document.createElement('span');
+    el.id = 'load-format';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  el.textContent = fmt || '';
 }
 
 function showError(msg) {
@@ -2284,6 +2563,7 @@ async function applyUrlParamsLate() {
 
 
 
+
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 
@@ -2325,6 +2605,7 @@ initFilter();
 initMinimap(getViewport);
 initStats();
 initShare();
+initLayoutToggle(getViewport);
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
 initKeyboard(getViewport);
@@ -2350,7 +2631,9 @@ function frame(tms) {
   const vp = getViewport();
 
   tickPlay();
-  if (state.running) stepPhysics(state.nodes, state.edges, vp);
+  tickLayoutTransition();
+  const physicsDisabled = isRadialActive();
+  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)

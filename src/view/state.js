@@ -14,6 +14,7 @@ export const state = {
   searchMatches: new Set(),
   searchActive: null,
   hiddenRoles: new Set(),
+  layoutMode: 'force', // 'force' | 'radial'
 };
 
 export function resetInteractionState() {

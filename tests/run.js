@@ -1,7 +1,8 @@
 import { parseJSONL, extractText, parseLine } from '../src/core/parser.js';
+import { detectFormat, chatgptToClaudeJsonl, anthropicMessagesToClaudeJsonl, normalizeToClaudeJsonl } from '../src/core/adapters.js';
 import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph, appendRawNodes } from '../src/core/graph.js';
-import { computeBBox, fitToView, stepPhysics } from '../src/core/layout.js';
+import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad } from '../src/core/layout.js';
 import { advanceTimeline } from '../src/ui/timeline.js';
 import { birthFactor, easeOutCubic } from '../src/view/renderer.js';
 import { pathToRoot } from '../src/view/path.js';
@@ -526,6 +527,96 @@ test('share: parseUrlParams parses n and jsonl', () => {
 test('share: parseUrlParams empty returns empty object', () => {
   eq(Object.keys(parseUrlParams('')).length, 0);
   eq(Object.keys(parseUrlParams('?other=1')).length, 0);
+});
+
+// ==== RADIAL LAYOUT ====
+test('radial: easeInOutQuad endpoints', () => {
+  eq(easeInOutQuad(0), 0);
+  eq(easeInOutQuad(1), 1);
+  approx(easeInOutQuad(0.5), 0.5, 1e-9);
+});
+
+test('radial: computeRadialLayout places root at center', () => {
+  const n1 = { id: 'r', parentId: null };
+  const byId = new Map([['r', n1]]);
+  const vp = { width: 800, height: 600, cx: 400, cy: 300 };
+  const pos = computeRadialLayout([n1], byId, vp);
+  const p = pos.get('r');
+  eq(p.x, 400);
+  eq(p.y, 300);
+});
+
+test('radial: children laid on outer ring', () => {
+  const r = { id: 'r', parentId: null, ts: 1 };
+  const c1 = { id: 'c1', parentId: 'r', ts: 2 };
+  const c2 = { id: 'c2', parentId: 'r', ts: 3 };
+  const byId = new Map([['r', r], ['c1', c1], ['c2', c2]]);
+  const vp = { width: 800, height: 600, cx: 400, cy: 300 };
+  const pos = computeRadialLayout([r, c1, c2], byId, vp);
+  const p1 = pos.get('c1'), p2 = pos.get('c2');
+  // На ring 130 px от центра
+  const d1 = Math.hypot(p1.x - 400, p1.y - 300);
+  const d2 = Math.hypot(p2.x - 400, p2.y - 300);
+  approx(d1, 130, 1e-6);
+  approx(d2, 130, 1e-6);
+});
+
+test('radial: empty input returns empty Map', () => {
+  const pos = computeRadialLayout([], new Map(), { width: 800, height: 600, cx: 400, cy: 300 });
+  eq(pos.size, 0);
+});
+
+// ==== ADAPTERS ====
+test('adapters: detectFormat recognizes Claude JSONL', () => {
+  eq(detectFormat('{"type":"user","uuid":"x","parentUuid":null,"message":{"content":"hi"}}'), 'claude-jsonl');
+  eq(detectFormat('{"type":"queue-operation"}'), 'claude-jsonl');
+});
+
+test('adapters: detectFormat recognizes ChatGPT export', () => {
+  const chatgpt = JSON.stringify([{ title: 't', mapping: { u1: { id: 'u1', message: null, parent: null } } }]);
+  eq(detectFormat(chatgpt), 'chatgpt-export');
+});
+
+test('adapters: detectFormat recognizes Anthropic messages', () => {
+  const anthr = JSON.stringify([{ role: 'user', content: 'hi' }, { role: 'assistant', content: [{ type: 'text', text: 'hello' }] }]);
+  eq(detectFormat(anthr), 'anthropic-messages');
+});
+
+test('adapters: chatgptToClaudeJsonl converts basic export', () => {
+  const input = JSON.stringify([{
+    title: 'Test',
+    mapping: {
+      'u1': { id: 'u1', message: { author: { role: 'user' }, content: { content_type: 'text', parts: ['hello'] }, create_time: 1700000000 }, parent: null },
+      'a1': { id: 'a1', message: { author: { role: 'assistant' }, content: { content_type: 'text', parts: ['hi'] }, create_time: 1700000005 }, parent: 'u1' },
+    },
+  }]);
+  const out = chatgptToClaudeJsonl(input);
+  const lines = out.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  eq(lines.length, 2);
+  const u = lines.find(l => l.type === 'user');
+  const a = lines.find(l => l.type === 'assistant');
+  eq(a.parentUuid, u.uuid);
+});
+
+test('adapters: anthropicMessagesToClaudeJsonl chains via prev id', () => {
+  const input = JSON.stringify([
+    { role: 'user', content: 'q1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'user', content: 'q2' },
+  ]);
+  const out = anthropicMessagesToClaudeJsonl(input);
+  const lines = out.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  eq(lines.length, 3);
+  eq(lines[0].parentUuid, null);
+  eq(lines[1].parentUuid, lines[0].uuid);
+  eq(lines[2].parentUuid, lines[1].uuid);
+});
+
+test('adapters: normalizeToClaudeJsonl passes through claude-jsonl unchanged', () => {
+  const raw = '{"type":"user","uuid":"x","parentUuid":null,"message":{"content":"hi"}}';
+  const r = normalizeToClaudeJsonl(raw);
+  eq(r.format, 'claude-jsonl');
+  eq(r.text, raw);
 });
 
 // ==== SUMMARY ====
