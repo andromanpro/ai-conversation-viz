@@ -1,0 +1,33 @@
+export const CFG = {
+  maxMessages: 5000,
+  excerptChars: 400,
+  tooltipMaxChars: 80,
+  repulsion: 9000,
+  spring: 0.05,
+  springLen: 90,
+  damping: 0.85,
+  centerPull: 0.002,
+  minR: 3,
+  maxR: 20,
+  pulseFreq: 2.0,
+  clickTolerancePx: 4,
+  hitPad: 4,
+  toolNodeScale: 0.6,
+  fitPadding: 0.85,
+  prewarmIterations: 180,
+  zoomStep: 1.1,
+  zoomMin: 0.1,
+  zoomMax: 8,
+};
+
+export const COLORS = {
+  bg: '#0a0e1a',
+  user: '#7BAAF0',
+  assistant: '#50D4B5',
+  tool: '#ECA040',
+  edge: 'rgba(0, 212, 255, 0.35)',
+  toolEdge: 'rgba(236, 160, 64, 0.45)',
+  accent: '#ECA040',
+  text: '#cfe6ff',
+  muted: '#6a7c95',
+};

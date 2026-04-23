@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Conversation Viz · v0.2 · standalone</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --user: #7BAAF0;
+    --assistant: #50D4B5;
+    --tool: #ECA040;
+    --edge: rgba(0, 212, 255, 0.35);
+    --accent: #ECA040;
+    --text: #cfe6ff;
+    --muted: #6a7c95;
+    --panel: rgba(10, 14, 26, 0.85);
+    --border: rgba(123, 170, 240, 0.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+  #graph { position: fixed; inset: 0; display: block; cursor: grab; }
+  #graph.dragging { cursor: grabbing; }
+  .hud { position: fixed; pointer-events: none; z-index: 10; }
+  .hud > * { pointer-events: auto; }
+  #top-left { top: 16px; left: 16px; }
+  #top-right { top: 16px; right: 16px; text-align: right; }
+  #bottom-left { bottom: 56px; left: 16px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .title { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); margin-bottom: 2px; }
+  .subtitle { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+  .controls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .btn { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; transition: all .15s; }
+  .btn:hover { background: rgba(123, 170, 240, 0.08); border-color: var(--user); }
+  .btn.primary { border-color: var(--assistant); color: var(--assistant); }
+  .btn.primary:hover { background: rgba(80, 212, 181, 0.08); }
+  .btn.accent { border-color: var(--accent); color: var(--accent); }
+  .btn.accent:hover { background: rgba(236, 160, 64, 0.08); }
+  input[type=file] { display: none; }
+  .stats { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+  .stats b { color: var(--text); font-weight: normal; }
+  .legend { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; justify-content: flex-end; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.u { background: var(--user); }
+  .dot.a { background: var(--assistant); }
+  .dot.t { background: var(--tool); }
+  kbd { display: inline-block; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; background: rgba(255,255,255,0.02); color: var(--text); font-size: 10px; }
+  #detail { position: fixed; right: 16px; bottom: 72px; width: 380px; max-height: 40vh; background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--border); padding: 14px 16px; font-size: 12px; line-height: 1.55; z-index: 10; display: none; }
+  #detail.show { display: block; }
+  #detail .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  #detail .role { letter-spacing: 0.08em; text-transform: uppercase; font-size: 10px; }
+  #detail .role.user { color: var(--user); }
+  #detail .role.assistant { color: var(--assistant); }
+  #detail .role.tool_use { color: var(--tool); }
+  #detail .ts { color: var(--muted); font-size: 10px; }
+  #detail .body { white-space: pre-wrap; word-break: break-word; max-height: 30vh; overflow: auto; color: var(--text); }
+  #detail .close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; }
+  #detail .close:hover { color: var(--accent); }
+  #tooltip { position: fixed; pointer-events: none; z-index: 9; background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--border); padding: 8px 10px; font-size: 11px; line-height: 1.4; max-width: 280px; display: none; }
+  #tooltip.show { display: block; }
+  #tooltip .tt-role { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; color: var(--muted); }
+  #tooltip .tt-role.user { color: var(--user); }
+  #tooltip .tt-role.assistant { color: var(--assistant); }
+  #tooltip .tt-role.tool_use { color: var(--tool); }
+  #tooltip .tt-body { color: var(--text); word-break: break-word; white-space: pre-wrap; }
+  #timeline-bar { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 12px; background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--border); padding: 8px 14px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+  #btn-play { flex-shrink: 0; background: transparent; border: 1px solid var(--border); color: var(--text); width: 28px; height: 28px; cursor: pointer; font-family: inherit; font-size: 12px; padding: 0; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+  #btn-play:hover { border-color: var(--accent); color: var(--accent); }
+  #btn-play.playing { border-color: var(--accent); color: var(--accent); }
+  #timeline-bar label { flex-shrink: 0; letter-spacing: 0.08em; text-transform: uppercase; font-size: 10px; color: var(--muted); }
+  #timeline { flex: 1; accent-color: var(--user); height: 2px; }
+  #timeline-label { flex-shrink: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+  #timeline-label b { color: var(--user); font-weight: normal; }
+  #drop-hint { position: fixed; inset: 0; background: rgba(10, 14, 26, 0.85); display: none; align-items: center; justify-content: center; z-index: 100; pointer-events: none; }
+  #drop-hint.show { display: flex; }
+  #drop-hint .box { border: 2px dashed var(--accent); padding: 40px 60px; font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  #error { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--panel); border: 1px solid #ff6666; padding: 16px 20px; color: #ff9999; font-size: 12px; z-index: 20; max-width: 60%; display: none; }
+  #error.show { display: block; }
+</style>
+</head>
+<body>
+<canvas id="graph"></canvas>
+
+<div class="hud" id="top-left">
+  <div class="title">AI Conversation Viz</div>
+  <div class="subtitle">v0.2 · standalone bundle</div>
+  <div class="controls">
+    <button class="btn primary" id="btn-sample">Load sample</button>
+    <button class="btn" id="btn-file">Open JSONL…</button>
+    <button class="btn accent" id="btn-reset">Reset view</button>
+    <input type="file" id="file-input" accept=".jsonl,.json,.txt">
+  </div>
+</div>
+
+<div class="hud" id="top-right">
+  <div class="stats" id="stats">—</div>
+  <div class="legend">
+    <div class="legend-item"><span class="dot u"></span> user</div>
+    <div class="legend-item"><span class="dot a"></span> assistant</div>
+    <div class="legend-item"><span class="dot t"></span> tool_use</div>
+  </div>
+</div>
+
+<div class="hud" id="bottom-left">
+  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag node</kbd> move &nbsp; <kbd>drag bg</kbd> pan &nbsp; <kbd>click</kbd> message &nbsp; <kbd>hover</kbd> preview &nbsp; <kbd>drop</kbd> file
+</div>
+
+<div id="detail">
+  <button class="close" id="detail-close">×</button>
+  <div class="head">
+    <span class="role" id="detail-role">—</span>
+    <span class="ts" id="detail-ts">—</span>
+  </div>
+  <div class="body" id="detail-body">—</div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-role"></div>
+  <div class="tt-body"></div>
+</div>
+
+<div id="timeline-bar">
+  <button id="btn-play" aria-label="Play">▶</button>
+  <label>timeline</label>
+  <input type="range" id="timeline" min="0" max="100" value="100">
+  <div id="timeline-label">—</div>
+</div>
+
+<div id="drop-hint"><div class="box">drop jsonl to visualize</div></div>
+<div id="error"></div>
+
+<script src="./dist/ai-conversation-viz.js"></script>
+</body>
+</html>

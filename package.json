@@ -1,0 +1,14 @@
+{
+  "name": "@andromanpro/ai-conversation-viz",
+  "version": "0.2.0",
+  "description": "Force-directed visualization of human↔AI conversation sessions (JSONL).",
+  "type": "module",
+  "main": "./dist/ai-conversation-viz.js",
+  "module": "./src/main.js",
+  "scripts": {
+    "build": "node build.cjs",
+    "test": "node tests/run.js"
+  },
+  "author": "andromanpro",
+  "license": "MIT"
+}
