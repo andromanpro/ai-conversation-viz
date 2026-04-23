@@ -3,6 +3,10 @@ import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph } from '../src/core/graph.js';
 import { computeBBox, fitToView, stepPhysics } from '../src/core/layout.js';
 import { advanceTimeline } from '../src/ui/timeline.js';
+import { birthFactor, easeOutCubic } from '../src/view/renderer.js';
+import { pathToRoot } from '../src/view/path.js';
+import { controlPoint, bezierPoint, advanceParticle } from '../src/view/particles.js';
+import { generateStarfield, starScreen } from '../src/view/starfield.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -204,6 +208,20 @@ test('layout: fitToView with single node gives scale 1 and centers', () => {
   approx(s.y, 300);
 });
 
+test('layout: fitToView respects safe-area (cx/cy + safeW/safeH)', () => {
+  const nodes = [
+    { x: 0, y: 0, r: 0 },
+    { x: 100, y: 100, r: 0 },
+  ];
+  const cam = fitToView(nodes, { width: 800, height: 600, safeW: 600, safeH: 400, cx: 400, cy: 330 });
+  // bbox центр (50, 50) должен оказаться в screen-центре safe-area (400, 330)
+  const s = worldToScreen(50, 50, cam);
+  approx(s.x, 400, 1e-6);
+  approx(s.y, 330, 1e-6);
+  // scale должен помещать bbox в safe area, не в весь viewport
+  approx(cam.scale, Math.min(600 / 100, 400 / 100) * 0.85);
+});
+
 test('layout: stepPhysics moves isolated pair apart (repulsion)', () => {
   const a = { x: 400, y: 300, vx: 0, vy: 0, r: 5 };
   const b = { x: 405, y: 300, vx: 0, vy: 0, r: 5 };
@@ -230,6 +248,96 @@ test('timeline: advanceTimeline crosses exactly 1', () => {
   const r = advanceTimeline(0.8, 2, 10);
   eq(r.value, 1);
   eq(r.finished, true);
+});
+
+// ==== BIRTH ANIMATION ====
+test('renderer: birthFactor null means 0 (not born)', () => {
+  eq(birthFactor(null, 1000, 600), 0);
+});
+
+test('renderer: birthFactor linear mid', () => {
+  eq(birthFactor(100, 400, 600), 0.5);
+});
+
+test('renderer: birthFactor clamps above 1', () => {
+  eq(birthFactor(100, 5000, 600), 1);
+});
+
+test('renderer: birthFactor clamps below 0 (time rewind)', () => {
+  eq(birthFactor(1000, 500, 600), 0);
+});
+
+test('renderer: easeOutCubic endpoints', () => {
+  eq(easeOutCubic(0), 0);
+  eq(easeOutCubic(1), 1);
+  assert(easeOutCubic(0.5) > 0.5, 'easeOut steeper at start');
+});
+
+// ==== v3: PATH / PARTICLES / STARFIELD ====
+test('path: pathToRoot collects chain by parentId', () => {
+  const n1 = { id: 'n1', parentId: null };
+  const n2 = { id: 'n2', parentId: 'n1' };
+  const n3 = { id: 'n3', parentId: 'n2' };
+  const byId = new Map([['n1', n1], ['n2', n2], ['n3', n3]]);
+  const p = pathToRoot(n3, byId);
+  eq(p.size, 3);
+  assert(p.has('n1') && p.has('n2') && p.has('n3'));
+});
+
+test('path: pathToRoot handles missing parent gracefully', () => {
+  const n = { id: 'x', parentId: 'GHOST' };
+  const byId = new Map([['x', n]]);
+  const p = pathToRoot(n, byId);
+  eq(p.size, 1);
+  assert(p.has('x'));
+});
+
+test('path: pathToRoot handles cycle (safety)', () => {
+  const a = { id: 'a', parentId: 'b' };
+  const b = { id: 'b', parentId: 'a' };
+  const byId = new Map([['a', a], ['b', b]]);
+  const p = pathToRoot(a, byId);
+  eq(p.size, 2);
+});
+
+test('particles: bezier endpoints match at t=0, t=1', () => {
+  const a = { x: 0, y: 0 };
+  const b = { x: 100, y: 0 };
+  const cp = controlPoint(a, b, 0.2);
+  const p0 = bezierPoint(a, b, cp, 0);
+  const p1 = bezierPoint(a, b, cp, 1);
+  approx(p0.x, 0); approx(p0.y, 0);
+  approx(p1.x, 100); approx(p1.y, 0);
+});
+
+test('particles: controlPoint offsets perpendicular to segment', () => {
+  const a = { x: 0, y: 0 };
+  const b = { x: 100, y: 0 };
+  const cp = controlPoint(a, b, 0.2);
+  approx(cp.x, 50);
+  approx(Math.abs(cp.y), 20);
+});
+
+test('particles: advanceParticle wraps 0..1', () => {
+  eq(advanceParticle(0.9, 0.3, 1), 0.20000000000000007 > 0 ? advanceParticle(0.9, 0.3, 1) : 0);
+  approx(advanceParticle(0.9, 0.3, 1), 0.2, 1e-9);
+  approx(advanceParticle(0.1, 0.5, 1), 0.6, 1e-9);
+});
+
+test('starfield: generateStarfield deterministic from seed', () => {
+  const a = generateStarfield(5, 42);
+  const b = generateStarfield(5, 42);
+  eq(a.length, 5);
+  eq(a[0].x, b[0].x);
+  eq(a[2].depth, b[2].depth);
+});
+
+test('starfield: starScreen applies depth-parallax', () => {
+  const star = { x: 100, y: 100, depth: 0.3 };
+  const p0 = starScreen(star, { x: 0, y: 0, scale: 1 });
+  const p1 = starScreen(star, { x: 200, y: 0, scale: 1 });
+  eq(p0.x, 100);
+  approx(p1.x, 100 - 200 * 0.3);
 });
 
 // ==== SUMMARY ====

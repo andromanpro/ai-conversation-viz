@@ -2,7 +2,8 @@ import { CFG } from './config.js';
 
 export function stepPhysics(nodes, edges, viewport) {
   if (!nodes.length) return;
-  const cx = viewport.width / 2, cy = viewport.height / 2;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
 
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
@@ -60,17 +61,21 @@ export function computeBBox(nodes) {
 
 export function fitToView(nodes, viewport) {
   const bbox = computeBBox(nodes);
+  const areaW = viewport.safeW != null ? viewport.safeW : viewport.width;
+  const areaH = viewport.safeH != null ? viewport.safeH : viewport.height;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
   if (bbox.w <= 0 || bbox.h <= 0) {
     return {
       scale: 1,
-      x: bbox.cx - viewport.width / 2,
-      y: bbox.cy - viewport.height / 2,
+      x: bbox.cx - cx,
+      y: bbox.cy - cy,
     };
   }
-  const scale = Math.min(viewport.width / bbox.w, viewport.height / bbox.h) * CFG.fitPadding;
+  const scale = Math.min(areaW / bbox.w, areaH / bbox.h) * CFG.fitPadding;
   return {
     scale,
-    x: bbox.cx - viewport.width / (2 * scale),
-    y: bbox.cy - viewport.height / (2 * scale),
+    x: bbox.cx - cx / scale,
+    y: bbox.cy - cy / scale,
   };
 }

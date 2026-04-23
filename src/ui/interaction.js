@@ -1,21 +1,28 @@
 import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
 import { screenToWorld, applyZoom } from '../view/camera.js';
+import { pathToRoot } from '../view/path.js';
 import { showDetail, hideDetail } from './detail-panel.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 
 let interactionCanvas;
 let dragging = false, dragStart = null, dragMoved = false, lastMouse = null;
 let draggedNode = null;
+let getViewportFn = () => ({ width: window.innerWidth, height: window.innerHeight, cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
 
-export function initInteraction(canvasEl) {
+export function initInteraction(canvasEl, getViewport) {
   interactionCanvas = canvasEl;
+  if (getViewport) getViewportFn = getViewport;
   interactionCanvas.addEventListener('mousedown', onDown);
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
   interactionCanvas.addEventListener('wheel', onWheel, { passive: false });
-  interactionCanvas.addEventListener('mouseleave', () => { state.hover = null; hideTooltip(); });
+  interactionCanvas.addEventListener('mouseleave', () => { state.hover = null; state.pathSet = new Set(); hideTooltip(); });
+  window.addEventListener('keydown', onKey);
 }
+
+export function isPanning() { return dragging && !draggedNode; }
+export function isDraggingNode() { return !!draggedNode; }
 
 function timelineCutoff() {
   if (!state.nodes.length) return Infinity;
@@ -34,6 +41,7 @@ function hitTest(sx, sy) {
   let best = null, bestD2 = Infinity;
   for (const n of state.nodes) {
     if (n.ts > cutoff) continue;
+    if (n.bornAt == null) continue;
     const dx = n.x - world.x, dy = n.y - world.y;
     const d2 = dx * dx + dy * dy;
     const r = n.r + CFG.hitPad / cam.scale;
@@ -48,8 +56,10 @@ function onDown(ev) {
   dragStart = { x: ev.clientX, y: ev.clientY };
   lastMouse = { x: ev.clientX, y: ev.clientY };
   draggedNode = hitTest(ev.clientX, ev.clientY);
+  state.cameraTarget = null;
   if (draggedNode) {
     state.hover = draggedNode;
+    state.pathSet = pathToRoot(draggedNode, state.byId);
     hideTooltip();
     interactionCanvas.style.cursor = 'grabbing';
   } else {
@@ -79,6 +89,7 @@ function onMove(ev) {
   } else {
     const h = hitTest(ev.clientX, ev.clientY);
     state.hover = h;
+    state.pathSet = h ? pathToRoot(h, state.byId) : new Set();
     interactionCanvas.style.cursor = h ? 'pointer' : 'grab';
     if (h) showTooltip(h, ev.clientX, ev.clientY);
     else hideTooltip();
@@ -96,6 +107,7 @@ function onUp(ev) {
     if (hit) {
       state.selected = hit;
       showDetail(hit);
+      zoomToNode(hit);
     } else {
       state.selected = null;
       hideDetail();
@@ -104,9 +116,31 @@ function onUp(ev) {
   interactionCanvas.style.cursor = wasNodeDrag ? 'pointer' : 'grab';
 }
 
+function zoomToNode(node) {
+  const vp = getViewportFn();
+  const cx = vp.cx != null ? vp.cx : vp.width / 2;
+  const cy = vp.cy != null ? vp.cy : vp.height / 2;
+  const curScale = state.camera.scale;
+  const nextScale = Math.min(CFG.zoomMax, Math.max(curScale, curScale * 1.1));
+  state.cameraTarget = {
+    x: node.x - cx / nextScale,
+    y: node.y - cy / nextScale,
+    scale: nextScale,
+  };
+}
+
 function onWheel(ev) {
   ev.preventDefault();
+  state.cameraTarget = null;
   const factor = ev.deltaY < 0 ? CFG.zoomStep : 1 / CFG.zoomStep;
   applyZoom(state.camera, factor, ev.clientX, ev.clientY, CFG.zoomMin, CFG.zoomMax);
   hideTooltip();
+}
+
+function onKey(ev) {
+  if (ev.key === 'Escape') {
+    state.selected = null;
+    state.cameraTarget = null;
+    hideDetail();
+  }
 }

@@ -8,9 +8,13 @@ export const state = {
   stats: null,
   running: true,
   timelineMax: 1,
+  pathSet: new Set(),
+  stars: [],
+  cameraTarget: null,
 };
 
 export function resetInteractionState() {
   state.selected = null;
   state.hover = null;
+  state.pathSet = new Set();
 }

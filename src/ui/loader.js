@@ -8,9 +8,11 @@ import { hideTooltip } from './tooltip.js';
 import { resetTimeline } from './timeline.js';
 
 let _getViewport;
+let _onReady = () => {};
 
-export function initLoader(getViewportFn) {
+export function initLoader(getViewportFn, onReady) {
   _getViewport = getViewportFn;
+  if (onReady) _onReady = onReady;
 
   const fileInput = document.getElementById('file-input');
   document.getElementById('btn-file').addEventListener('click', () => fileInput.click());
@@ -59,6 +61,8 @@ export function loadText(text) {
     state.byId = g.byId;
     state.selected = null;
     state.hover = null;
+    state.pathSet = new Set();
+    state.cameraTarget = null;
     state.stats = parsed.stats;
     const cam = fitToView(state.nodes, vp);
     state.camera.scale = cam.scale;
@@ -68,6 +72,7 @@ export function loadText(text) {
     hideDetail();
     hideTooltip();
     updateStatsHUD();
+    _onReady();
   } catch (e) {
     showError('Parse error: ' + e.message);
     console.error(e);

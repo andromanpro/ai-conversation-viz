@@ -1,9 +1,13 @@
+import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
+import { resetStory } from './story-mode.js';
 
 let sliderEl, labelEl, playBtn;
 let playing = false;
-let lastPlayTime = 0;
-const PLAY_DURATION_SEC = 20;
+let lastStepMs = 0;
+let sortedIds = [];
+let stepIndex = 0;
+const STEP_INTERVAL_MS = CFG.storyDwellMs;
 
 export function initTimeline() {
   sliderEl = document.getElementById('timeline');
@@ -25,14 +29,32 @@ export function togglePlay() {
   if (playing) stopPlay(); else startPlay();
 }
 
+export function isPlaying() { return playing; }
+
+function computeTsBounds() {
+  if (!state.nodes.length) return { tsMin: 0, tsMax: 1 };
+  let tsMin = Infinity, tsMax = -Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+  }
+  return { tsMin, tsMax };
+}
+
 function startPlay() {
   if (!state.nodes.length) return;
-  if (state.timelineMax >= 1) state.timelineMax = 0;
-  syncSlider();
+  // Сортируем ноды по ts
+  sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
+  // Если диалог уже досмотрен или стартуем с нуля — обнуляем
+  resetStory();
+  state.timelineMax = 0;
+  stepIndex = 0;
   playing = true;
-  lastPlayTime = performance.now() / 1000;
+  lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
+  // Шагаем первую ноду сразу, чтобы не ждать интервал
+  advanceStep();
 }
 
 function stopPlay() {
@@ -40,16 +62,33 @@ function stopPlay() {
   updatePlayBtn();
 }
 
-export function tickPlay() {
-  if (!playing) return;
-  const now = performance.now() / 1000;
-  const dt = now - lastPlayTime;
-  lastPlayTime = now;
-  const step = advanceTimeline(state.timelineMax, dt, PLAY_DURATION_SEC);
-  state.timelineMax = step.value;
+function advanceStep() {
+  if (stepIndex >= sortedIds.length) {
+    state.timelineMax = 1;
+    syncSlider();
+    updateLabel();
+    stopPlay();
+    return;
+  }
+  const id = sortedIds[stepIndex++];
+  const node = state.byId.get(id);
+  if (!node) return advanceStep();
+  const { tsMin, tsMax } = computeTsBounds();
+  const range = Math.max(1, tsMax - tsMin);
+  const desired = (node.ts - tsMin) / range;
+  // Небольшая дельта, чтобы cutoff строго >= ts ноды
+  state.timelineMax = Math.min(1, desired + 0.0001);
   syncSlider();
   updateLabel();
-  if (step.finished) stopPlay();
+}
+
+export function tickPlay() {
+  if (!playing) return;
+  const now = performance.now();
+  if (now - lastStepMs >= STEP_INTERVAL_MS) {
+    lastStepMs = now;
+    advanceStep();
+  }
 }
 
 export function advanceTimeline(current, dt, duration) {
@@ -72,11 +111,7 @@ function updatePlayBtn() {
 function updateLabel() {
   if (!labelEl) return;
   if (!state.nodes.length) { labelEl.textContent = '—'; return; }
-  let tsMin = Infinity, tsMax = -Infinity;
-  for (const n of state.nodes) {
-    if (n.ts < tsMin) tsMin = n.ts;
-    if (n.ts > tsMax) tsMax = n.ts;
-  }
+  const { tsMin, tsMax } = computeTsBounds();
   const t = tsMin + (tsMax - tsMin) * state.timelineMax;
   const visible = state.nodes.filter(n => n.ts <= t).length;
   labelEl.innerHTML = `<b>${visible}</b> / ${state.nodes.length} &middot; <span>${new Date(t).toISOString().replace('T', ' ').slice(0, 19)}</span>`;
@@ -86,5 +121,7 @@ export function resetTimeline() {
   stopPlay();
   if (sliderEl) sliderEl.value = 100;
   state.timelineMax = 1;
+  sortedIds = [];
+  stepIndex = 0;
   updateLabel();
 }

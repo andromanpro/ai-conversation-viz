@@ -69,7 +69,7 @@ export function parseJSONL(text) {
           id: `${baseId}#tu${i}`,
           parentId: baseId,
           role: 'tool_use',
-          ts: ts + i + 1,
+          ts: ts + (i + 1) * CFG.toolUseTsStepMs,
           text: subText,
           textLen: subText.length,
           toolName: tu.name,
