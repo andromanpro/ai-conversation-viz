@@ -69,6 +69,11 @@ const CFG = {
   searchPulseFreq: 3.5,
   livePollMs: 800,
   liveReconnectMs: 2500,
+  minimapW: 170,
+  minimapH: 110,
+  minimapEveryNFrames: 3,
+  minimapNodeR: 1.3,
+  minimapPadding: 8,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,
@@ -454,6 +459,7 @@ const state = {
   cameraTarget: null,
   searchMatches: new Set(),
   searchActive: null,
+  hiddenRoles: new Set(),
 };
 function resetInteractionState() {
   state.selected = null;
@@ -865,7 +871,7 @@ function draw(ctx, state, tSec, viewport, extras) {
   const bfOf = n => birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
-  const visible = n => n.ts <= cutoff && n.bornAt != null;
+  const visible = n => n.ts <= cutoff && n.bornAt != null && !(state.hiddenRoles && state.hiddenRoles.has(n.role));
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
@@ -1097,18 +1103,30 @@ function computeTsBounds() {
 
 function startPlay() {
   if (!state.nodes.length) return;
-  // Сортируем ноды по ts
   sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
-  // Если диалог уже досмотрен или стартуем с нуля — обнуляем
-  resetStory();
-  state.timelineMax = 0;
-  stepIndex = 0;
+  const atEnd = state.timelineMax >= 0.9999;
+  if (atEnd) {
+    // Досмотрено — начать заново
+    resetStory();
+    state.timelineMax = 0;
+    stepIndex = 0;
+  } else {
+    // Возобновить с текущей позиции — вычисляем stepIndex по cutoff
+    const { tsMin, tsMax } = computeTsBounds();
+    const range = Math.max(1, tsMax - tsMin);
+    const cutoff = tsMin + range * state.timelineMax;
+    stepIndex = 0;
+    for (let i = 0; i < sortedIds.length; i++) {
+      const node = state.byId.get(sortedIds[i]);
+      if (node && node.ts <= cutoff) stepIndex = i + 1;
+      else break;
+    }
+  }
   playing = true;
   lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
-  // Шагаем первую ноду сразу, чтобы не ждать интервал
-  advanceStep();
+  if (atEnd) advanceStep(); // в рестарте сразу показываем первую
 }
 
 function stopPlay() {
@@ -1578,6 +1596,322 @@ function setStatus(s) {
 }
 
 
+// --- src/ui/filter.js ---
+
+
+const ROLES = ['user', 'assistant', 'tool_use'];
+function initFilter() {
+  for (const role of ROLES) {
+    const btn = document.querySelector(`.btn-role[data-role="${role}"]`);
+    if (!btn) continue;
+    btn.addEventListener('click', () => toggleRole(role, btn));
+    btn.classList.add('active');
+  }
+}
+
+function toggleRole(role, btn) {
+  if (state.hiddenRoles.has(role)) {
+    state.hiddenRoles.delete(role);
+    btn.classList.add('active');
+  } else {
+    state.hiddenRoles.add(role);
+    btn.classList.remove('active');
+  }
+}
+function isRoleVisible(role) {
+  return !state.hiddenRoles.has(role);
+}
+
+
+// --- src/ui/minimap.js ---
+
+
+
+let canvasEl, ctx, dpr = 1;
+let tf = null; // сохранённая трансформация для click->world
+let frameCounter = 0;
+let getViewport = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  cx: window.innerWidth / 2,
+  cy: window.innerHeight / 2,
+});
+function initMinimap(getViewportFn) {
+  if (getViewportFn) getViewport = getViewportFn;
+  canvasEl = document.getElementById('minimap');
+  if (!canvasEl) return;
+  dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvasEl.width = CFG.minimapW * dpr;
+  canvasEl.height = CFG.minimapH * dpr;
+  canvasEl.style.width = CFG.minimapW + 'px';
+  canvasEl.style.height = CFG.minimapH + 'px';
+  ctx = canvasEl.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvasEl.addEventListener('click', onClick);
+}
+
+function colorFor(role) {
+  if (role === 'user') return '#7BAAF0';
+  if (role === 'tool_use') return '#ECA040';
+  return '#50D4B5';
+}
+function tickMinimap() {
+  if (!canvasEl || !ctx) return;
+  if ((frameCounter++) % CFG.minimapEveryNFrames !== 0) return;
+  const W = CFG.minimapW, H = CFG.minimapH;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (!state.nodes.length) {
+    tf = null;
+    return;
+  }
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of state.nodes) {
+    if (state.hiddenRoles.has(n.role)) continue;
+    if (n.bornAt == null) continue;
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  }
+  if (!isFinite(minX)) { tf = null; return; }
+  const bw = Math.max(1, maxX - minX);
+  const bh = Math.max(1, maxY - minY);
+  const pad = CFG.minimapPadding;
+  const s = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh);
+  const ox = pad + ((W - pad * 2) - bw * s) / 2;
+  const oy = pad + ((H - pad * 2) - bh * s) / 2;
+  const w2m = (wx, wy) => ({ x: ox + (wx - minX) * s, y: oy + (wy - minY) * s });
+
+  // edges
+  ctx.strokeStyle = 'rgba(0, 212, 255, 0.22)';
+  ctx.lineWidth = 0.5;
+  for (const e of state.edges) {
+    if (state.hiddenRoles.has(e.a.role) || state.hiddenRoles.has(e.b.role)) continue;
+    if (e.a.bornAt == null || e.b.bornAt == null) continue;
+    const a = w2m(e.a.x, e.a.y);
+    const b = w2m(e.b.x, e.b.y);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  // nodes
+  for (const n of state.nodes) {
+    if (state.hiddenRoles.has(n.role)) continue;
+    if (n.bornAt == null) continue;
+    const p = w2m(n.x, n.y);
+    ctx.fillStyle = colorFor(n.role);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, CFG.minimapNodeR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // viewport rectangle
+  const cam = state.camera;
+  const vp = getViewport();
+  const vw = vp.width / cam.scale;
+  const vh = vp.height / cam.scale;
+  const tl = w2m(cam.x, cam.y);
+  const br = w2m(cam.x + vw, cam.y + vh);
+  ctx.strokeStyle = 'rgba(236, 160, 64, 0.75)';
+  ctx.lineWidth = 1;
+  const rx = Math.max(0, Math.min(W, tl.x));
+  const ry = Math.max(0, Math.min(H, tl.y));
+  const rw = Math.max(1, Math.min(W - rx, br.x - tl.x));
+  const rh = Math.max(1, Math.min(H - ry, br.y - tl.y));
+  ctx.strokeRect(rx, ry, rw, rh);
+
+  tf = { ox, oy, s, minX, minY };
+}
+
+function onClick(ev) {
+  if (!tf) return;
+  const rect = canvasEl.getBoundingClientRect();
+  const mx = ev.clientX - rect.left;
+  const my = ev.clientY - rect.top;
+  const wx = (mx - tf.ox) / tf.s + tf.minX;
+  const wy = (my - tf.oy) / tf.s + tf.minY;
+  const vp = getViewport();
+  const cx = vp.cx != null ? vp.cx : vp.width / 2;
+  const cy = vp.cy != null ? vp.cy : vp.height / 2;
+  state.cameraTarget = {
+    x: wx - cx / state.camera.scale,
+    y: wy - cy / state.camera.scale,
+    scale: state.camera.scale,
+  };
+}
+
+
+// --- src/ui/keyboard.js ---
+
+
+
+
+
+
+let getViewport = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  cx: window.innerWidth / 2,
+  cy: window.innerHeight / 2,
+});
+function initKeyboard(getViewportFn) {
+  if (getViewportFn) getViewport = getViewportFn;
+  window.addEventListener('keydown', onKey);
+  // Чтобы Space/Enter на наших кнопках не триггерил shortcut повторно — blur после click
+  document.querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => { try { b.blur(); } catch {} });
+  });
+}
+
+function isInputFocused() {
+  const a = document.activeElement;
+  if (!a) return false;
+  const tag = a.tagName && a.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || a.isContentEditable;
+}
+
+function onKey(ev) {
+  if (isInputFocused()) return;
+  if (ev.key === ' ') {
+    ev.preventDefault();
+    togglePlay();
+  } else if (ev.key === 'ArrowRight') {
+    ev.preventDefault();
+    stepTimeline(1);
+  } else if (ev.key === 'ArrowLeft') {
+    ev.preventDefault();
+    stepTimeline(-1);
+  } else if (ev.key === 'Home' || ev.key === 'r' || ev.key === 'R') {
+    ev.preventDefault();
+    resetView();
+  } else if (ev.key === 'Escape') {
+    if (state.selected || state.cameraTarget) {
+      state.selected = null;
+      state.cameraTarget = null;
+      hideDetail();
+    }
+  }
+}
+
+function stepTimeline(dir) {
+  if (!state.nodes.length) return;
+  const sorted = [...state.nodes].sort((a, b) => a.ts - b.ts);
+  const tsMin = sorted[0].ts;
+  const tsMax = sorted[sorted.length - 1].ts;
+  const range = Math.max(1, tsMax - tsMin);
+  const cutoff = tsMin + range * state.timelineMax;
+  let currentIdx = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].ts <= cutoff) currentIdx = i;
+    else break;
+  }
+  const newIdx = Math.max(0, Math.min(sorted.length - 1, currentIdx + dir));
+  state.timelineMax = Math.min(1, (sorted[newIdx].ts - tsMin) / range + 0.0001);
+  const slider = document.getElementById('timeline');
+  if (slider) {
+    slider.value = String(Math.round(state.timelineMax * 100));
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+  } else {
+    syncChatToTimeline(state);
+  }
+}
+
+function resetView() {
+  if (!state.nodes.length) return;
+  const cam = fitToView(state.nodes, getViewport());
+  state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
+}
+
+
+// --- src/ui/stats-hud.js ---
+
+
+
+let panelEl, tokensEl, durationEl, topToolsEl, longestEl;
+let tickCounter = 0;
+function initStats() {
+  panelEl = document.getElementById('stats-panel');
+  tokensEl = document.getElementById('stat-tokens');
+  durationEl = document.getElementById('stat-duration');
+  topToolsEl = document.getElementById('stat-top-tools');
+  longestEl = document.getElementById('stat-longest');
+}
+function computeStats(nodes) {
+  if (!nodes || !nodes.length) return null;
+  let totalChars = 0;
+  let tsMin = Infinity, tsMax = -Infinity;
+  let longest = null;
+  const toolCounts = new Map();
+  for (const n of nodes) {
+    if (typeof n.textLen === 'number') totalChars += n.textLen;
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+    if (!longest || n.textLen > longest.textLen) longest = n;
+    if (n.role === 'tool_use' && n.toolName) {
+      toolCounts.set(n.toolName, (toolCounts.get(n.toolName) || 0) + 1);
+    }
+  }
+  return {
+    tokens: Math.round(totalChars / 4),
+    durationSec: (tsMax - tsMin) / 1000,
+    longest,
+    topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
+  };
+}
+function formatDuration(sec) {
+  if (sec < 0 || !isFinite(sec)) return '—';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const parts = [];
+  if (h) parts.push(h + 'h');
+  if (m || h) parts.push(m + 'm');
+  parts.push(s + 's');
+  return parts.join(' ');
+}
+function formatTokens(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function recomputeStats() {
+  if (!panelEl) return;
+  const s = computeStats(state.nodes);
+  if (!s) { panelEl.style.display = 'none'; return; }
+  panelEl.style.display = '';
+  tokensEl.textContent = '~' + formatTokens(s.tokens);
+  durationEl.textContent = formatDuration(s.durationSec);
+  if (s.topTools.length) {
+    topToolsEl.innerHTML = s.topTools.map(([name, count]) =>
+      `<span class="tool-chip"><span class="tool-chip-icon">${escapeHtml(toolIcon(name))}</span>${escapeHtml(name)} <b>×${count}</b></span>`
+    ).join(' ');
+  } else {
+    topToolsEl.innerHTML = '<span class="muted">—</span>';
+  }
+  if (s.longest) {
+    const preview = (s.longest.text || '').slice(0, 36).replace(/\n/g, ' ');
+    const ellipsis = (s.longest.text || '').length > 36 ? '…' : '';
+    longestEl.innerHTML = `<span class="longest-role ${s.longest.role}">${s.longest.role}</span> <span class="longest-len">${s.longest.textLen}</span> <span class="longest-preview">${escapeHtml(preview)}${ellipsis}</span>`;
+  } else {
+    longestEl.textContent = '—';
+  }
+}
+function tickStats() {
+  if ((tickCounter++) % 180 !== 0) return;
+  recomputeStats();
+}
+
+
 // --- src/ui/interaction.js ---
 
 
@@ -1840,7 +2174,101 @@ function hideError() {
 }
 
 
+// --- src/ui/share.js ---
+
+
+
+let toastEl, btnShare;
+function initShare() {
+  btnShare = document.getElementById('btn-share');
+  toastEl = document.getElementById('toast');
+  if (btnShare) btnShare.addEventListener('click', shareCurrent);
+}
+function buildShareUrl() {
+  const params = new URLSearchParams();
+  params.set('t', String(Math.round(state.timelineMax * 100)));
+  if (state.selected && state.selected.id) params.set('n', state.selected.id);
+  const hidden = [...state.hiddenRoles];
+  if (hidden.length) params.set('hide', hidden.join(','));
+  return window.location.origin + window.location.pathname + '?' + params.toString();
+}
+function parseUrlParams(search) {
+  const out = {};
+  const p = new URLSearchParams(search || '');
+  if (p.has('jsonl')) out.jsonl = p.get('jsonl');
+  if (p.has('t')) {
+    const t = parseFloat(p.get('t'));
+    if (!isNaN(t)) out.t = Math.max(0, Math.min(1, t / 100));
+  }
+  if (p.has('n')) out.nodeId = p.get('n');
+  if (p.has('hide')) {
+    out.hide = p.get('hide').split(',').map(r => r.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+async function shareCurrent() {
+  const url = buildShareUrl();
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied to clipboard');
+  } catch {
+    prompt('Copy URL:', url);
+  }
+}
+
+function showToast(msg) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2000);
+}
+async function applyUrlParamsLate() {
+  const params = parseUrlParams(window.location.search);
+
+  if (params.jsonl) {
+    try {
+      const resp = await fetch(params.jsonl, { cache: 'no-store' });
+      if (resp.ok) {
+        const text = await resp.text();
+        loadText(text);
+      }
+    } catch (e) {
+      console.warn('[share] failed to fetch jsonl param:', e.message);
+    }
+  }
+
+  if (params.t != null) {
+    state.timelineMax = params.t;
+    const slider = document.getElementById('timeline');
+    if (slider) {
+      slider.value = String(Math.round(state.timelineMax * 100));
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  if (Array.isArray(params.hide)) {
+    for (const r of params.hide) {
+      state.hiddenRoles.add(r);
+      const btn = document.querySelector(`.btn-role[data-role="${r}"]`);
+      if (btn) btn.classList.remove('active');
+    }
+  }
+
+  if (params.nodeId && state.byId) {
+    const node = state.byId.get(params.nodeId);
+    if (node) state.selected = node;
+  }
+}
+
+
 // --- src/main.js ---
+
+
+
+
+
 
 
 
@@ -1893,14 +2321,25 @@ initTimeline();
 initStory();
 initSearch(getViewport);
 initLive(getViewport);
+initFilter();
+initMinimap(getViewport);
+initStats();
+initShare();
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
+initKeyboard(getViewport);
 
 state.stars = generateStarfield(CFG.starfieldCount);
 
+let urlParamsApplied = false;
 function onGraphReady() {
   ensureParticles(state.edges);
   resetStory();
+  recomputeStats();
+  if (!urlParamsApplied) {
+    urlParamsApplied = true;
+    applyUrlParamsLate();
+  }
 }
 
 let lastMs = performance.now();
@@ -1952,6 +2391,8 @@ function frame(tms) {
 
   // Story mode должен читать bornAt после того как draw()/updateBirths его обновил
   tickStory(tms, state);
+  tickMinimap();
+  tickStats();
 
   requestAnimationFrame(frame);
 }

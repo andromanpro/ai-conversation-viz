@@ -44,18 +44,30 @@ function computeTsBounds() {
 
 function startPlay() {
   if (!state.nodes.length) return;
-  // Сортируем ноды по ts
   sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
-  // Если диалог уже досмотрен или стартуем с нуля — обнуляем
-  resetStory();
-  state.timelineMax = 0;
-  stepIndex = 0;
+  const atEnd = state.timelineMax >= 0.9999;
+  if (atEnd) {
+    // Досмотрено — начать заново
+    resetStory();
+    state.timelineMax = 0;
+    stepIndex = 0;
+  } else {
+    // Возобновить с текущей позиции — вычисляем stepIndex по cutoff
+    const { tsMin, tsMax } = computeTsBounds();
+    const range = Math.max(1, tsMax - tsMin);
+    const cutoff = tsMin + range * state.timelineMax;
+    stepIndex = 0;
+    for (let i = 0; i < sortedIds.length; i++) {
+      const node = state.byId.get(sortedIds[i]);
+      if (node && node.ts <= cutoff) stepIndex = i + 1;
+      else break;
+    }
+  }
   playing = true;
   lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
-  // Шагаем первую ноду сразу, чтобы не ждать интервал
-  advanceStep();
+  if (atEnd) advanceStep(); // в рестарте сразу показываем первую
 }
 
 function stopPlay() {

@@ -102,7 +102,7 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const bfOf = n => birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
-  const visible = n => n.ts <= cutoff && n.bornAt != null;
+  const visible = n => n.ts <= cutoff && n.bornAt != null && !(state.hiddenRoles && state.hiddenRoles.has(n.role));
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;

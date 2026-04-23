@@ -12,6 +12,11 @@ import { initTimeline, tickPlay, isPlaying } from './ui/timeline.js';
 import { initStory, tickStory, getFrontierNodeId, resetStory } from './ui/story-mode.js';
 import { initSearch } from './ui/search.js';
 import { initLive } from './ui/live.js';
+import { initKeyboard } from './ui/keyboard.js';
+import { initFilter } from './ui/filter.js';
+import { initMinimap, tickMinimap } from './ui/minimap.js';
+import { initStats, tickStats, recomputeStats } from './ui/stats-hud.js';
+import { initShare, applyUrlParamsLate } from './ui/share.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -50,14 +55,25 @@ initTimeline();
 initStory();
 initSearch(getViewport);
 initLive(getViewport);
+initFilter();
+initMinimap(getViewport);
+initStats();
+initShare();
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
+initKeyboard(getViewport);
 
 state.stars = generateStarfield(CFG.starfieldCount);
 
+let urlParamsApplied = false;
 function onGraphReady() {
   ensureParticles(state.edges);
   resetStory();
+  recomputeStats();
+  if (!urlParamsApplied) {
+    urlParamsApplied = true;
+    applyUrlParamsLate();
+  }
 }
 
 let lastMs = performance.now();
@@ -109,6 +125,8 @@ function frame(tms) {
 
   // Story mode должен читать bornAt после того как draw()/updateBirths его обновил
   tickStory(tms, state);
+  tickMinimap();
+  tickStats();
 
   requestAnimationFrame(frame);
 }

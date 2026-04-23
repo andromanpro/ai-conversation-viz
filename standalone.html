@@ -52,6 +52,28 @@
   .dot.u { background: var(--user); }
   .dot.a { background: var(--assistant); }
   .dot.t { background: var(--tool); }
+  #stats-panel { margin-top: 10px; font-size: 10px; color: var(--muted); line-height: 1.75; min-width: 280px; max-width: 360px; }
+  #stats-panel .row { display: flex; justify-content: flex-end; gap: 10px; align-items: baseline; }
+  #stats-panel .label { letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-size: 9px; white-space: nowrap; }
+  #stats-panel .value { color: var(--text); text-align: right; }
+  #stats-panel .tool-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; background: rgba(236, 160, 64, 0.08); border: 1px solid rgba(236, 160, 64, 0.3); border-radius: 3px; margin-left: 3px; font-size: 9px; color: var(--text); }
+  #stats-panel .tool-chip-icon { color: var(--tool); font-weight: bold; }
+  #stats-panel .tool-chip b { font-weight: normal; color: var(--muted); }
+  #stats-panel .longest-role { color: var(--muted); }
+  #stats-panel .longest-role.user { color: var(--user); }
+  #stats-panel .longest-role.assistant { color: var(--assistant); }
+  #stats-panel .longest-role.tool_use { color: var(--tool); }
+  #stats-panel .longest-len { color: var(--muted); font-size: 9px; }
+  #stats-panel .longest-preview { opacity: 0.7; }
+  #toast { position: fixed; bottom: 82px; left: 50%; transform: translateX(-50%); background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--assistant); padding: 8px 18px; border-radius: 20px; font-size: 12px; color: var(--text); z-index: 20; opacity: 0; transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .role-filter { display: flex; gap: 4px; margin-top: 8px; justify-content: flex-end; }
+  .btn-role { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 3px 8px; cursor: pointer; font-family: inherit; font-size: 10px; letter-spacing: 0.04em; display: inline-flex; align-items: center; gap: 5px; transition: all .15s; border-radius: 2px; }
+  .btn-role.active { color: var(--text); border-color: rgba(123,170,240,0.35); }
+  .btn-role:not(.active) { opacity: 0.4; text-decoration: line-through; }
+  .btn-role:hover { border-color: var(--user); }
+  #minimap { position: fixed; left: 16px; bottom: 72px; border: 1px solid var(--border); z-index: 9; cursor: crosshair; box-shadow: 0 2px 12px rgba(0,0,0,0.35); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  @media (max-width: 720px) { #minimap { display: none; } }
   kbd { display: inline-block; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; background: rgba(255,255,255,0.02); color: var(--text); font-size: 10px; }
   #detail { position: fixed; right: 16px; bottom: 72px; width: 380px; max-height: 40vh; background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--border); padding: 14px 16px; font-size: 12px; line-height: 1.55; z-index: 10; display: none; }
   #detail.show { display: block; }
@@ -131,6 +153,7 @@
     <button class="btn primary" id="btn-sample">Load sample</button>
     <button class="btn" id="btn-file">Open JSONL…</button>
     <button class="btn accent" id="btn-reset">Reset view</button>
+    <button class="btn" id="btn-share" title="Скопировать URL с текущим состоянием">Share</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="live-row">
@@ -143,15 +166,21 @@
 
 <div class="hud" id="top-right">
   <div class="stats" id="stats">—</div>
-  <div class="legend">
-    <div class="legend-item"><span class="dot u"></span> user</div>
-    <div class="legend-item"><span class="dot a"></span> assistant</div>
-    <div class="legend-item"><span class="dot t"></span> tool_use</div>
+  <div class="role-filter">
+    <button class="btn-role" data-role="user" title="Toggle user"><span class="dot u"></span>user</button>
+    <button class="btn-role" data-role="assistant" title="Toggle assistant"><span class="dot a"></span>assistant</button>
+    <button class="btn-role" data-role="tool_use" title="Toggle tool_use"><span class="dot t"></span>tool_use</button>
+  </div>
+  <div id="stats-panel">
+    <div class="row"><span class="label">tokens</span><span class="value" id="stat-tokens">—</span></div>
+    <div class="row"><span class="label">duration</span><span class="value" id="stat-duration">—</span></div>
+    <div class="row"><span class="label">top tools</span><span class="value" id="stat-top-tools">—</span></div>
+    <div class="row"><span class="label">longest</span><span class="value" id="stat-longest">—</span></div>
   </div>
 </div>
 
 <div class="hud" id="bottom-left">
-  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag node</kbd> move &nbsp; <kbd>drag bg</kbd> pan &nbsp; <kbd>click</kbd> message &nbsp; <kbd>hover</kbd> preview &nbsp; <kbd>drop</kbd> file
+  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag</kbd> pan/node &nbsp; <kbd>click</kbd> msg &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step &nbsp; <kbd>Home</kbd> fit &nbsp; <kbd>Ctrl+F</kbd> search &nbsp; <kbd>Esc</kbd> close
 </div>
 
 <div id="detail">
@@ -189,6 +218,8 @@
   <button id="search-close" aria-label="Close">×</button>
 </div>
 
+<canvas id="minimap" width="170" height="110"></canvas>
+<div id="toast">—</div>
 <div id="drop-hint"><div class="box">drop jsonl to visualize</div></div>
 <div id="error"></div>
 

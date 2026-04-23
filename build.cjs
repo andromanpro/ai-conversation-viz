@@ -27,8 +27,13 @@ const MODULES = [
   'src/ui/story-mode.js',
   'src/ui/search.js',
   'src/ui/live.js',
+  'src/ui/filter.js',
+  'src/ui/minimap.js',
+  'src/ui/keyboard.js',
+  'src/ui/stats-hud.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',
+  'src/ui/share.js',
   'src/main.js',
 ];
 

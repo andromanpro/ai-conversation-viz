@@ -13,6 +13,7 @@ export const state = {
   cameraTarget: null,
   searchMatches: new Set(),
   searchActive: null,
+  hiddenRoles: new Set(),
 };
 
 export function resetInteractionState() {

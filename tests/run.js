@@ -9,6 +9,8 @@ import { controlPoint, bezierPoint, advanceParticle } from '../src/view/particle
 import { generateStarfield, starScreen } from '../src/view/starfield.js';
 import { toolIcon } from '../src/view/tool-icons.js';
 import { matchNodes } from '../src/ui/search.js';
+import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.js';
+import { parseUrlParams } from '../src/ui/share.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -463,6 +465,67 @@ test('appendRawNodes: пересчитывает recency при добавлен
   const a = state.byId.get('a'), b = state.byId.get('b');
   eq(a.recency, 0);
   eq(b.recency, 1);
+});
+
+// ==== STATS HUD ====
+test('stats: computeStats aggregates tokens/longest/topTools', () => {
+  const nodes = [
+    { id: 'u1', role: 'user', ts: 1000, text: 'a'.repeat(40), textLen: 40 },
+    { id: 'a1', role: 'assistant', ts: 2000, text: 'b'.repeat(200), textLen: 200 },
+    { id: 't1', role: 'tool_use', toolName: 'Grep', ts: 2100, text: 'x', textLen: 1 },
+    { id: 't2', role: 'tool_use', toolName: 'Grep', ts: 2200, text: 'x', textLen: 1 },
+    { id: 't3', role: 'tool_use', toolName: 'Write', ts: 2300, text: 'x', textLen: 1 },
+  ];
+  const s = computeStats(nodes);
+  eq(s.tokens, Math.round(243 / 4));
+  eq(s.durationSec, 1.3);
+  eq(s.longest.id, 'a1');
+  eq(s.topTools[0][0], 'Grep');
+  eq(s.topTools[0][1], 2);
+  eq(s.topTools[1][0], 'Write');
+});
+
+test('stats: computeStats null for empty', () => {
+  eq(computeStats([]), null);
+  eq(computeStats(null), null);
+});
+
+test('stats: formatDuration handles h/m/s', () => {
+  eq(formatDuration(45), '45s');
+  eq(formatDuration(90), '1m 30s');
+  eq(formatDuration(3661), '1h 1m 1s');
+});
+
+test('stats: formatTokens uses k/M', () => {
+  eq(formatTokens(500), '500');
+  eq(formatTokens(1500), '1.5k');
+  eq(formatTokens(2_500_000), '2.5M');
+});
+
+// ==== SHARE URL ====
+test('share: parseUrlParams parses t', () => {
+  eq(parseUrlParams('?t=50').t, 0.5);
+  eq(parseUrlParams('?t=0').t, 0);
+  eq(parseUrlParams('?t=100').t, 1);
+  eq(parseUrlParams('?t=150').t, 1); // clamped
+});
+
+test('share: parseUrlParams parses hide as array', () => {
+  const p = parseUrlParams('?hide=user,tool_use');
+  assert(Array.isArray(p.hide));
+  eq(p.hide.length, 2);
+  eq(p.hide[0], 'user');
+});
+
+test('share: parseUrlParams parses n and jsonl', () => {
+  const p = parseUrlParams('?n=abc-123&jsonl=http://localhost/x.jsonl');
+  eq(p.nodeId, 'abc-123');
+  eq(p.jsonl, 'http://localhost/x.jsonl');
+});
+
+test('share: parseUrlParams empty returns empty object', () => {
+  eq(Object.keys(parseUrlParams('')).length, 0);
+  eq(Object.keys(parseUrlParams('?other=1')).length, 0);
 });
 
 // ==== SUMMARY ====
