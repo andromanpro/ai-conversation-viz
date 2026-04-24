@@ -69,6 +69,7 @@ const MODULES = [
   'src/ui/settings-modal.js',
   'src/ui/topics-toggle.js',
   'src/ui/diff-mode.js',
+  'src/ui/session-picker.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',
   'src/ui/share.js',

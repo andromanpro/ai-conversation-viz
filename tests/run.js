@@ -17,6 +17,8 @@ import { matchNodes } from '../src/ui/search.js';
 import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.js';
 import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
+import { addRemoteSessions } from '../src/ui/session-picker.js';
+import { state as globalState } from '../src/view/state.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -949,6 +951,34 @@ test('diff: mergeDiff marks A-only, B-only, both correctly', () => {
   const bX = state.nodes.find(n => n.id === 'B:bX');
   assert(bX, 'B:bX должен быть добавлен');
   eq(bX._diffOrigin, 'B');
+});
+
+// ==== SESSION PICKER ====
+test('sessions: addRemoteSessions добавляет с префиксом remote:', () => {
+  globalState.sessions = [];
+  addRemoteSessions([
+    { id: 'a', title: 'Session A', url: '/a.jsonl' },
+    { id: 'b', title: 'Session B', url: '/b.jsonl', size: 1024 },
+  ]);
+  eq(globalState.sessions.length, 2);
+  assert(globalState.sessions[0].id.startsWith('remote:'));
+  eq(globalState.sessions[0].name, 'Session A');
+  eq(globalState.sessions[1].size, 1024);
+});
+
+test('sessions: addRemoteSessions дедупит по id', () => {
+  globalState.sessions = [];
+  addRemoteSessions([{ id: 'x', title: 'Once', url: '/x.jsonl' }]);
+  addRemoteSessions([{ id: 'x', title: 'Dup', url: '/x.jsonl' }]);
+  eq(globalState.sessions.length, 1);
+});
+
+test('sessions: addRemoteSessions игнорирует некорректные элементы', () => {
+  globalState.sessions = [];
+  addRemoteSessions([null, { id: 'only-id' }, { url: '/y.jsonl' }]);
+  // null и { id } без url — отвергнуты, { url } без title принят
+  eq(globalState.sessions.length, 1);
+  eq(globalState.sessions[0].name, '/y.jsonl');
 });
 
 test('diff: mergeDiff edges for B-only ноды цепляются через matched parent', () => {

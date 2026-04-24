@@ -5,7 +5,7 @@ import { draw } from './view/renderer.js';
 import { generateStarfield, drawStarfield } from './view/starfield.js';
 import { ensureParticles, tickParticles, drawParticles } from './view/particles.js';
 import { initInteraction, isPanning, isDraggingNode } from './ui/interaction.js';
-import { initLoader } from './ui/loader.js';
+import { initLoader, loadText } from './ui/loader.js';
 import { initDetail } from './ui/detail-panel.js';
 import { initTooltip } from './ui/tooltip.js';
 import { initTimeline, tickPlay, isPlaying } from './ui/timeline.js';
@@ -28,6 +28,7 @@ import { initThemeToggle } from './ui/theme-toggle.js';
 import { initSettingsModal } from './ui/settings-modal.js';
 import { initTopicsToggle } from './ui/topics-toggle.js';
 import { initDiffMode } from './ui/diff-mode.js';
+import { initSessionPicker, loadSessionIndex } from './ui/session-picker.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -81,6 +82,7 @@ initThemeToggle();
 initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);
+initSessionPicker(loadText);
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -96,6 +98,13 @@ function onGraphReady() {
 initInteraction(canvas, getViewport);
 initLoader(getViewport, onGraphReady);
 initKeyboard(getViewport);
+
+// URL-param ?sessions=<url-to-index.json> — загрузить список сессий
+try {
+  const sp = new URLSearchParams(window.location.search);
+  const sessionsUrl = sp.get('sessions');
+  if (sessionsUrl) loadSessionIndex(sessionsUrl);
+} catch {}
 
 state.stars = generateStarfield(CFG.starfieldCount);
 

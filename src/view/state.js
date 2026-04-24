@@ -23,6 +23,9 @@ export const state = {
   topicsMode: false, // TF-IDF topic coloring
   diffMode: false,     // сравнение двух сессий
   diffStats: null,     // { onlyA, onlyB, both }
+  sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
+  sessionsOpen: false, // панель session-picker открыта
+  isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
 };
 
 export function resetInteractionState() {

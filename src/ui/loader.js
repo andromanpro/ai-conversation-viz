@@ -8,6 +8,7 @@ import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
 import { hideTooltip } from './tooltip.js';
 import { resetTimeline } from './timeline.js';
+import { addSessionFiles } from './session-picker.js';
 
 let _getViewport;
 let _onReady = () => {};
@@ -17,10 +18,12 @@ export function initLoader(getViewportFn, onReady) {
   if (onReady) _onReady = onReady;
 
   const fileInput = document.getElementById('file-input');
+  // multiple=true ставится динамически, чтобы можно было выбирать несколько
+  if (fileInput) fileInput.setAttribute('multiple', 'true');
   document.getElementById('btn-file').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', (ev) => {
-    const f = ev.target.files && ev.target.files[0];
-    if (f) loadFile(f);
+    const files = ev.target.files;
+    if (files && files.length) handleFiles(files);
     fileInput.value = '';
   });
 
@@ -45,9 +48,25 @@ function initDragDrop() {
     ev.preventDefault();
     depth = 0;
     dropHint.classList.remove('show');
-    const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-    if (f) loadFile(f);
+    const files = ev.dataTransfer && ev.dataTransfer.files;
+    if (files && files.length) handleFiles(files);
   });
+}
+
+/**
+ * Обрабатывает один или несколько файлов: все кладём в session-picker,
+ * а первый сразу загружаем для отображения.
+ */
+function handleFiles(files) {
+  if (files.length === 1) {
+    const f = files[0];
+    loadFile(f);
+    // также добавить в список сессий без autoLoad (уже загружается)
+    addSessionFiles([f], { autoLoadFirst: false });
+    return;
+  }
+  // Multi: все в picker, первый авто-загружается
+  addSessionFiles(files, { autoLoadFirst: true });
 }
 
 export function loadText(text) {
