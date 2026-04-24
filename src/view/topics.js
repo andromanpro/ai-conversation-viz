@@ -20,14 +20,25 @@ function tokenize(text) {
 }
 
 /**
- * Анализирует ноды, для каждой возвращает top-1 TF-IDF слово.
+ * Анализирует ноды, для каждой возвращает top-1 «тематическое» слово.
+ *
+ * Классический TF-IDF оверкомпенсирует редкие слова: глагол встречается в
+ * одной ноде (df=1) → максимальный IDF → побеждает реальную тему
+ * (df=3-5). Поэтому используем **обратную** стратегию: хотим слова,
+ * которые ПОВТОРЯЮТСЯ в корпусе (это и есть темы), но сфокусированы в
+ * конкретной ноде.
+ *
+ * Формула: score = tf × log(1 + df). Singleton-слова (df=1) отбрасываются
+ * полностью — они либо шум, либо уникальный контекст, непригодный для
+ * кластеризации. Fallback: если у ноды нет ни одного не-singleton слова,
+ * берём слово с максимальным df среди её токенов.
+ *
  * @param {Array} nodes — state.nodes
  * @returns {Map<nodeId, { topWord: string, score: number }>}
  */
 export function computeTopics(nodes) {
   const result = new Map();
   if (!nodes || !nodes.length) return result;
-  const N = nodes.length;
   // DF — в скольких документах встречается слово
   const df = new Map();
   const nodeTokens = new Map();
@@ -37,9 +48,6 @@ export function computeTopics(nodes) {
     const seen = new Set(toks);
     for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
   }
-  // IDF
-  const idf = new Map();
-  for (const [w, d] of df) idf.set(w, Math.log((N + 1) / (d + 1)) + 1);
 
   for (const n of nodes) {
     const toks = nodeTokens.get(n.id) || [];
@@ -47,11 +55,22 @@ export function computeTopics(nodes) {
     // TF
     const tf = new Map();
     for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+    // Пройдём два раза: сначала ищем среди non-singleton (df >= 2),
+    // потом fallback на слово с max df.
     let best = null, bestScore = 0;
     for (const [w, c] of tf) {
-      const s = (c / toks.length) * (idf.get(w) || 1);
-      // приоритет более частым в документе, но с редкостью
-      if (s > bestScore) { bestScore = s; best = w; }
+      const d = df.get(w) || 0;
+      if (d < 2) continue;
+      const score = c * Math.log(1 + d);
+      if (score > bestScore) { bestScore = score; best = w; }
+    }
+    if (!best) {
+      // Fallback — берём самое «массовое» слово в корпусе из токенов ноды
+      let maxDf = 0;
+      for (const w of tf.keys()) {
+        const d = df.get(w) || 0;
+        if (d > maxDf) { maxDf = d; best = w; bestScore = d; }
+      }
     }
     result.set(n.id, best ? { topWord: best, score: bestScore } : null);
   }

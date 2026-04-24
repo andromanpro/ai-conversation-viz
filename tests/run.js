@@ -744,6 +744,37 @@ test('topics: stopwords отфильтрованы (и, the, если)', () => {
   assert(r === null || (r && !['если','это','то','что','мы'].includes(r.topWord)));
 });
 
+test('topics: recurring topics выигрывают over singleton verbs', () => {
+  // Классический баг старого TF-IDF: "implement", "fix", "write" (df=1)
+  // получали максимальный IDF → выигрывали у "authentication" (df=3).
+  // Проверяем что новая формула TF × log(1+df) это исправляет.
+  const nodes = [
+    { id: '1', text: 'Implement authentication with JWT tokens bcrypt password hashing' },
+    { id: '2', text: 'Add database migration for users table, run pg_dump' },
+    { id: '3', text: 'Write unit tests for auth flow using jest supertest' },
+    { id: '4', text: 'Fix bug in authentication JWT expiration handling' },
+    { id: '5', text: 'Database migration fails on timestamp column investigate' },
+    { id: '6', text: 'Tests passing after jest update completed' },
+  ];
+  const t = computeTopics(nodes);
+  eq(t.get('1').topWord, 'authentication', 'node 1 про authentication');
+  eq(t.get('2').topWord, 'database', 'node 2 про database');
+  eq(t.get('3').topWord, 'tests', 'node 3 про tests');
+  eq(t.get('4').topWord, 'authentication', 'node 4 тоже про authentication');
+  eq(t.get('5').topWord, 'database', 'node 5 тоже про database');
+  eq(t.get('6').topWord, 'tests', 'node 6 тоже про tests');
+});
+
+test('topics: fallback работает когда все слова singleton (один документ)', () => {
+  // Если корпус = 1 нода, все df=1 → первый pass пустой. Fallback должен
+  // вернуть любое не-stopword слово, чтобы _topicHue был не null.
+  const nodes = [{ id: 'solo', text: 'performance optimization canvas' }];
+  const t = computeTopics(nodes);
+  const r = t.get('solo');
+  assert(r && r.topWord, 'fallback должен подхватить');
+  assert(['performance','optimization','canvas'].includes(r.topWord));
+});
+
 test('tree: orphan gets depth 0', () => {
   const orphan = { id: 'o', parentId: 'GHOST' };
   const byId = new Map([['o', orphan]]);

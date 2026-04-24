@@ -1673,14 +1673,25 @@ function tokenize(text) {
 }
 
 /**
- * Анализирует ноды, для каждой возвращает top-1 TF-IDF слово.
+ * Анализирует ноды, для каждой возвращает top-1 «тематическое» слово.
+ *
+ * Классический TF-IDF оверкомпенсирует редкие слова: глагол встречается в
+ * одной ноде (df=1) → максимальный IDF → побеждает реальную тему
+ * (df=3-5). Поэтому используем **обратную** стратегию: хотим слова,
+ * которые ПОВТОРЯЮТСЯ в корпусе (это и есть темы), но сфокусированы в
+ * конкретной ноде.
+ *
+ * Формула: score = tf × log(1 + df). Singleton-слова (df=1) отбрасываются
+ * полностью — они либо шум, либо уникальный контекст, непригодный для
+ * кластеризации. Fallback: если у ноды нет ни одного не-singleton слова,
+ * берём слово с максимальным df среди её токенов.
+ *
  * @param {Array} nodes — state.nodes
  * @returns {Map<nodeId, { topWord: string, score: number }>}
  */
 function computeTopics(nodes) {
   const result = new Map();
   if (!nodes || !nodes.length) return result;
-  const N = nodes.length;
   // DF — в скольких документах встречается слово
   const df = new Map();
   const nodeTokens = new Map();
@@ -1690,9 +1701,6 @@ function computeTopics(nodes) {
     const seen = new Set(toks);
     for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
   }
-  // IDF
-  const idf = new Map();
-  for (const [w, d] of df) idf.set(w, Math.log((N + 1) / (d + 1)) + 1);
 
   for (const n of nodes) {
     const toks = nodeTokens.get(n.id) || [];
@@ -1700,11 +1708,22 @@ function computeTopics(nodes) {
     // TF
     const tf = new Map();
     for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+    // Пройдём два раза: сначала ищем среди non-singleton (df >= 2),
+    // потом fallback на слово с max df.
     let best = null, bestScore = 0;
     for (const [w, c] of tf) {
-      const s = (c / toks.length) * (idf.get(w) || 1);
-      // приоритет более частым в документе, но с редкостью
-      if (s > bestScore) { bestScore = s; best = w; }
+      const d = df.get(w) || 0;
+      if (d < 2) continue;
+      const score = c * Math.log(1 + d);
+      if (score > bestScore) { bestScore = score; best = w; }
+    }
+    if (!best) {
+      // Fallback — берём самое «массовое» слово в корпусе из токенов ноды
+      let maxDf = 0;
+      for (const w of tf.keys()) {
+        const d = df.get(w) || 0;
+        if (d > maxDf) { maxDf = d; best = w; bestScore = d; }
+      }
     }
     result.set(n.id, best ? { topWord: best, score: bestScore } : null);
   }
@@ -3424,13 +3443,15 @@ function loadSaved() {
   // --- src/ui/topics-toggle.js ---
   __M["src/ui/topics-toggle.js"] = (function () {
     const { state } = __M["src/view/state.js"];
-    const { applyTopicsToNodes } = __M["src/view/topics.js"];
+    const { applyTopicsToNodes, hueToRgbaString } = __M["src/view/topics.js"];
 
 let _topicBtn;
+let _legendEl;
 
 function initTopicsToggle() {
   _topicBtn = document.getElementById('btn-topics');
   if (_topicBtn) _topicBtn.addEventListener('click', toggle);
+  _legendEl = ensureLegend();
   updateBtn();
 }
 
@@ -3441,8 +3462,82 @@ function toggle() {
   if (state.topicsMode && state.nodes.length) {
     const top = applyTopicsToNodes(state.nodes);
     console.log('[topics] top words:', top);
+    renderLegend(top);
+  } else {
+    if (_legendEl) _legendEl.classList.remove('show');
   }
   updateBtn();
+}
+
+function ensureLegend() {
+  let el = document.getElementById('topics-legend');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'topics-legend';
+  el.className = 'topics-legend';
+  el.innerHTML = '<div class="topics-legend-title">Top topics (TF × log df)</div><div class="topics-legend-items"></div>';
+  // Inline CSS — чтобы модуль работал без правок HTML
+  const css = document.createElement('style');
+  css.textContent = `
+    .topics-legend {
+      position: fixed; bottom: 72px; right: 340px; z-index: 11;
+      display: none; background: var(--panel, rgba(10,14,26,0.85));
+      border: 1px solid var(--border, rgba(123,170,240,0.25));
+      border-radius: 4px; padding: 8px 12px;
+      font-size: 11px; letter-spacing: 0.04em; max-width: 260px;
+      pointer-events: none;
+    }
+    .topics-legend.show { display: block; }
+    .topics-legend-title { color: var(--muted, #6a7c95); font-size: 9px;
+      letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
+    .topics-legend-item { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+    .topics-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .topics-legend-word { color: var(--text, #cfe6ff); font-family: ui-monospace, monospace; }
+    .topics-legend-count { color: var(--muted, #6a7c95); margin-left: auto; font-variant-numeric: tabular-nums; }
+  `;
+  document.head.appendChild(css);
+  document.body.appendChild(el);
+  return el;
+}
+
+function renderLegend(topPairs) {
+  if (!_legendEl) return;
+  const items = _legendEl.querySelector('.topics-legend-items');
+  if (!items) return;
+  items.innerHTML = '';
+  if (!topPairs || !topPairs.length) {
+    items.innerHTML = '<div style="color:var(--muted);font-size:10px;">(не нашёл повторяющихся слов — слишком короткий диалог)</div>';
+  } else {
+    for (const [word, count] of topPairs) {
+      const row = document.createElement('div');
+      row.className = 'topics-legend-item';
+      const swatch = document.createElement('span');
+      swatch.className = 'topics-legend-swatch';
+      const hue = hashHueLocal(word);
+      swatch.style.background = hueToRgbaString(hue, 0.7, 0.55, 1);
+      swatch.style.boxShadow = '0 0 6px ' + hueToRgbaString(hue, 0.7, 0.55, 0.7);
+      const w = document.createElement('span');
+      w.className = 'topics-legend-word';
+      w.textContent = word;
+      const c = document.createElement('span');
+      c.className = 'topics-legend-count';
+      c.textContent = '×' + count;
+      row.appendChild(swatch); row.appendChild(w); row.appendChild(c);
+      items.appendChild(row);
+    }
+  }
+  _legendEl.classList.add('show');
+}
+
+// Локальная копия хэша — избегаем циклического импорта через topics.js,
+// который уже экспортирует hashHue, но нам удобнее держать это рядом с UI.
+function hashHueLocal(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
 }
 
 function updateBtn() {
