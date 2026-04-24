@@ -237,14 +237,20 @@ export function draw(ctx, state, tSec, viewport, extras) {
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
+  const topicFilter = state.topicFilter || null;
+  const topicMatches = node => !topicFilter || node._topicWord === topicFilter;
   const dimMul = node => {
     if (hasSearch) return state.searchMatches.has(node.id) ? 1 : CFG.searchDimAlpha;
+    if (topicFilter) return topicMatches(node) ? 1 : CFG.searchDimAlpha;
     if (!hasPath) return 1;
     return state.pathSet.has(node.id) ? 1 : CFG.focusDimAlpha;
   };
   const edgeDim = e => {
     if (hasSearch) {
       return (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
+    }
+    if (topicFilter) {
+      return (topicMatches(e.a) && topicMatches(e.b)) ? 1 : CFG.searchDimAlpha;
     }
     if (!hasPath) return 1;
     return (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id)) ? 1 : CFG.focusDimAlpha;

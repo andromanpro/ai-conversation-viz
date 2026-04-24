@@ -331,7 +331,10 @@ function updateEdgeBuffer() {
     const hex = edgeColorHex(e);
     _edgeColor.setHex(hex);
     const r = _edgeColor.r, g = _edgeColor.g, bl = _edgeColor.b;
-    const alpha = e.adopted ? 0.4 : 0.85;
+    // Dim ребра если активен topic-filter и endpoint-ы ему не соответствуют
+    const tf = state.topicFilter;
+    const topicDim = tf ? ((a._topicWord === tf && b._topicWord === tf) ? 1 : 0.2) : 1;
+    const alpha = (e.adopted ? 0.4 : 0.85) * topicDim;
     // Рисуем EDGE_SEGMENTS последовательных отрезков вдоль quadratic Bezier
     for (let s = 0; s < EDGE_SEGMENTS; s++) {
       const t0 = s / EDGE_SEGMENTS;
@@ -535,6 +538,7 @@ function tick() {
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const topicsMode = !!state.topicsMode;
   const diffMode = !!state.diffMode;
+  const topicFilter = state.topicFilter || null;
   // Update node meshes
   for (const n of state.nodes) {
     const mesh = n._mesh;
@@ -555,6 +559,7 @@ function tick() {
     // Dim при активном search/path если не матч
     let dimMul = 1;
     if (hasSearch) dimMul = state.searchMatches.has(n.id) ? 1 : 0.22;
+    else if (topicFilter) dimMul = n._topicWord === topicFilter ? 1 : 0.22;
     else if (hasPath) dimMul = state.pathSet.has(n.id) ? 1 : 0.3;
     if (mesh.material) {
       mesh.material.opacity = (0.25 + 0.75 * ag) * dimMul;

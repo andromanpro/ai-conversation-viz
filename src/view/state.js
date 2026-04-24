@@ -21,6 +21,7 @@ export const state = {
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
   topicsMode: false, // TF-IDF topic coloring
+  topicFilter: null, // string | null — если задан, подсвечиваем только ноды с таким _topicWord
   diffMode: false,     // сравнение двух сессий
   diffStats: null,     // { onlyA, onlyB, both }
   sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]

@@ -1304,6 +1304,7 @@ const state = {
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
   topicsMode: false, // TF-IDF topic coloring
+  topicFilter: null, // string | null — если задан, подсвечиваем только ноды с таким _topicWord
   diffMode: false,     // сравнение двух сессий
   diffStats: null,     // { onlyA, onlyB, both }
   sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
@@ -2030,14 +2031,20 @@ function draw(ctx, state, tSec, viewport, extras) {
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
+  const topicFilter = state.topicFilter || null;
+  const topicMatches = node => !topicFilter || node._topicWord === topicFilter;
   const dimMul = node => {
     if (hasSearch) return state.searchMatches.has(node.id) ? 1 : CFG.searchDimAlpha;
+    if (topicFilter) return topicMatches(node) ? 1 : CFG.searchDimAlpha;
     if (!hasPath) return 1;
     return state.pathSet.has(node.id) ? 1 : CFG.focusDimAlpha;
   };
   const edgeDim = e => {
     if (hasSearch) {
       return (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
+    }
+    if (topicFilter) {
+      return (topicMatches(e.a) && topicMatches(e.b)) ? 1 : CFG.searchDimAlpha;
     }
     if (!hasPath) return 1;
     return (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id)) ? 1 : CFG.focusDimAlpha;
@@ -3464,9 +3471,32 @@ function toggle() {
     console.log('[topics] top words:', top);
     renderLegend(top);
   } else {
+    state.topicFilter = null; // при выключении режима убираем и фильтр
     if (_legendEl) _legendEl.classList.remove('show');
   }
   updateBtn();
+}
+
+/** Устанавливает/снимает topic-фильтр. Null — показать все. */
+function setTopicFilter(word) {
+  if (state.topicFilter === word) {
+    state.topicFilter = null;
+  } else {
+    state.topicFilter = word;
+  }
+  // Обновить active-класс на элементах легенды
+  if (_legendEl) {
+    _legendEl.querySelectorAll('.topics-legend-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.word === state.topicFilter);
+    });
+  }
+}
+
+function clearTopicFilter() {
+  state.topicFilter = null;
+  if (_legendEl) {
+    _legendEl.querySelectorAll('.topics-legend-item.active').forEach(el => el.classList.remove('active'));
+  }
 }
 
 function ensureLegend() {
@@ -3485,12 +3515,17 @@ function ensureLegend() {
       border: 1px solid var(--border, rgba(123,170,240,0.25));
       border-radius: 4px; padding: 8px 12px;
       font-size: 11px; letter-spacing: 0.04em; max-width: 260px;
-      pointer-events: none;
     }
     .topics-legend.show { display: block; }
     .topics-legend-title { color: var(--muted, #6a7c95); font-size: 9px;
       letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
-    .topics-legend-item { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+    .topics-legend-hint { color: var(--muted, #6a7c95); font-size: 9px;
+      margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border, rgba(123,170,240,0.15)); font-style: italic; }
+    .topics-legend-item { display: flex; align-items: center; gap: 7px; margin: 2px -4px;
+      padding: 3px 6px; border-radius: 3px; cursor: pointer; transition: background .12s, border-color .12s;
+      border: 1px solid transparent; }
+    .topics-legend-item:hover { background: rgba(123,170,240,0.08); }
+    .topics-legend-item.active { background: rgba(80,212,181,0.14); border-color: rgba(80,212,181,0.6); }
     .topics-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .topics-legend-word { color: var(--text, #cfe6ff); font-family: ui-monospace, monospace; }
     .topics-legend-count { color: var(--muted, #6a7c95); margin-left: auto; font-variant-numeric: tabular-nums; }
@@ -3505,12 +3540,16 @@ function renderLegend(topPairs) {
   const items = _legendEl.querySelector('.topics-legend-items');
   if (!items) return;
   items.innerHTML = '';
+  // Удалить старую hint-строку, если была
+  _legendEl.querySelectorAll('.topics-legend-hint').forEach(el => el.remove());
   if (!topPairs || !topPairs.length) {
     items.innerHTML = '<div style="color:var(--muted);font-size:10px;">(не нашёл повторяющихся слов — слишком короткий диалог)</div>';
   } else {
     for (const [word, count] of topPairs) {
       const row = document.createElement('div');
       row.className = 'topics-legend-item';
+      row.dataset.word = word;
+      row.title = 'Клик — оставить только эту тему (повтор снимет)';
       const swatch = document.createElement('span');
       swatch.className = 'topics-legend-swatch';
       const hue = hashHueLocal(word);
@@ -3523,8 +3562,14 @@ function renderLegend(topPairs) {
       c.className = 'topics-legend-count';
       c.textContent = '×' + count;
       row.appendChild(swatch); row.appendChild(w); row.appendChild(c);
+      row.addEventListener('click', () => setTopicFilter(word));
+      if (state.topicFilter === word) row.classList.add('active');
       items.appendChild(row);
     }
+    const hint = document.createElement('div');
+    hint.className = 'topics-legend-hint';
+    hint.textContent = 'Клик на тему — отфильтровать граф. Esc — снять.';
+    _legendEl.appendChild(hint);
   }
   _legendEl.classList.add('show');
 }
@@ -3546,7 +3591,7 @@ function updateBtn() {
   _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
 }
 
-    return { initTopicsToggle, toggleTopics };
+    return { initTopicsToggle, toggleTopics, setTopicFilter, clearTopicFilter };
   })();
 
   // --- src/ui/keyboard.js ---
@@ -3561,7 +3606,7 @@ function updateBtn() {
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
     const { toggleTheme } = __M["src/ui/theme-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
-    const { toggleTopics } = __M["src/ui/topics-toggle.js"];
+    const { toggleTopics, clearTopicFilter } = __M["src/ui/topics-toggle.js"];
 
 let _kbdGetViewport = () => ({
   width: window.innerWidth,
@@ -3601,7 +3646,9 @@ function onKey(ev) {
     ev.preventDefault();
     resetView();
   } else if (ev.key === 'Escape') {
-    if (state.selected || state.cameraTarget) {
+    let handled = false;
+    if (state.topicFilter) { clearTopicFilter(); handled = true; }
+    if (!handled && (state.selected || state.cameraTarget)) {
       state.selected = null;
       state.cameraTarget = null;
       hideDetail();

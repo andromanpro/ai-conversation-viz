@@ -8,7 +8,7 @@ import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
 import { toggleTheme } from './theme-toggle.js';
 import { toggleSettings } from './settings-modal.js';
-import { toggleTopics } from './topics-toggle.js';
+import { toggleTopics, clearTopicFilter } from './topics-toggle.js';
 
 let _kbdGetViewport = () => ({
   width: window.innerWidth,
@@ -48,7 +48,9 @@ function onKey(ev) {
     ev.preventDefault();
     resetView();
   } else if (ev.key === 'Escape') {
-    if (state.selected || state.cameraTarget) {
+    let handled = false;
+    if (state.topicFilter) { clearTopicFilter(); handled = true; }
+    if (!handled && (state.selected || state.cameraTarget)) {
       state.selected = null;
       state.cameraTarget = null;
       hideDetail();
