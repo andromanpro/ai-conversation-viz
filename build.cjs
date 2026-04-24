@@ -35,6 +35,7 @@ const OUT = path.join(ROOT, 'dist', 'ai-conversation-viz.js');
 const MODULES = [
   'src/core/config.js',
   'src/core/sample.js',
+  'src/core/samples-embedded.js',
   'src/core/parser.js',
   'src/core/adapters.js',
   'src/core/graph.js',
@@ -219,7 +220,29 @@ function topologicalOrder(modules, depsOf) {
   return order;
 }
 
+// Pre-step: генерируем src/core/samples-embedded.js из samples/*.jsonl.
+// Эмбед делает демо-сэмплы доступными через import (без runtime fetch),
+// что работает и в standalone.html на file://, и в npm-пакете.
+function generateSamplesEmbedded() {
+  const samplesDir = path.join(ROOT, 'samples');
+  if (!fs.existsSync(samplesDir)) return;
+  const files = fs.readdirSync(samplesDir).filter(f => f.endsWith('.jsonl'));
+  const parts = [
+    '// Auto-generated from samples/*.jsonl by build.cjs — do not edit.\n',
+    '// Embeds sample JSONL content so the app works offline (file://) and in\n',
+    '// the npm package without runtime fetch.\n\n',
+  ];
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(samplesDir, f), 'utf8');
+    const id = f.replace(/\.jsonl$/, '').replace(/[^\w]/g, '_').toUpperCase();
+    parts.push('export const ' + id + '_JSONL = ' + JSON.stringify(text) + ';\n\n');
+  }
+  const out = path.join(ROOT, 'src', 'core', 'samples-embedded.js');
+  fs.writeFileSync(out, parts.join(''));
+}
+
 function build() {
+  generateSamplesEmbedded();
   // Шаг 1. Прочитать все модули.
   const parsedByPath = new Map();
   for (const modulePath of MODULES) {

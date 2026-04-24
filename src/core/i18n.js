@@ -41,6 +41,8 @@ const DICT = {
 
     // Primary buttons
     'btn.sample': 'Load sample',
+    'btn.demo_orchestration': '🤖 Multi-agent demo',
+    'tip.demo_orchestration': 'Load multi-agent orchestration sample (security audit across 4 microservices)',
     'btn.file': 'Open JSONL…',
     'btn.reset': 'Reset view',
     'btn.share': '🔗 Share',
@@ -219,6 +221,8 @@ const DICT = {
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Загрузить пример',
+    'btn.demo_orchestration': '🤖 Multi-agent',
+    'tip.demo_orchestration': 'Загрузить пример оркестрации — security-audit 4 микросервисов через параллельные subagent-ы',
     'btn.file': 'Открыть JSONL…',
     'btn.reset': 'Сбросить вид',
     'btn.share': '🔗 Поделиться',

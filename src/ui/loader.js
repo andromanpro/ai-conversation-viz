@@ -4,6 +4,7 @@ import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
 import { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
+import { MULTI_AGENT_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
 import { hideTooltip } from './tooltip.js';
@@ -34,6 +35,13 @@ export function initLoader(getViewportFn, onReady) {
     clearSessionForHandoff(); // юзер явно выбрал sample — не сохраняем его как «последнюю сессию»
     loadText(SAMPLE_JSONL);
   });
+  const btnDemoOrch = document.getElementById('btn-demo-orchestration');
+  if (btnDemoOrch) {
+    btnDemoOrch.addEventListener('click', () => {
+      clearSessionForHandoff();
+      loadText(MULTI_AGENT_ORCHESTRATION_JSONL);
+    });
+  }
   document.getElementById('btn-reset').addEventListener('click', resetView);
 
   initDragDrop();
