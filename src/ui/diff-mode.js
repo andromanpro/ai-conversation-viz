@@ -235,12 +235,15 @@ function refitCamera() {
 
 function updateBtn() {
   if (!_diffBtn) return;
+  _diffBtn.textContent = '🔀';
   if (state.diffMode && state.diffStats) {
     const s = state.diffStats;
-    _diffBtn.textContent = `🔀 Diff A:${s.onlyA}/B:${s.onlyB}/= ${s.both}`;
+    _diffBtn.title = `Diff активен — A:${s.onlyA} / B:${s.onlyB} / общих:${s.both}. Клик — выключить.`;
+    _diffBtn.dataset.badge = String(s.onlyB); // бейдж с кол-вом уникальных в B
     _diffBtn.classList.add('active-diff');
   } else {
-    _diffBtn.textContent = '🔀 Diff';
+    _diffBtn.title = 'Сравнить с другой сессией (Diff)';
+    delete _diffBtn.dataset.badge;
     _diffBtn.classList.remove('active-diff');
   }
 }

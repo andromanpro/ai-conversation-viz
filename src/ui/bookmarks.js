@@ -29,11 +29,12 @@ function toggle() {
 export function updateBadge() {
   if (!_btn) return;
   const starred = listStarred();
-  if (starred.length) {
-    _btn.textContent = `⭐ Bookmarks (${starred.length})`;
-  } else {
-    _btn.textContent = '⭐ Bookmarks';
-  }
+  _btn.textContent = '⭐';
+  _btn.title = starred.length
+    ? `Bookmarks: ${starred.length} закладок. Клик — открыть список.`
+    : 'Bookmarks (B). Выдели ноду и нажми S чтобы отметить.';
+  if (starred.length) _btn.dataset.badge = String(starred.length);
+  else delete _btn.dataset.badge;
 }
 
 function ensurePanel() {

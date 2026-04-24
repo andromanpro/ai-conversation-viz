@@ -19,6 +19,9 @@ function toggle() {
 
 function update() {
   if (!_orphBtn) return;
-  _orphBtn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
+  _orphBtn.textContent = '🔗';
+  _orphBtn.title = state.connectOrphans
+    ? 'Disconnect orphans (O) — сейчас связаны'
+    : 'Connect orphans (O) — сейчас разрознены';
   _orphBtn.classList.toggle('active-orphans', state.connectOrphans);
 }

@@ -4436,7 +4436,8 @@ function toggle() {
 function updateFreezeBtn() {
   if (!_frzBtn) return;
   const frozen = state.sim && state.sim.manualFrozen;
-  _frzBtn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
+  _frzBtn.textContent = frozen ? '▶' : '❄';
+  _frzBtn.title = frozen ? 'Unfreeze physics (F)' : 'Freeze physics (F)';
   _frzBtn.classList.toggle('active-freeze', !!frozen);
 }
 
@@ -4500,7 +4501,10 @@ function toggle() {
 
 function update() {
   if (!_orphBtn) return;
-  _orphBtn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
+  _orphBtn.textContent = '🔗';
+  _orphBtn.title = state.connectOrphans
+    ? 'Disconnect orphans (O) — сейчас связаны'
+    : 'Connect orphans (O) — сейчас разрознены';
   _orphBtn.classList.toggle('active-orphans', state.connectOrphans);
 }
 
@@ -4809,7 +4813,10 @@ function hashHueLocal(s) {
 
 function updateBtn() {
   if (!_topicBtn) return;
-  _topicBtn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
+  _topicBtn.textContent = '🧬';
+  _topicBtn.title = state.topicsMode
+    ? 'Topics on — кластеризация по темам активна'
+    : 'Topics — кластеризация нод по TF-IDF темам';
   _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
 }
 
@@ -4849,11 +4856,12 @@ function toggle() {
 function updateBadge() {
   if (!_btn) return;
   const starred = listStarred();
-  if (starred.length) {
-    _btn.textContent = `⭐ Bookmarks (${starred.length})`;
-  } else {
-    _btn.textContent = '⭐ Bookmarks';
-  }
+  _btn.textContent = '⭐';
+  _btn.title = starred.length
+    ? `Bookmarks: ${starred.length} закладок. Клик — открыть список.`
+    : 'Bookmarks (B). Выдели ноду и нажми S чтобы отметить.';
+  if (starred.length) _btn.dataset.badge = String(starred.length);
+  else delete _btn.dataset.badge;
 }
 
 function ensurePanel() {
@@ -6030,12 +6038,15 @@ function refitCamera() {
 
 function updateBtn() {
   if (!_diffBtn) return;
+  _diffBtn.textContent = '🔀';
   if (state.diffMode && state.diffStats) {
     const s = state.diffStats;
-    _diffBtn.textContent = `🔀 Diff A:${s.onlyA}/B:${s.onlyB}/= ${s.both}`;
+    _diffBtn.title = `Diff активен — A:${s.onlyA} / B:${s.onlyB} / общих:${s.both}. Клик — выключить.`;
+    _diffBtn.dataset.badge = String(s.onlyB); // бейдж с кол-вом уникальных в B
     _diffBtn.classList.add('active-diff');
   } else {
-    _diffBtn.textContent = '🔀 Diff';
+    _diffBtn.title = 'Сравнить с другой сессией (Diff)';
+    delete _diffBtn.dataset.badge;
     _diffBtn.classList.remove('active-diff');
   }
 }
@@ -6274,7 +6285,10 @@ function render() {
 function updateBadge() {
   if (!_toggleBtn) return;
   const n = state.sessions.length;
-  _toggleBtn.textContent = n ? `📚 Sessions (${n})` : '📚 Sessions';
+  _toggleBtn.textContent = '📚';
+  _toggleBtn.title = n ? `Sessions: ${n} загружено` : 'Sessions — дропни несколько JSONL';
+  if (n > 0) _toggleBtn.dataset.badge = String(n);
+  else delete _toggleBtn.dataset.badge;
 }
 
 function formatBytes(b) {
@@ -6375,10 +6389,12 @@ function setBackend(backend, opts) {
 function updateBtn() {
   if (!_btn) return;
   if (state.renderBackend === 'webgl') {
-    _btn.textContent = '🎨 WebGL';
+    _btn.textContent = '🎨';
+    _btn.title = 'WebGL рендерер — клик чтобы переключиться на Canvas 2D';
     _btn.classList.add('active-render');
   } else {
-    _btn.textContent = '🖼 Canvas 2D';
+    _btn.textContent = '🖼';
+    _btn.title = 'Canvas 2D рендерер — клик чтобы переключиться на WebGL';
     _btn.classList.remove('active-render');
   }
 }

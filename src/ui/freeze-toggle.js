@@ -22,6 +22,7 @@ function toggle() {
 export function updateFreezeBtn() {
   if (!_frzBtn) return;
   const frozen = state.sim && state.sim.manualFrozen;
-  _frzBtn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
+  _frzBtn.textContent = frozen ? '▶' : '❄';
+  _frzBtn.title = frozen ? 'Unfreeze physics (F)' : 'Freeze physics (F)';
   _frzBtn.classList.toggle('active-freeze', !!frozen);
 }

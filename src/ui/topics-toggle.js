@@ -136,6 +136,9 @@ function hashHueLocal(s) {
 
 function updateBtn() {
   if (!_topicBtn) return;
-  _topicBtn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
+  _topicBtn.textContent = '🧬';
+  _topicBtn.title = state.topicsMode
+    ? 'Topics on — кластеризация по темам активна'
+    : 'Topics — кластеризация нод по TF-IDF темам';
   _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
 }

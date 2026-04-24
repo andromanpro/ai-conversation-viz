@@ -76,10 +76,12 @@ function setBackend(backend, opts) {
 function updateBtn() {
   if (!_btn) return;
   if (state.renderBackend === 'webgl') {
-    _btn.textContent = '🎨 WebGL';
+    _btn.textContent = '🎨';
+    _btn.title = 'WebGL рендерер — клик чтобы переключиться на Canvas 2D';
     _btn.classList.add('active-render');
   } else {
-    _btn.textContent = '🖼 Canvas 2D';
+    _btn.textContent = '🖼';
+    _btn.title = 'Canvas 2D рендерер — клик чтобы переключиться на WebGL';
     _btn.classList.remove('active-render');
   }
 }

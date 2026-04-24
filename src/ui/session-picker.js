@@ -210,7 +210,10 @@ function render() {
 function updateBadge() {
   if (!_toggleBtn) return;
   const n = state.sessions.length;
-  _toggleBtn.textContent = n ? `📚 Sessions (${n})` : '📚 Sessions';
+  _toggleBtn.textContent = '📚';
+  _toggleBtn.title = n ? `Sessions: ${n} загружено` : 'Sessions — дропни несколько JSONL';
+  if (n > 0) _toggleBtn.dataset.badge = String(n);
+  else delete _toggleBtn.dataset.badge;
 }
 
 function formatBytes(b) {
