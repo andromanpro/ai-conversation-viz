@@ -94,11 +94,15 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 
-scene.add(new THREE.AmbientLight(0x3a4a7a, 0.6));
-const keyLight = new THREE.PointLight(0x7baaf0, 1.8, 4000);
+// Освещение: ambient → hemi → key + rim. Hemi даёт мягкую градацию сверху-снизу
+// (синий небесный / тёплый пол), что добавляет объём без резких бликов.
+scene.add(new THREE.AmbientLight(0x4a5a8a, 0.5));
+const hemiLight = new THREE.HemisphereLight(0x9ab8ff, 0x2a1a10, 0.55);
+scene.add(hemiLight);
+const keyLight = new THREE.PointLight(0x9ac0ff, 2.2, 5000);
 keyLight.position.set(600, 600, 1000);
 scene.add(keyLight);
-const rimLight = new THREE.PointLight(0x50d4b5, 1.0, 3000);
+const rimLight = new THREE.PointLight(0x50d4b5, 1.2, 3500);
 rimLight.position.set(-600, -400, 500);
 scene.add(rimLight);
 
@@ -121,18 +125,40 @@ const edgesGroup = new THREE.Group();
 scene.add(nodesGroup);
 scene.add(edgesGroup);
 
+// Глобальный LineSegments для всех рёбер — один draw call, обновляемый
+// каждый кадр из текущих позиций нод. Гарантирует что рёбра не «отрываются»
+// от нод при физическом движении.
+let edgesMesh = null;
+let edgesPositions = null; // Float32Array
+let edgesColors = null;    // Float32Array
+let edgesVisibility = null; // per-segment alpha (мультипликативный)
+
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
 // ---- Geometry pools (reuse) ----
 const sphereGeoLarge = new THREE.SphereGeometry(1, 20, 20);
-const hubRingGeo = new THREE.TorusGeometry(1.5, 0.09, 8, 32);
+// Более тонкий halo — большая прозрачная sphere с additive blending
+const sphereGeoHalo = new THREE.SphereGeometry(1, 16, 16);
+const hubRingGeoA = new THREE.TorusGeometry(1.5, 0.08, 8, 40);
+const hubRingGeoB = new THREE.TorusGeometry(1.5, 0.08, 8, 40);
 const orphanRingGeo = new THREE.TorusGeometry(2.0, 0.06, 6, 28);
+
+// Сегментов на curve ребра — делим ребро на N чтобы получить плавную дугу
+const EDGE_SEGMENTS = 10;
+// Кэш промежуточных Vector3 для расчёта curve (не аллоцировать в tick)
+const _tmpA = new THREE.Vector3();
+const _tmpB = new THREE.Vector3();
+const _tmpM = new THREE.Vector3();
 
 // ---- Build scene from state ----
 function clearGroups() {
   while (nodesGroup.children.length) {
     const m = nodesGroup.children.pop();
+    // Halo/hub-group: рекурсивно освобождаем material
+    m.traverse?.((child) => {
+      if (child.material && child.material !== m.material) child.material.dispose();
+    });
     if (m.material) m.material.dispose();
   }
   while (edgesGroup.children.length) {
@@ -140,26 +166,32 @@ function clearGroups() {
     if (m.geometry) m.geometry.dispose();
     if (m.material) m.material.dispose();
   }
+  edgesMesh = null;
+  edgesPositions = null;
+  edgesColors = null;
 }
 
 function buildFromState() {
   clearGroups();
   if (!state.nodes.length) return;
 
-  // Присваиваем z по глубине parent-tree
+  // Присваиваем z по глубине parent-tree + seed-jitter чтобы ноды на одном
+  // уровне не попадали в одну плоскость (тогда граф плоский и не «3D»-шный).
   const depths = computeDepths(state.nodes, state.byId);
   const ringZ = 140;
   for (const n of state.nodes) {
-    n.z = (depths.get(n.id) || 0) * ringZ;
+    const d = depths.get(n.id) || 0;
+    const jitter = ((n._seedDx || 0) - 0.5) * 100 + ((n._seedDy || 0) - 0.5) * 80;
+    n.z = d * ringZ + jitter;
   }
 
-  // Nodes — sphere per node (+ hub ring / orphan ring при необходимости)
+  // Nodes — sphere + halo + (hub/orphan rings)
   for (const n of state.nodes) {
     const { color, emissive } = colorForNode(n);
     const mat = new THREE.MeshStandardMaterial({
       color, emissive,
-      emissiveIntensity: 0.55,
-      metalness: 0.25, roughness: 0.4,
+      emissiveIntensity: 0.65,
+      metalness: 0.2, roughness: 0.35,
       transparent: true, opacity: 1,
     });
     const mesh = new THREE.Mesh(sphereGeoLarge, mat);
@@ -170,21 +202,39 @@ function buildFromState() {
     nodesGroup.add(mesh);
     n._mesh = mesh;
 
-    // Hub ring — золотое торическое кольцо вокруг hub-нод
+    // Halo — большая полупрозрачная sphere с additive blending: даёт
+    // «свечение» вокруг каждой ноды (имитация bloom без post-processing)
+    const haloMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.12,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const halo = new THREE.Mesh(sphereGeoHalo, haloMat);
+    halo.position.copy(mesh.position);
+    halo.scale.set(baseR * 2.4, baseR * 2.4, baseR * 2.4);
+    halo.userData.haloOwner = n;
+    nodesGroup.add(halo);
+    n._halo = halo;
+
+    // Hub ring — два скрещенных торических кольца («атомная модель»)
     if (n.isHub) {
+      const hubGroup = new THREE.Group();
       const hubMat = new THREE.MeshBasicMaterial({
-        color: 0xffd778, transparent: true, opacity: 0.8,
+        color: 0xffd778, transparent: true, opacity: 0.75,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       });
-      const hubRing = new THREE.Mesh(hubRingGeo, hubMat);
-      hubRing.position.copy(mesh.position);
-      hubRing.scale.set(baseR, baseR, baseR);
-      hubRing.userData.hubOwner = n;
-      nodesGroup.add(hubRing);
-      n._hubRing = hubRing;
+      const ringA = new THREE.Mesh(hubRingGeoA, hubMat);
+      const ringB = new THREE.Mesh(hubRingGeoB, hubMat);
+      ringB.rotation.x = Math.PI / 2; // перпендикулярное кольцо
+      hubGroup.add(ringA);
+      hubGroup.add(ringB);
+      hubGroup.position.copy(mesh.position);
+      hubGroup.scale.set(baseR, baseR, baseR);
+      hubGroup.userData.hubOwner = n;
+      nodesGroup.add(hubGroup);
+      n._hubRing = hubGroup;
     }
 
-    // Orphan marker — оранжевое «сигнальное» кольцо
+    // Orphan marker — оранжевое кольцо
     if (n._isOrphanRoot) {
       const orphMat = new THREE.MeshBasicMaterial({
         color: 0xeca040, transparent: true, opacity: 0.7,
@@ -199,44 +249,126 @@ function buildFromState() {
     }
   }
 
-  // Edges — tubes
-  for (const e of state.edges) {
-    if (!e.a || !e.b) continue;
-    const a = e.a, b = e.b;
-    const az = a.z || 0, bz = b.z || 0;
-    const mid = new THREE.Vector3(
-      (a.x + b.x) / 2 + (a._seedDx || 0) * 40,
-      -((a.y + b.y) / 2) + (a._seedDy || 0) * 40,
-      (az + bz) / 2 + 40
-    );
-    const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(a.x, -a.y, az),
-      mid,
-      new THREE.Vector3(b.x, -b.y, bz),
-    ]);
-    const tubeGeo = new THREE.TubeGeometry(curve, 36, e.adopted ? 0.4 : 0.7, 6, false);
-    const color = e.adopted ? 0xc8b478 : (e.b.role === 'tool_use' ? 0xeca040 : 0x00d4ff);
-    const tubeMat = new THREE.MeshBasicMaterial({
-      color, transparent: true,
-      opacity: e.adopted ? 0.25 : 0.55,
-      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-    });
-    const tube = new THREE.Mesh(tubeGeo, tubeMat);
-    tube.userData.edge = e;
-    edgesGroup.add(tube);
-    e._mesh = tube;
-  }
+  // Edges — единый LineSegments с curved-сегментами, обновляемыми каждый кадр.
+  // Для каждого ребра выделяем EDGE_SEGMENTS сегментов (EDGE_SEGMENTS*2 точек).
+  const segCount = state.edges.length * EDGE_SEGMENTS;
+  edgesPositions = new Float32Array(segCount * 2 * 3);
+  edgesColors = new Float32Array(segCount * 2 * 3);
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(edgesPositions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(edgesColors, 3));
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  edgesMesh = new THREE.LineSegments(geom, mat);
+  edgesMesh.frustumCulled = false;
+  edgesGroup.add(edgesMesh);
 
-  // Fit camera
+  // Инициализируем buffer первым кадром
+  updateEdgeBuffer();
+
+  // Fit camera — ближе чем раньше, без большого offset
   let maxD = 0;
   for (const n of state.nodes) {
     const d = Math.hypot(n.x, n.y, n.z || 0);
     if (d > maxD) maxD = d;
   }
-  camera.position.set(0, -maxD * 0.3, maxD * 1.6 + 400);
+  camera.position.set(0, -maxD * 0.25, maxD * 1.25 + 250);
   controls.target.set(0, 0, 0);
   controls.update();
   updateStats();
+}
+
+// Цвет ребра: учитываем diff-режим (edge.diffSide), tool_use, adopted, role
+const _edgeColor = new THREE.Color();
+function edgeColorHex(e) {
+  if (state.diffMode && e.diffSide === 'B') return 0x5ad2ff;
+  if (e.adopted) return 0xc8b478;
+  if (e.b && e.b.role === 'tool_use') return 0xeca040;
+  return 0x00d4ff;
+}
+
+/**
+ * Перестраивает positions/colors буфер для LineSegments из текущих
+ * координат нод. Вызывается каждый кадр — N=edges.length * EDGE_SEGMENTS
+ * сегментов, для 2000 нод ≈ 20k сегментов, что уверенно тянет 60 fps.
+ */
+function updateEdgeBuffer() {
+  if (!edgesMesh || !edgesPositions) return;
+  const pos = edgesPositions;
+  const col = edgesColors;
+  let pIdx = 0, cIdx = 0;
+  for (const e of state.edges) {
+    if (!e.a || !e.b) { skipEdge(pos, col, pIdx, cIdx); pIdx += EDGE_SEGMENTS * 6; cIdx += EDGE_SEGMENTS * 6; continue; }
+    const a = e.a, b = e.b;
+    const invisible = (a.bornAt == null || b.bornAt == null)
+      || (state.hiddenRoles && (state.hiddenRoles.has(a.role) || state.hiddenRoles.has(b.role)))
+      || (e.adopted && !state.connectOrphans);
+    if (invisible) {
+      // скрываем сегменты — ставим все точки в одну (невидимо)
+      for (let s = 0; s < EDGE_SEGMENTS; s++) {
+        pos[pIdx++] = 0; pos[pIdx++] = 0; pos[pIdx++] = 0;
+        pos[pIdx++] = 0; pos[pIdx++] = 0; pos[pIdx++] = 0;
+        col[cIdx++] = 0; col[cIdx++] = 0; col[cIdx++] = 0;
+        col[cIdx++] = 0; col[cIdx++] = 0; col[cIdx++] = 0;
+      }
+      continue;
+    }
+    const az = a.z || 0, bz = b.z || 0;
+    // Control point — немного вверх по z + лёгкий jitter для органики
+    const mx = (a.x + b.x) / 2 + ((a._seedDx || 0.5) - 0.5) * 30;
+    const my = -((a.y + b.y) / 2) + ((a._seedDy || 0.5) - 0.5) * 30;
+    const mz = (az + bz) / 2 + 35;
+    _tmpA.set(a.x, -a.y, az);
+    _tmpB.set(b.x, -b.y, bz);
+    _tmpM.set(mx, my, mz);
+
+    const hex = edgeColorHex(e);
+    _edgeColor.setHex(hex);
+    const r = _edgeColor.r, g = _edgeColor.g, bl = _edgeColor.b;
+    const alpha = e.adopted ? 0.4 : 0.85;
+    // Рисуем EDGE_SEGMENTS последовательных отрезков вдоль quadratic Bezier
+    for (let s = 0; s < EDGE_SEGMENTS; s++) {
+      const t0 = s / EDGE_SEGMENTS;
+      const t1 = (s + 1) / EDGE_SEGMENTS;
+      bezierPoint3(_tmpA, _tmpM, _tmpB, t0, _p0);
+      bezierPoint3(_tmpA, _tmpM, _tmpB, t1, _p1);
+      pos[pIdx++] = _p0.x; pos[pIdx++] = _p0.y; pos[pIdx++] = _p0.z;
+      pos[pIdx++] = _p1.x; pos[pIdx++] = _p1.y; pos[pIdx++] = _p1.z;
+      // Градиент опасности — крайние сегменты тусклее, середина ярче
+      const fade = Math.min(1, 1 - Math.abs((s + 0.5) / EDGE_SEGMENTS - 0.5) * 0.6);
+      col[cIdx++] = r * alpha * fade;
+      col[cIdx++] = g * alpha * fade;
+      col[cIdx++] = bl * alpha * fade;
+      col[cIdx++] = r * alpha * fade;
+      col[cIdx++] = g * alpha * fade;
+      col[cIdx++] = bl * alpha * fade;
+    }
+  }
+  edgesMesh.geometry.attributes.position.needsUpdate = true;
+  edgesMesh.geometry.attributes.color.needsUpdate = true;
+}
+
+function skipEdge(pos, col, pIdx, cIdx) {
+  for (let s = 0; s < EDGE_SEGMENTS * 2; s++) {
+    pos[pIdx++] = 0; pos[pIdx++] = 0; pos[pIdx++] = 0;
+    col[cIdx++] = 0; col[cIdx++] = 0; col[cIdx++] = 0;
+  }
+}
+
+const _p0 = new THREE.Vector3();
+const _p1 = new THREE.Vector3();
+function bezierPoint3(a, m, b, t, out) {
+  const u = 1 - t;
+  out.x = u * u * a.x + 2 * u * t * m.x + t * t * b.x;
+  out.y = u * u * a.y + 2 * u * t * m.y + t * t * b.y;
+  out.z = u * u * a.z + 2 * u * t * m.z + t * t * b.z;
+  return out;
 }
 
 function updateStats() {
@@ -444,31 +576,42 @@ function tick() {
         : isMatch ? (1.2 + 0.4 * Math.sin(t * 3.5 + n.phase))
         : (0.4 + 0.25 * pulseMul);
     }
-    // Hub ring pulse
+    // Halo — пульсирующая «атмосфера» вокруг ноды
+    if (n._halo) {
+      n._halo.position.copy(mesh.position);
+      const haloR = baseR * (2.2 + 0.3 * Math.sin(t * 1.2 + n.phase));
+      n._halo.scale.set(haloR, haloR, haloR);
+      if (n._halo.material) {
+        const isMatch = hasSearch && state.searchMatches.has(n.id);
+        n._halo.material.opacity = isMatch ? 0.28 : (0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.6 + n.phase))) * dimMul;
+        if (topicsMode || diffMode) {
+          const { color } = colorForNode(n);
+          n._halo.material.color.setHex(color);
+        }
+      }
+    }
+    // Hub ring — два скрещенных кольца, вращающихся в разных осях
     if (n._hubRing) {
       n._hubRing.position.copy(mesh.position);
-      const hr = baseR * (1.8 + 0.3 * Math.sin(t * 1.4 + n.phase));
+      const hr = baseR * (1.9 + 0.2 * Math.sin(t * 1.4 + n.phase));
       n._hubRing.scale.set(hr, hr, hr);
       n._hubRing.rotation.y = t * 0.35;
-      if (n._hubRing.material) n._hubRing.material.opacity = 0.45 + 0.35 * pulseFor(n, t);
+      n._hubRing.rotation.x = Math.sin(t * 0.5) * 0.3;
+      n._hubRing.children.forEach((ch, i) => {
+        if (ch.material) ch.material.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(t * 1.6 + n.phase + i));
+      });
     }
     // Orphan ring
     if (n._orphRing) {
       n._orphRing.position.copy(mesh.position);
-      const or = baseR * 2.3;
+      const or = baseR * 2.4;
       n._orphRing.scale.set(or, or, or);
-      n._orphRing.rotation.x = t * 0.5;
-      n._orphRing.rotation.z = t * 0.3;
+      n._orphRing.rotation.x = t * 0.6;
+      n._orphRing.rotation.z = t * 0.35;
     }
   }
-  // Update edge visibility (пересборка геометрии слишком дорого — только вкл/выкл)
-  for (const e of state.edges) {
-    if (!e._mesh) continue;
-    const vis = e.a.bornAt != null && e.b.bornAt != null
-      && (!state.hiddenRoles || (!state.hiddenRoles.has(e.a.role) && !state.hiddenRoles.has(e.b.role)))
-      && (!e.adopted || state.connectOrphans);
-    e._mesh.visible = vis;
-  }
+  // Обновить positions/colors для LineSegments — ребра будут следовать за нодами
+  updateEdgeBuffer();
 
   tickStory(nowMs, state);
   tickStats();
