@@ -121,6 +121,17 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.stroke();
 }
 
+/**
+ * Для WebGL-режима: вычисляем cutoff и вызываем updateBirths.
+ * В Canvas 2D это происходит внутри draw(), но в WebGL мы не вызываем
+ * Canvas 2D draw — birth-логика должна работать независимо.
+ */
+export function updateBirthsForWebgl(state, tSec, viewport) {
+  const nowMs = tSec * 1000;
+  const cutoff = timelineCutoff(state);
+  updateBirths(state, cutoff, nowMs, null);
+}
+
 // Вспомогательная: 5-лучевая звезда для annotation star-marker
 function drawStar(ctx, cx, cy, outerR, innerR, points) {
   ctx.beginPath();

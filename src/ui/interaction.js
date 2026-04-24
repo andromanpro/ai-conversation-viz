@@ -15,13 +15,21 @@ let getViewportFn = () => ({ width: window.innerWidth, height: window.innerHeigh
 export function initInteraction(canvasEl, getViewport) {
   interactionCanvas = canvasEl;
   if (getViewport) getViewportFn = getViewport;
-  interactionCanvas.addEventListener('mousedown', onDown);
+  attachToCanvas(canvasEl);
+  // Также привязываемся к WebGL-канвасу, если он существует — события
+  // обрабатываются на видимом canvas, поэтому listener'ы на обоих не мешают.
+  const webglCanvas = document.getElementById('graph-webgl');
+  if (webglCanvas && webglCanvas !== canvasEl) attachToCanvas(webglCanvas);
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
-  interactionCanvas.addEventListener('wheel', onWheel, { passive: false });
-  interactionCanvas.addEventListener('mouseleave', () => { state.hover = null; state.pathSet = new Set(); hideTooltip(); });
-  interactionCanvas.addEventListener('dblclick', onDblClick);
   window.addEventListener('keydown', onKey);
+}
+
+function attachToCanvas(c) {
+  c.addEventListener('mousedown', onDown);
+  c.addEventListener('wheel', onWheel, { passive: false });
+  c.addEventListener('mouseleave', () => { state.hover = null; state.pathSet = new Set(); hideTooltip(); });
+  c.addEventListener('dblclick', onDblClick);
 }
 
 function onDblClick(ev) {

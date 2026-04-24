@@ -1,7 +1,7 @@
 import { state } from './view/state.js';
 import { CFG } from './core/config.js';
 import { stepPhysics, createSim } from './core/layout.js';
-import { draw } from './view/renderer.js';
+import { draw, updateBirthsForWebgl } from './view/renderer.js';
 import { generateStarfield, drawStarfield } from './view/starfield.js';
 import { ensureParticles, tickParticles, drawParticles } from './view/particles.js';
 import { initInteraction, isPanning, isDraggingNode } from './ui/interaction.js';
@@ -31,6 +31,8 @@ import { initDiffMode } from './ui/diff-mode.js';
 import { initSessionPicker, loadSessionIndex } from './ui/session-picker.js';
 import { initAnnotations } from './ui/annotations.js';
 import { initBookmarks } from './ui/bookmarks.js';
+import { initRenderToggle } from './ui/render-toggle.js';
+import { drawWebgl } from './view/renderer-webgl.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -87,6 +89,7 @@ initDiffMode(getViewport);
 initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
+initRenderToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -163,13 +166,20 @@ function frame(tms) {
   const allowHeartbeat = !isDraggingNode() && !isPanning();
 
   const perfMode = state.perfMode || 'normal';
-  draw(ctx, state, tSec, vp, {
-    allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
-    starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
-    particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf, perfMode),
-    onBirth: chirpFor,
-    perfMode,
-  });
+  if (state.renderBackend === 'webgl') {
+    // В WebGL мы сами вычисляем bornAt (birth-animation) через updateBirths,
+    // которая жила внутри draw(). Вынесем её в view/renderer.js как export.
+    updateBirthsForWebgl(state, tSec, vp);
+    drawWebgl(state, tSec, vp);
+  } else {
+    draw(ctx, state, tSec, vp, {
+      allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
+      starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
+      particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf, perfMode),
+      onBirth: chirpFor,
+      perfMode,
+    });
+  }
 
   // Story mode должен читать bornAt после того как draw()/updateBirths его обновил
   tickStory(tms, state);

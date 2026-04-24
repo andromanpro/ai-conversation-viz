@@ -28,6 +28,7 @@ export const state = {
   sessionsOpen: false, // панель session-picker открыта
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
+  renderBackend: 'canvas2d', // 'canvas2d' | 'webgl' — в WebGL-режиме draw() уходит в renderer-webgl.js
 };
 
 export function resetInteractionState() {

@@ -67,6 +67,7 @@
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
   .btn.active-diff { border-color: #5ad2ff; color: #5ad2ff; }
   .btn.active-sessions { border-color: #a5d8a1; color: #a5d8a1; }
+  .btn.active-render { border-color: #ff8ed4; color: #ff8ed4; }
   #sessions-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 320px; z-index: 40; background: var(--panel); border-left: 1px solid var(--border); box-shadow: -10px 0 30px rgba(0,0,0,0.35); transform: translateX(100%); transition: transform .22s ease; display: flex; flex-direction: column; }
   #sessions-panel.open { transform: translateX(0); }
   #sessions-panel .sessions-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); }
@@ -219,6 +220,7 @@
 </head>
 <body>
 <canvas id="graph"></canvas>
+<canvas id="graph-webgl" style="display:none;position:fixed;inset:0;"></canvas>
 
 <div class="hud" id="top-left">
   <div class="title">AI Conversation Viz</div>
@@ -239,6 +241,7 @@
     <button class="btn" id="btn-diff" title="Сравнить с другой сессией (diff)">🔀 Diff</button>
     <button class="btn" id="btn-sessions" title="Список загруженных сессий">📚 Sessions</button>
     <button class="btn" id="btn-bookmarks" title="Закладки (B). Отметить ноду — S">⭐ Bookmarks</button>
+    <button class="btn" id="btn-render" title="Переключить рендерер (Canvas 2D / WebGL для больших графов)">🖼 Canvas 2D</button>
     <button class="btn" id="btn-settings" title="Settings (,)">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
     <input type="file" id="diff-file-input" accept=".jsonl,.json,.txt">
