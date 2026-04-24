@@ -10,15 +10,15 @@ import { toggleTheme } from './theme-toggle.js';
 import { toggleSettings } from './settings-modal.js';
 import { toggleTopics } from './topics-toggle.js';
 
-let getViewport = () => ({
+let _kbdGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
 
-export function initKeyboard(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+export function initKeyboard(_kbdGetViewportFn) {
+  if (_kbdGetViewportFn) _kbdGetViewport = _kbdGetViewportFn;
   window.addEventListener('keydown', onKey);
   // Чтобы Space/Enter на наших кнопках не триггерил shortcut повторно — blur после click
   document.querySelectorAll('button').forEach(b => {
@@ -96,6 +96,6 @@ function stepTimeline(dir) {
 
 function resetView() {
   if (!state.nodes.length) return;
-  const cam = fitToView(state.nodes, getViewport());
+  const cam = fitToView(state.nodes, _kbdGetViewport());
   state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
 }

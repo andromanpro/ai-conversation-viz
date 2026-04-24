@@ -32,6 +32,8 @@ function centerRootsInViewport() {
 
 let sliderEl, labelEl, playBtn;
 let playing = false;
+// Зеркалим в state чтобы story-mode мог прочитать без циклического импорта
+function setPlaying(v) { playing = v; state.isPlaying = v; }
 let lastStepMs = 0;
 let sortedIds = [];
 let stepIndex = 0;
@@ -104,7 +106,7 @@ function startPlay() {
     // rebuild seen from DOM после manual drag
     rebuildSeen(state);
   }
-  playing = true;
+  setPlaying(true);
   lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
@@ -112,7 +114,7 @@ function startPlay() {
 }
 
 function stopPlay() {
-  playing = false;
+  setPlaying(false);
   updatePlayBtn();
 }
 

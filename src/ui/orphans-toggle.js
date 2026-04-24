@@ -1,11 +1,11 @@
 import { state } from '../view/state.js';
 import { reheat } from '../core/layout.js';
 
-let btn;
+let _orphBtn;
 
 export function initOrphansToggle() {
-  btn = document.getElementById('btn-orphans');
-  if (btn) btn.addEventListener('click', toggle);
+  _orphBtn = document.getElementById('btn-orphans');
+  if (_orphBtn) _orphBtn.addEventListener('click', toggle);
   update();
 }
 
@@ -18,7 +18,7 @@ function toggle() {
 }
 
 function update() {
-  if (!btn) return;
-  btn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
-  btn.classList.toggle('active-orphans', state.connectOrphans);
+  if (!_orphBtn) return;
+  _orphBtn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
+  _orphBtn.classList.toggle('active-orphans', state.connectOrphans);
 }

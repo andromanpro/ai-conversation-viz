@@ -16,6 +16,7 @@ import { toolIcon } from '../src/view/tool-icons.js';
 import { matchNodes } from '../src/ui/search.js';
 import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.js';
 import { parseUrlParams } from '../src/ui/share.js';
+import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -884,6 +885,89 @@ test('adapters: normalizeToClaudeJsonl passes through claude-jsonl unchanged', (
   const r = normalizeToClaudeJsonl(raw);
   eq(r.format, 'claude-jsonl');
   eq(r.text, raw);
+});
+
+// ==== DIFF MODE ====
+test('diff: fnv1a deterministic and collision-resistant for short strings', () => {
+  const h1 = fnv1a('hello');
+  const h2 = fnv1a('hello');
+  const h3 = fnv1a('hellp');
+  assert(h1 === h2, 'same input → same hash');
+  assert(h1 !== h3, 'different input → different hash');
+  assert(typeof h1 === 'number', 'returns number');
+});
+
+test('diff: hashNode same role+text → same hash', () => {
+  const n1 = { role: 'user', text: 'Привет, как дела?' };
+  const n2 = { role: 'user', text: 'Привет, как дела?' };
+  assert(hashNode(n1) === hashNode(n2));
+});
+
+test('diff: hashNode different role → different hash', () => {
+  const n1 = { role: 'user', text: 'hello' };
+  const n2 = { role: 'assistant', text: 'hello' };
+  assert(hashNode(n1) !== hashNode(n2));
+});
+
+test('diff: hashNode normalizes whitespace (trim + collapse)', () => {
+  const n1 = { role: 'user', text: 'hello   world' };
+  const n2 = { role: 'user', text: '  hello world  ' };
+  assert(hashNode(n1) === hashNode(n2));
+});
+
+test('diff: hashNode truncates at 300 chars — tail differences ignored', () => {
+  const base = 'a'.repeat(300);
+  const n1 = { role: 'user', text: base + 'BBB' };
+  const n2 = { role: 'user', text: base + 'ZZZ' };
+  assert(hashNode(n1) === hashNode(n2), '300-char suffix should not affect hash');
+});
+
+test('diff: mergeDiff marks A-only, B-only, both correctly', () => {
+  // State A: три ноды
+  const na1 = { id: 'a1', role: 'user', text: 'first', ts: 1, parentId: null, x: 0, y: 0 };
+  const na2 = { id: 'a2', role: 'assistant', text: 'second', ts: 2, parentId: 'a1', x: 0, y: 0 };
+  const na3 = { id: 'a3', role: 'user', text: 'third', ts: 3, parentId: 'a2', x: 0, y: 0 };
+  const state = {
+    nodes: [na1, na2, na3],
+    edges: [],
+    byId: new Map([[na1.id, na1], [na2.id, na2], [na3.id, na3]]),
+  };
+  // Raw B: ноды b-only (unique), and one matching A's second
+  const rawB = [
+    { id: 'b1', role: 'user', text: 'first', ts: 1, parentId: null }, // matches a1
+    { id: 'b2', role: 'assistant', text: 'second', ts: 2, parentId: 'b1' }, // matches a2
+    { id: 'bX', role: 'user', text: 'brand new', ts: 4, parentId: 'b2' }, // unique to B
+  ];
+  const vp = { width: 1024, height: 768, cx: 512, cy: 384 };
+  const stats = mergeDiff(state, rawB, vp);
+  eq(stats.both, 2, 'a1=b1, a2=b2 → both');
+  eq(stats.onlyB, 1, 'bX is B-only');
+  eq(stats.onlyA, 1, 'only a3 остаётся уникальной A');
+  assert(state.nodes.find(n => n.id === 'a1')._diffOrigin === 'both');
+  assert(state.nodes.find(n => n.id === 'a2')._diffOrigin === 'both');
+  assert(state.nodes.find(n => n.id === 'a3')._diffOrigin === 'A');
+  const bX = state.nodes.find(n => n.id === 'B:bX');
+  assert(bX, 'B:bX должен быть добавлен');
+  eq(bX._diffOrigin, 'B');
+});
+
+test('diff: mergeDiff edges for B-only ноды цепляются через matched parent', () => {
+  const na1 = { id: 'a1', role: 'user', text: 'hello', ts: 1, parentId: null, x: 0, y: 0 };
+  const state = {
+    nodes: [na1],
+    edges: [],
+    byId: new Map([[na1.id, na1]]),
+  };
+  const rawB = [
+    { id: 'b1', role: 'user', text: 'hello', ts: 1, parentId: null }, // matches a1
+    { id: 'bNew', role: 'assistant', text: 'новый ответ', ts: 2, parentId: 'b1' }, // unique, parent=b1→a1
+  ];
+  const vp = { width: 1024, height: 768, cx: 512, cy: 384 };
+  mergeDiff(state, rawB, vp);
+  // Должно быть одно ребро a1 → B:bNew
+  const edges = state.edges.filter(e => e.source === 'a1' && e.target === 'B:bNew');
+  eq(edges.length, 1);
+  eq(edges[0].diffSide, 'B');
 });
 
 // ==== SUMMARY ====

@@ -21,6 +21,8 @@ export const state = {
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
   topicsMode: false, // TF-IDF topic coloring
+  diffMode: false,     // сравнение двух сессий
+  diffStats: null,     // { onlyA, onlyB, both }
 };
 
 export function resetInteractionState() {

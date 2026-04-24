@@ -1,9 +1,9 @@
 "use strict";
-
 (function (window) {
+  const __M = Object.create(null);
 
-// --- src/core/config.js ---
-
+  // --- src/core/config.js ---
+  __M["src/core/config.js"] = (function () {
 const CFG = {
   maxMessages: 5000,
   excerptChars: 400,
@@ -108,6 +108,7 @@ const CFG = {
   zoomOnClickFactor: 1.8,
   useGradientFillBelow: 250,
 };
+
 const COLORS = {
   bg: '#0a0e1a',
   user: '#7BAAF0',
@@ -122,9 +123,11 @@ const COLORS = {
   star: 'rgba(200, 220, 255, ',
 };
 
+    return { CFG, COLORS };
+  })();
 
-// --- src/core/sample.js ---
-
+  // --- src/core/sample.js ---
+  __M["src/core/sample.js"] = (function () {
 // Развёрнутое демо — ~30 сообщений с разветвлениями, tool_use + tool_result,
 // thinking-блоками, ошибкой от тула, изображением. Имитирует реальный debug-диалог.
 
@@ -132,6 +135,7 @@ const T0 = Date.parse('2026-04-24T10:00:00.000Z');
 const step = (sec) => new Date(T0 + sec * 1000).toISOString();
 
 function entry(obj) { return JSON.stringify(obj); }
+
 const SAMPLE_JSONL = [
   // --- Служебные (должны быть отфильтрованы) ---
   entry({ type: 'queue-operation', operation: 'enqueue', timestamp: step(0) }),
@@ -293,9 +297,12 @@ const SAMPLE_JSONL = [
   entry({ type: 'queue-operation', operation: 'dequeue', timestamp: step(200) }),
 ].join('\n');
 
+    return { SAMPLE_JSONL };
+  })();
 
-// --- src/core/parser.js ---
-
+  // --- src/core/parser.js ---
+  __M["src/core/parser.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
 
 function extractToolResultText(content) {
   if (typeof content === 'string') return content;
@@ -348,6 +355,7 @@ function classifyContent(content) {
   }
   return { text: textParts.join('\n\n'), toolUses };
 }
+
 function extractText(message) {
   if (!message) return '';
   return classifyContent(message.content).text;
@@ -357,6 +365,7 @@ const SERVICE_TYPES = new Set([
   'queue-operation', 'last-prompt', 'progress', 'system',
   'attachment', 'custom-title', 'ai-title', 'summary',
 ]);
+
 function parseJSONL(text) {
   const lines = text.split(/\r?\n/);
   const nodes = [];
@@ -438,6 +447,7 @@ const TOOL_KEY_FIELD = {
   task: 'description', agent: 'description',
   skill: 'skill', scheduledwakeup: 'reason',
 };
+
 function summariseToolUse(tu) {
   const name = tu && tu.name ? String(tu.name) : 'tool';
   const key = name.toLowerCase().replace(/[^a-z]/g, '');
@@ -516,13 +526,16 @@ function parseLine(line, seedCounter) {
   return out;
 }
 
+    return { extractText, parseJSONL, summariseToolUse, parseLine };
+  })();
 
-// --- src/core/adapters.js ---
-
+  // --- src/core/adapters.js ---
+  __M["src/core/adapters.js"] = (function () {
 // Формат-адаптеры. На входе — сырой текст файла, на выходе
 // либо уже Claude JSONL (`type: user/assistant + parentUuid`),
 // либо пустая строка. loader.js использует detectFormat()
 // и вызывает соответствующий toClaudeJsonl().
+
 function detectFormat(text) {
   const trimmed = (text || '').trim();
   if (!trimmed) return 'unknown';
@@ -550,6 +563,7 @@ function detectFormat(text) {
   }
   return 'unknown';
 }
+
 function chatgptToClaudeJsonl(text) {
   let obj;
   try { obj = JSON.parse(text); } catch { return ''; }
@@ -586,6 +600,7 @@ function chatgptToClaudeJsonl(text) {
   }
   return out.join('\n');
 }
+
 function anthropicMessagesToClaudeJsonl(text) {
   let arr;
   try { arr = JSON.parse(text); } catch { return ''; }
@@ -618,6 +633,7 @@ function anthropicMessagesToClaudeJsonl(text) {
   }
   return out.join('\n');
 }
+
 function normalizeToClaudeJsonl(text) {
   const fmt = detectFormat(text);
   if (fmt === 'chatgpt-export') {
@@ -629,174 +645,12 @@ function normalizeToClaudeJsonl(text) {
   return { format: fmt, text };
 }
 
+    return { detectFormat, chatgptToClaudeJsonl, anthropicMessagesToClaudeJsonl, normalizeToClaudeJsonl };
+  })();
 
-// --- src/core/graph.js ---
-
-
-
-function computeRadius(n) {
-  const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
-  const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-  return n.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
-}
-
-function recomputeRecency(nodes) {
-  if (!nodes.length) return;
-  let tMin = Infinity, tMax = -Infinity;
-  for (const n of nodes) {
-    if (n.ts < tMin) tMin = n.ts;
-    if (n.ts > tMax) tMax = n.ts;
-  }
-  const dt = Math.max(1, tMax - tMin);
-  for (const n of nodes) {
-    n.recency = (n.ts - tMin) / dt;
-    n.r = computeRadius(n);
-  }
-}
-
-function computeDegreesAndHubs(nodes, edges) {
-  for (const n of nodes) n.degree = 0;
-  for (const e of edges) {
-    if (e.a) e.a.degree = (e.a.degree || 0) + 1;
-    if (e.b) e.b.degree = (e.b.degree || 0) + 1;
-  }
-  // p90 of degree
-  if (!nodes.length) return;
-  const degs = nodes.map(n => n.degree).sort((a, b) => a - b);
-  const p90 = degs[Math.floor(degs.length * 0.9)] || 0;
-  const hubThreshold = Math.max(3, p90);
-  for (const n of nodes) n.isHub = n.degree > hubThreshold;
-}
-
-function applySeedJitter(n) {
-  const s = seedJitter(n.id || ('n' + Math.random()));
-  n._seedDx = s.dx;
-  n._seedDy = s.dy;
-}
-
-/**
- * Добавляет raw-ноды (от parseLine) в уже существующий state.
- * Дедупит по id. Связи строятся по parentId, если он есть в byId.
- * Возвращает список РЕАЛЬНО добавленных нод.
- */
-function appendRawNodes(state, rawNodes, viewport) {
-  if (!rawNodes || !rawNodes.length) return [];
-  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
-  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
-  const added = [];
-  for (const src of rawNodes) {
-    if (state.byId.has(src.id)) continue;
-    const parent = src.parentId ? state.byId.get(src.parentId) : null;
-    const angle = Math.random() * Math.PI * 2;
-    const dist = CFG.springLen * (CFG.birthSpreadMin + Math.random() * (CFG.birthSpreadMax - CFG.birthSpreadMin));
-    const node = {
-      ...src,
-      x: parent ? parent.x + Math.cos(angle) * dist : cx + (Math.random() - 0.5) * 60,
-      y: parent ? parent.y + Math.sin(angle) * dist : cy + (Math.random() - 0.5) * 60,
-      vx: 0, vy: 0,
-      fxAcc: 0, fyAcc: 0,
-      r: CFG.minR,
-      recency: 1,
-      phase: Math.random() * Math.PI * 2,
-      degree: 0,
-      isHub: false,
-    };
-    applySeedJitter(node);
-    state.nodes.push(node);
-    state.byId.set(node.id, node);
-    if (parent) {
-      state.edges.push({ source: parent.id, target: node.id, a: parent, b: node });
-    }
-    added.push(node);
-  }
-  recomputeRecency(state.nodes);
-  computeDegreesAndHubs(state.nodes, state.edges);
-  return added;
-}
-function buildGraph(parsed, viewport) {
-  const { width, height } = viewport;
-  const cx = width / 2, cy = height / 2;
-  const n = parsed.nodes.length;
-
-  const nodes = parsed.nodes.map((src, i) => {
-    const angle = n ? (i / n) * Math.PI * 2 : 0;
-    const spread = 80 + Math.random() * 60;
-    const node = {
-      ...src,
-      x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
-      y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
-      vx: 0, vy: 0,
-      fxAcc: 0, fyAcc: 0,
-      r: CFG.minR,
-      recency: 0,
-      phase: Math.random() * Math.PI * 2,
-      degree: 0,
-      isHub: false,
-    };
-    applySeedJitter(node);
-    return node;
-  });
-
-  const byId = new Map(nodes.map(node => [node.id, node]));
-
-  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
-  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
-  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
-  // решает как их показывать: как отдельный forest (off, default) или
-  // пунктирно-связанными с основной цепью (on).
-  const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
-  for (let i = 0; i < sortedByTs.length; i++) {
-    const node = sortedByTs[i];
-    if (node.parentId && !byId.has(node.parentId)) {
-      node._isOrphanRoot = true;
-      const prev = i > 0 ? sortedByTs[i - 1] : null;
-      if (prev) node._adoptedParentId = prev.id;
-    }
-  }
-
-  const edges = [];
-  for (const node of nodes) {
-    if (node.parentId && byId.has(node.parentId)) {
-      edges.push({
-        source: node.parentId,
-        target: node.id,
-        a: byId.get(node.parentId),
-        b: node,
-        adopted: false,
-      });
-    } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
-      const parent = byId.get(node._adoptedParentId);
-      edges.push({
-        source: parent.id,
-        target: node.id,
-        a: parent,
-        b: node,
-        adopted: true,
-      });
-    }
-  }
-
-  if (nodes.length) {
-    let tMin = Infinity, tMax = -Infinity;
-    for (const node of nodes) {
-      if (node.ts < tMin) tMin = node.ts;
-      if (node.ts > tMax) tMax = node.ts;
-    }
-    const dt = Math.max(1, tMax - tMin);
-    for (const node of nodes) {
-      node.recency = (node.ts - tMin) / dt;
-      node.r = computeRadius(node);
-    }
-  }
-
-  computeDegreesAndHubs(nodes, edges);
-
-  return { nodes, edges, byId };
-}
-
-
-// --- src/core/quadtree.js ---
-
+  // --- src/core/quadtree.js ---
+  __M["src/core/quadtree.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
 
 function createQuad(x, y, s) {
   return { x, y, s, cx: 0, cy: 0, mass: 0, point: null, children: null };
@@ -841,6 +695,7 @@ function insert(q, n) {
   q.mass = newMass;
   insert(q.children[findQuadrantIndex(q, n.x, n.y)], n);
 }
+
 function buildQuadtree(nodes) {
   if (!nodes.length) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -908,12 +763,16 @@ function _accumulate(q, node, theta, k, cutoff2, acc) {
   for (const ch of q.children) _accumulate(ch, node, theta, k, cutoff2, acc);
 }
 
+    return { buildQuadtree, computeRepulsion };
+  })();
 
-// --- src/core/layout.js ---
-
-
+  // --- src/core/layout.js ---
+  __M["src/core/layout.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { buildQuadtree, computeRepulsion } = __M["src/core/quadtree.js"];
 
 // ---------- D3-style simulation state ----------
+
 function createSim(opts = {}) {
   return {
     alpha: 1,
@@ -925,6 +784,7 @@ function createSim(opts = {}) {
     manualFrozen: false,
   };
 }
+
 function reheat(sim, a) {
   if (!sim) return;
   const target = a != null ? a : CFG.reheatAlpha;
@@ -932,17 +792,20 @@ function reheat(sim, a) {
   sim.alphaTarget = target;
   sim.frozen = false;
 }
+
 function freeze(sim) {
   if (!sim) return;
   sim.manualFrozen = true;
   sim.frozen = true;
 }
+
 function unfreeze(sim) {
   if (!sim) return;
   sim.manualFrozen = false;
   sim.frozen = false;
   reheat(sim, CFG.reheatAlpha);
 }
+
 function isSettled(sim) {
   if (!sim) return true;
   return sim.alpha < sim.alphaMin && sim.alphaTarget === 0;
@@ -964,6 +827,7 @@ function seedJitter(id) {
 }
 
 // ---------- core step ----------
+
 function stepPhysics(nodes, edges, viewport, sim) {
   const _sim = sim || createSim();
 
@@ -1081,6 +945,7 @@ function stepPhysics(nodes, edges, viewport, sim) {
     n.y += n.vy;
   }
 }
+
 function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
   // Backward-compat: prewarm(nodes, edges, vp) или (nodes, edges, vp, sim) или (nodes, edges, vp, sim, iters)
   // Старый вызов: prewarm(nodes, edges, vp) — используется в 3d/main.js
@@ -1095,6 +960,7 @@ function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
 }
 
 // ---------- radial / bbox / fit (без изменений) ----------
+
 function computeRadialLayout(nodes, byId, viewport) {
   const positions = new Map();
   if (!nodes.length) return positions;
@@ -1156,6 +1022,7 @@ function computeRadialLayout(nodes, byId, viewport) {
   }
   return positions;
 }
+
 function easeInOutQuad(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
@@ -1209,6 +1076,7 @@ function computeSwimLanes(nodes, viewport) {
   }
   return positions;
 }
+
 function computeBBox(nodes) {
   if (!nodes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0, cx: 0, cy: 0 };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1221,6 +1089,7 @@ function computeBBox(nodes) {
   const w = maxX - minX, h = maxY - minY;
   return { minX, minY, maxX, maxY, w, h, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
 }
+
 function fitToView(nodes, viewport) {
   const bbox = computeBBox(nodes);
   const areaW = viewport.safeW != null ? viewport.safeW : viewport.width;
@@ -1238,9 +1107,180 @@ function fitToView(nodes, viewport) {
   };
 }
 
+    return { createSim, reheat, freeze, unfreeze, isSettled, seedJitter, stepPhysics, prewarm, computeRadialLayout, easeInOutQuad, computeSwimLanes, computeBBox, fitToView };
+  })();
 
-// --- src/view/state.js ---
+  // --- src/core/graph.js ---
+  __M["src/core/graph.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { seedJitter } = __M["src/core/layout.js"];
 
+function computeRadius(n) {
+  const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
+  const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
+  return n.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
+}
+
+function recomputeRecency(nodes) {
+  if (!nodes.length) return;
+  let tMin = Infinity, tMax = -Infinity;
+  for (const n of nodes) {
+    if (n.ts < tMin) tMin = n.ts;
+    if (n.ts > tMax) tMax = n.ts;
+  }
+  const dt = Math.max(1, tMax - tMin);
+  for (const n of nodes) {
+    n.recency = (n.ts - tMin) / dt;
+    n.r = computeRadius(n);
+  }
+}
+
+function computeDegreesAndHubs(nodes, edges) {
+  for (const n of nodes) n.degree = 0;
+  for (const e of edges) {
+    if (e.a) e.a.degree = (e.a.degree || 0) + 1;
+    if (e.b) e.b.degree = (e.b.degree || 0) + 1;
+  }
+  // p90 of degree
+  if (!nodes.length) return;
+  const degs = nodes.map(n => n.degree).sort((a, b) => a - b);
+  const p90 = degs[Math.floor(degs.length * 0.9)] || 0;
+  const hubThreshold = Math.max(3, p90);
+  for (const n of nodes) n.isHub = n.degree > hubThreshold;
+}
+
+function applySeedJitter(n) {
+  const s = seedJitter(n.id || ('n' + Math.random()));
+  n._seedDx = s.dx;
+  n._seedDy = s.dy;
+}
+
+/**
+ * Добавляет raw-ноды (от parseLine) в уже существующий state.
+ * Дедупит по id. Связи строятся по parentId, если он есть в byId.
+ * Возвращает список РЕАЛЬНО добавленных нод.
+ */
+function appendRawNodes(state, rawNodes, viewport) {
+  if (!rawNodes || !rawNodes.length) return [];
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+  const added = [];
+  for (const src of rawNodes) {
+    if (state.byId.has(src.id)) continue;
+    const parent = src.parentId ? state.byId.get(src.parentId) : null;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = CFG.springLen * (CFG.birthSpreadMin + Math.random() * (CFG.birthSpreadMax - CFG.birthSpreadMin));
+    const node = {
+      ...src,
+      x: parent ? parent.x + Math.cos(angle) * dist : cx + (Math.random() - 0.5) * 60,
+      y: parent ? parent.y + Math.sin(angle) * dist : cy + (Math.random() - 0.5) * 60,
+      vx: 0, vy: 0,
+      fxAcc: 0, fyAcc: 0,
+      r: CFG.minR,
+      recency: 1,
+      phase: Math.random() * Math.PI * 2,
+      degree: 0,
+      isHub: false,
+    };
+    applySeedJitter(node);
+    state.nodes.push(node);
+    state.byId.set(node.id, node);
+    if (parent) {
+      state.edges.push({ source: parent.id, target: node.id, a: parent, b: node });
+    }
+    added.push(node);
+  }
+  recomputeRecency(state.nodes);
+  computeDegreesAndHubs(state.nodes, state.edges);
+  return added;
+}
+
+function buildGraph(parsed, viewport) {
+  const { width, height } = viewport;
+  const cx = width / 2, cy = height / 2;
+  const n = parsed.nodes.length;
+
+  const nodes = parsed.nodes.map((src, i) => {
+    const angle = n ? (i / n) * Math.PI * 2 : 0;
+    const spread = 80 + Math.random() * 60;
+    const node = {
+      ...src,
+      x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
+      y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
+      vx: 0, vy: 0,
+      fxAcc: 0, fyAcc: 0,
+      r: CFG.minR,
+      recency: 0,
+      phase: Math.random() * Math.PI * 2,
+      degree: 0,
+      isHub: false,
+    };
+    applySeedJitter(node);
+    return node;
+  });
+
+  const byId = new Map(nodes.map(node => [node.id, node]));
+
+  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
+  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
+  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
+  // решает как их показывать: как отдельный forest (off, default) или
+  // пунктирно-связанными с основной цепью (on).
+  const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
+  for (let i = 0; i < sortedByTs.length; i++) {
+    const node = sortedByTs[i];
+    if (node.parentId && !byId.has(node.parentId)) {
+      node._isOrphanRoot = true;
+      const prev = i > 0 ? sortedByTs[i - 1] : null;
+      if (prev) node._adoptedParentId = prev.id;
+    }
+  }
+
+  const edges = [];
+  for (const node of nodes) {
+    if (node.parentId && byId.has(node.parentId)) {
+      edges.push({
+        source: node.parentId,
+        target: node.id,
+        a: byId.get(node.parentId),
+        b: node,
+        adopted: false,
+      });
+    } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
+      const parent = byId.get(node._adoptedParentId);
+      edges.push({
+        source: parent.id,
+        target: node.id,
+        a: parent,
+        b: node,
+        adopted: true,
+      });
+    }
+  }
+
+  if (nodes.length) {
+    let tMin = Infinity, tMax = -Infinity;
+    for (const node of nodes) {
+      if (node.ts < tMin) tMin = node.ts;
+      if (node.ts > tMax) tMax = node.ts;
+    }
+    const dt = Math.max(1, tMax - tMin);
+    for (const node of nodes) {
+      node.recency = (node.ts - tMin) / dt;
+      node.r = computeRadius(node);
+    }
+  }
+
+  computeDegreesAndHubs(nodes, edges);
+
+  return { nodes, edges, byId };
+}
+
+    return { appendRawNodes, buildGraph };
+  })();
+
+  // --- src/view/state.js ---
+  __M["src/view/state.js"] = (function () {
 const state = {
   nodes: [],
   edges: [],
@@ -1264,22 +1304,29 @@ const state = {
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
   topicsMode: false, // TF-IDF topic coloring
+  diffMode: false,     // сравнение двух сессий
+  diffStats: null,     // { onlyA, onlyB, both }
 };
+
 function resetInteractionState() {
   state.selected = null;
   state.hover = null;
   state.pathSet = new Set();
 }
 
+    return { resetInteractionState, state };
+  })();
 
-// --- src/view/camera.js ---
-
+  // --- src/view/camera.js ---
+  __M["src/view/camera.js"] = (function () {
 function worldToScreen(wx, wy, cam) {
   return { x: (wx - cam.x) * cam.scale, y: (wy - cam.y) * cam.scale };
 }
+
 function screenToWorld(sx, sy, cam) {
   return { x: sx / cam.scale + cam.x, y: sy / cam.scale + cam.y };
 }
+
 function applyZoom(cam, factor, anchorSx, anchorSy, min, max) {
   const before = screenToWorld(anchorSx, anchorSy, cam);
   cam.scale *= factor;
@@ -1290,9 +1337,11 @@ function applyZoom(cam, factor, anchorSx, anchorSy, min, max) {
   cam.y += before.y - after.y;
 }
 
+    return { worldToScreen, screenToWorld, applyZoom };
+  })();
 
-// --- src/view/path.js ---
-
+  // --- src/view/path.js ---
+  __M["src/view/path.js"] = (function () {
 function pathToRoot(node, byId, maxDepth = 500) {
   const ids = new Set();
   if (!node) return ids;
@@ -1308,8 +1357,12 @@ function pathToRoot(node, byId, maxDepth = 500) {
   return ids;
 }
 
+    return { pathToRoot };
+  })();
 
-// --- src/view/particles.js ---
+  // --- src/view/particles.js ---
+  __M["src/view/particles.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
 
 function controlPoint(a, b, strength) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -1322,6 +1375,7 @@ function controlPoint(a, b, strength) {
     y: midY + (dx / len) * offset,
   };
 }
+
 function bezierPoint(a, b, cp, t) {
   const u = 1 - t;
   return {
@@ -1337,12 +1391,14 @@ function bezierTangent(a, b, cp, t) {
     y: 2 * (1 - t) * (cp.y - a.y) + 2 * t * (b.y - cp.y),
   };
 }
+
 function advanceParticle(progress, dt, speed) {
   let p = progress + dt * speed;
   while (p > 1) p -= 1;
   while (p < 0) p += 1;
   return p;
 }
+
 function ensureParticles(edges) {
   for (const e of edges) {
     if (!e.particles) {
@@ -1353,6 +1409,7 @@ function ensureParticles(edges) {
     }
   }
 }
+
 function tickParticles(edges, dt) {
   for (const e of edges) {
     if (!e.particles) continue;
@@ -1459,6 +1516,7 @@ function drawEdgeFlash(ctx, edge, cp, camera, ageFrac, edgeAlpha) {
   ctx.quadraticCurveTo(cpScreen.x, cpScreen.y, bScreen.x, bScreen.y);
   ctx.stroke();
 }
+
 function drawParticles(ctx, edges, camera, alphaOf) {
   const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
   const prev = ctx.globalCompositeOperation;
@@ -1489,9 +1547,12 @@ function drawParticles(ctx, edges, camera, alphaOf) {
   ctx.globalCompositeOperation = prev;
 }
 
+    return { controlPoint, bezierPoint, advanceParticle, ensureParticles, tickParticles, drawParticles };
+  })();
 
-// --- src/view/starfield.js ---
-
+  // --- src/view/starfield.js ---
+  __M["src/view/starfield.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
 
 function mulberry32(seed) {
   let s = seed >>> 0;
@@ -1503,6 +1564,7 @@ function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
 function generateStarfield(count, seed = 1337, range = CFG.starWorldRange) {
   const rng = mulberry32(seed);
   const stars = [];
@@ -1518,12 +1580,14 @@ function generateStarfield(count, seed = 1337, range = CFG.starWorldRange) {
   }
   return stars;
 }
+
 function starScreen(star, camera) {
   return {
     x: star.x - camera.x * star.depth,
     y: star.y - camera.y * star.depth,
   };
 }
+
 function drawStarfield(ctx, stars, camera, viewport, tSec) {
   const W = viewport.width, H = viewport.height;
   for (const s of stars) {
@@ -1537,9 +1601,11 @@ function drawStarfield(ctx, stars, camera, viewport, tSec) {
   }
 }
 
+    return { generateStarfield, starScreen, drawStarfield };
+  })();
 
-// --- src/view/tool-icons.js ---
-
+  // --- src/view/tool-icons.js ---
+  __M["src/view/tool-icons.js"] = (function () {
 // Unicode-символы (одноцветные, без emoji — стабильный рендер в canvas)
 const TOOL_ICON_MAP = {
   bash: '▶',
@@ -1565,6 +1631,7 @@ const TOOL_ICON_MAP = {
   schedulewakeup: '⏱',
   toolsearch: '⌘',
 };
+
 function toolIcon(toolName) {
   if (!toolName) return '•';
   const key = String(toolName).toLowerCase().replace(/[^a-z]/g, '');
@@ -1576,9 +1643,11 @@ function toolIcon(toolName) {
   return String(toolName).trim().charAt(0).toUpperCase() || '•';
 }
 
+    return { toolIcon };
+  })();
 
-// --- src/view/topics.js ---
-
+  // --- src/view/topics.js ---
+  __M["src/view/topics.js"] = (function () {
 // TF-IDF topic clustering. Для каждой ноды считаем top-слово по TF-IDF,
 // хешируем его в hue → ноды с похожей темой окрашены в похожий оттенок.
 // Без LLM, без внешних зависимостей. Stopwords — минимальный набор RU/EN.
@@ -1695,13 +1764,16 @@ function hueToRgbaString(hue, saturation = 0.65, lightness = 0.6, alpha = 1) {
   return `rgba(${R}, ${G}, ${B}, ${alpha})`;
 }
 
+    return { computeTopics, hashHue, applyTopicsToNodes, hueToRgbaString };
+  })();
 
-// --- src/view/renderer.js ---
-
-
-
-
-
+  // --- src/view/renderer.js ---
+  __M["src/view/renderer.js"] = (function () {
+    const { CFG, COLORS } = __M["src/core/config.js"];
+    const { worldToScreen } = __M["src/view/camera.js"];
+    const { controlPoint, bezierPoint } = __M["src/view/particles.js"];
+    const { toolIcon } = __M["src/view/tool-icons.js"];
+    const { hueToRgbaString } = __M["src/view/topics.js"];
 
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
@@ -1713,7 +1785,28 @@ function timelineCutoff(state) {
   return tsMin + (tsMax - tsMin) * state.timelineMax;
 }
 
-function glowRgba(role, alpha, node, topicsMode) {
+// Diff palette
+//   A-only: розовато-фуксиевый (теряется в A)
+//   B-only: бирюзовый (добавлено в B)
+//   both  : нейтрально-тёплый серый
+function diffGlowRgba(origin, alpha) {
+  if (origin === 'A') return `rgba(255, 96, 175, ${alpha})`;
+  if (origin === 'B') return `rgba(90, 210, 255, ${alpha})`;
+  return `rgba(200, 200, 210, ${alpha * 0.75})`;
+}
+function diffCoreRgba(origin, alpha) {
+  if (origin === 'A') return `rgba(255, 130, 190, ${alpha})`;
+  if (origin === 'B') return `rgba(120, 220, 255, ${alpha})`;
+  return `rgba(220, 220, 230, ${alpha})`;
+}
+function diffCoreDark(origin, alpha) {
+  if (origin === 'A') return `rgba(140, 30, 90, ${alpha})`;
+  if (origin === 'B') return `rgba(20, 100, 140, ${alpha})`;
+  return `rgba(120, 120, 130, ${alpha})`;
+}
+
+function glowRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffGlowRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
   }
@@ -1722,7 +1815,8 @@ function glowRgba(role, alpha, node, topicsMode) {
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreRgba(role, alpha, node, topicsMode) {
+function coreRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffCoreRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
   }
@@ -1731,7 +1825,8 @@ function coreRgba(role, alpha, node, topicsMode) {
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreDarkRgba(role, alpha, node, topicsMode) {
+function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffCoreDark(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
   }
@@ -1740,10 +1835,12 @@ function coreDarkRgba(role, alpha, node, topicsMode) {
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha) {
+function edgeRgba(childRole, alpha, edge, diffMode) {
+  if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
+
 function birthFactor(bornAt, now, duration) {
   if (bornAt == null) return 0;
   const t = (now - bornAt) / duration;
@@ -1751,6 +1848,7 @@ function birthFactor(bornAt, now, duration) {
   if (t <= 0) return 0;
   return t;
 }
+
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 function updateBirths(state, cutoff, nowMs, onBirth) {
@@ -1793,6 +1891,7 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.quadraticCurveTo(cpScreen.x, cpScreen.y, bScreen.x, bScreen.y);
   ctx.stroke();
 }
+
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -1944,7 +2043,7 @@ function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
@@ -1976,15 +2075,16 @@ function draw(ctx, state, tSec, viewport, extras) {
 
     // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
     const topicsMode = !!state.topicsMode;
+    const diffMode = !!state.diffMode;
     if (perfMode !== 'minimal') {
       const glowR = r * CFG.nodeGlowRadiusMul;
       const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
       if (perfMode === 'degraded') {
-        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode);
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode, diffMode);
       } else {
         const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode));
-        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode));
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode, diffMode));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode, diffMode));
         ctx.fillStyle = glowGrad;
       }
       ctx.beginPath();
@@ -1994,11 +2094,11 @@ function draw(ctx, state, tSec, viewport, extras) {
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode));
-      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode));
+      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode, diffMode));
+      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode, diffMode));
       ctx.fillStyle = grad;
     } else {
-      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode);
+      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode, diffMode);
     }
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -2099,12 +2199,16 @@ function draw(ctx, state, tSec, viewport, extras) {
   ctx.restore();
 }
 
+    return { birthFactor, easeOutCubic, draw };
+  })();
 
-// --- src/ui/detail-panel.js ---
-
-
+  // --- src/ui/detail-panel.js ---
+  __M["src/ui/detail-panel.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { state } = __M["src/view/state.js"];
 
 let detailEl, detailRoleEl, detailTsEl, detailBodyEl;
+
 function initDetail() {
   detailEl = document.getElementById('detail');
   detailRoleEl = document.getElementById('detail-role');
@@ -2115,6 +2219,7 @@ function initDetail() {
     hideDetail();
   });
 }
+
 function showDetail(n) {
   detailRoleEl.textContent = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
   detailRoleEl.className = 'role ' + n.role;
@@ -2123,20 +2228,26 @@ function showDetail(n) {
   detailBodyEl.textContent = txt.length > CFG.excerptChars ? txt.slice(0, CFG.excerptChars) + '…' : txt;
   detailEl.classList.add('show');
 }
+
 function hideDetail() {
   if (detailEl) detailEl.classList.remove('show');
 }
 
+    return { initDetail, showDetail, hideDetail };
+  })();
 
-// --- src/ui/tooltip.js ---
-
+  // --- src/ui/tooltip.js ---
+  __M["src/ui/tooltip.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
 
 let tooltipEl, tooltipRoleEl, tooltipBodyEl;
+
 function initTooltip() {
   tooltipEl = document.getElementById('tooltip');
   tooltipRoleEl = tooltipEl.querySelector('.tt-role');
   tooltipBodyEl = tooltipEl.querySelector('.tt-body');
 }
+
 function showTooltip(node, screenX, screenY) {
   if (!tooltipEl || !node) return;
   const text = node.text || '';
@@ -2156,195 +2267,19 @@ function showTooltip(node, screenX, screenY) {
   tooltipEl.style.top = top + 'px';
   tooltipEl.classList.add('show');
 }
+
 function hideTooltip() {
   if (tooltipEl) tooltipEl.classList.remove('show');
 }
 
+    return { initTooltip, showTooltip, hideTooltip };
+  })();
 
-// --- src/ui/timeline.js ---
-
-
-
-
-
-function centerRootsInViewport() {
-  // Помещаем все "root"-ноды (без parent) в центр текущего viewport камеры,
-  // чтобы при рестарте play первая нода появлялась в поле зрения.
-  const cam = state.camera;
-  const vp = { w: window.innerWidth, h: window.innerHeight };
-  const cx = cam.x + (vp.w / 2) / cam.scale;
-  const cy = cam.y + (vp.h / 2) / cam.scale;
-  const roots = state.nodes.filter(n => !n.parentId || !state.byId.has(n.parentId));
-  if (!roots.length) return;
-  if (roots.length === 1) {
-    roots[0].x = cx;
-    roots[0].y = cy;
-    roots[0].vx = 0;
-    roots[0].vy = 0;
-  } else {
-    // Несколько корней — по небольшому кольцу вокруг центра
-    const R = 40;
-    for (let i = 0; i < roots.length; i++) {
-      const a = (i / roots.length) * Math.PI * 2;
-      roots[i].x = cx + Math.cos(a) * R;
-      roots[i].y = cy + Math.sin(a) * R;
-      roots[i].vx = 0;
-      roots[i].vy = 0;
-    }
-  }
-}
-
-let sliderEl, labelEl, playBtn;
-let playing = false;
-let lastStepMs = 0;
-let sortedIds = [];
-let stepIndex = 0;
-function initTimeline() {
-  sliderEl = document.getElementById('timeline');
-  labelEl = document.getElementById('timeline-label');
-  playBtn = document.getElementById('btn-play');
-  sliderEl.addEventListener('input', onSliderInput);
-  playBtn.addEventListener('click', togglePlay);
-  updateLabel();
-  updatePlayBtn();
-}
-
-function currentStepInterval() {
-  return CFG.storyDwellMs / Math.max(0.1, state.playSpeed || 1);
-}
-function setSpeed(mult) {
-  state.playSpeed = mult;
-  // при изменении speed пересчитываем lastStepMs, чтобы не произошло instant advance
-  lastStepMs = performance.now();
-}
-
-function onSliderInput() {
-  state.timelineMax = parseFloat(sliderEl.value) / 100;
-  if (playing) stopPlay();
-  updateLabel();
-  syncChatToTimeline(state);
-  rebuildSeen(state);
-}
-function togglePlay() {
-  if (playing) stopPlay(); else startPlay();
-}
-function isPlaying() { return playing; }
-
-function computeTsBounds() {
-  if (!state.nodes.length) return { tsMin: 0, tsMax: 1 };
-  let tsMin = Infinity, tsMax = -Infinity;
-  for (const n of state.nodes) {
-    if (n.ts < tsMin) tsMin = n.ts;
-    if (n.ts > tsMax) tsMax = n.ts;
-  }
-  return { tsMin, tsMax };
-}
-
-function startPlay() {
-  if (!state.nodes.length) return;
-  sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
-  const atEnd = state.timelineMax >= 0.9999;
-  if (atEnd) {
-    resetStory();
-    state.timelineMax = 0;
-    stepIndex = 0;
-    // Ставим корни в центр viewport + полный reheat, чтобы первая нода появилась в поле зрения
-    centerRootsInViewport();
-    if (state.sim) reheat(state.sim, 0.8);
-  } else {
-    const { tsMin, tsMax } = computeTsBounds();
-    const range = Math.max(1, tsMax - tsMin);
-    const cutoff = tsMin + range * state.timelineMax;
-    stepIndex = 0;
-    for (let i = 0; i < sortedIds.length; i++) {
-      const node = state.byId.get(sortedIds[i]);
-      if (node && node.ts <= cutoff) stepIndex = i + 1;
-      else break;
-    }
-    // rebuild seen from DOM после manual drag
-    rebuildSeen(state);
-  }
-  playing = true;
-  lastStepMs = performance.now();
-  updatePlayBtn();
-  updateLabel();
-  if (atEnd) advanceStep();
-}
-
-function stopPlay() {
-  playing = false;
-  updatePlayBtn();
-}
-
-function advanceStep() {
-  if (stepIndex >= sortedIds.length) {
-    state.timelineMax = 1;
-    syncSlider();
-    updateLabel();
-    stopPlay();
-    return;
-  }
-  const id = sortedIds[stepIndex++];
-  const node = state.byId.get(id);
-  if (!node) return advanceStep();
-  const { tsMin, tsMax } = computeTsBounds();
-  const range = Math.max(1, tsMax - tsMin);
-  const desired = (node.ts - tsMin) / range;
-  state.timelineMax = Math.min(1, desired + 0.0001);
-  // небольшой re-heat чтобы новорождённая нода могла устаканиться
-  if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);
-  syncSlider();
-  updateLabel();
-}
-function tickPlay() {
-  if (!playing) return;
-  const now = performance.now();
-  const interval = currentStepInterval();
-  // строго 1 advance на кадр; если отстали — просто догоняем по 1 на кадр
-  if (now - lastStepMs >= interval) {
-    lastStepMs = now;
-    advanceStep();
-  }
-}
-function advanceTimeline(current, dt, duration) {
-  const next = current + dt / duration;
-  if (next >= 1) return { value: 1, finished: true };
-  return { value: next, finished: false };
-}
-
-function syncSlider() {
-  if (sliderEl) sliderEl.value = String(Math.round(state.timelineMax * 100));
-}
-
-function updatePlayBtn() {
-  if (!playBtn) return;
-  playBtn.textContent = playing ? '⏸' : '▶';
-  playBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
-  playBtn.classList.toggle('playing', playing);
-}
-
-function updateLabel() {
-  if (!labelEl) return;
-  if (!state.nodes.length) { labelEl.textContent = '—'; return; }
-  const { tsMin, tsMax } = computeTsBounds();
-  const t = tsMin + (tsMax - tsMin) * state.timelineMax;
-  const visible = state.nodes.filter(n => n.ts <= t).length;
-  labelEl.innerHTML = `<b>${visible}</b> / ${state.nodes.length} &middot; <span>${new Date(t).toISOString().replace('T', ' ').slice(0, 19)}</span>`;
-}
-function resetTimeline() {
-  stopPlay();
-  if (sliderEl) sliderEl.value = 100;
-  state.timelineMax = 1;
-  sortedIds = [];
-  stepIndex = 0;
-  updateLabel();
-}
-
-
-// --- src/ui/story-mode.js ---
-
-
-
+  // --- src/ui/story-mode.js ---
+  __M["src/ui/story-mode.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { toolIcon } = __M["src/view/tool-icons.js"];
+// isPlaying читается через state.isPlaying (избегаем циклического импорта с timeline.js)
 
 let streamEl, phoneEl;
 
@@ -2352,6 +2287,7 @@ const seen = new Set();
 const pendingQueue = [];
 let lastPostMs = 0;
 let activeNodeId = null;
+
 function initStory() {
   streamEl = document.getElementById('chat-stream');
   phoneEl = document.getElementById('phone');
@@ -2487,6 +2423,7 @@ function cutoffTs(state) {
   }
   return tsMin + (tsMax - tsMin) * state.timelineMax;
 }
+
 function syncChatToTimeline(state) {
   if (!streamEl) return;
   const cutoff = cutoffTs(state);
@@ -2544,8 +2481,9 @@ function rebuildSeen(state) {
     if (child.dataset.nodeId) seen.add(child.dataset.nodeId);
   }
 }
+
 function tickStory(nowMs, state) {
-  const active = isPlaying() && state.nodes.length > 0;
+  const active = !!state.isPlaying && state.nodes.length > 0;
   if (!active) {
     // Когда play выключен — чистим очередь (manual режим)
     if (pendingQueue.length) pendingQueue.length = 0;
@@ -2564,7 +2502,9 @@ function tickStory(nowMs, state) {
     break; // ровно одна за кадр — чтобы typewriter не накладывался
   }
 }
+
 function getFrontierNodeId() { return activeNodeId; }
+
 function resetStory() {
   seen.clear();
   pendingQueue.length = 0;
@@ -2581,16 +2521,212 @@ function resetStory() {
   if (phoneEl) phoneEl.classList.remove('active');
 }
 
+    return { initStory, syncChatToTimeline, rebuildSeen, tickStory, getFrontierNodeId, resetStory };
+  })();
 
-// --- src/ui/search.js ---
+  // --- src/ui/timeline.js ---
+  __M["src/ui/timeline.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { state } = __M["src/view/state.js"];
+    const { resetStory, syncChatToTimeline, rebuildSeen } = __M["src/ui/story-mode.js"];
+    const { reheat } = __M["src/core/layout.js"];
 
+function centerRootsInViewport() {
+  // Помещаем все "root"-ноды (без parent) в центр текущего viewport камеры,
+  // чтобы при рестарте play первая нода появлялась в поле зрения.
+  const cam = state.camera;
+  const vp = { w: window.innerWidth, h: window.innerHeight };
+  const cx = cam.x + (vp.w / 2) / cam.scale;
+  const cy = cam.y + (vp.h / 2) / cam.scale;
+  const roots = state.nodes.filter(n => !n.parentId || !state.byId.has(n.parentId));
+  if (!roots.length) return;
+  if (roots.length === 1) {
+    roots[0].x = cx;
+    roots[0].y = cy;
+    roots[0].vx = 0;
+    roots[0].vy = 0;
+  } else {
+    // Несколько корней — по небольшому кольцу вокруг центра
+    const R = 40;
+    for (let i = 0; i < roots.length; i++) {
+      const a = (i / roots.length) * Math.PI * 2;
+      roots[i].x = cx + Math.cos(a) * R;
+      roots[i].y = cy + Math.sin(a) * R;
+      roots[i].vx = 0;
+      roots[i].vy = 0;
+    }
+  }
+}
+
+let sliderEl, labelEl, playBtn;
+let playing = false;
+// Зеркалим в state чтобы story-mode мог прочитать без циклического импорта
+function setPlaying(v) { playing = v; state.isPlaying = v; }
+let lastStepMs = 0;
+let sortedIds = [];
+let stepIndex = 0;
+
+function initTimeline() {
+  sliderEl = document.getElementById('timeline');
+  labelEl = document.getElementById('timeline-label');
+  playBtn = document.getElementById('btn-play');
+  sliderEl.addEventListener('input', onSliderInput);
+  playBtn.addEventListener('click', togglePlay);
+  updateLabel();
+  updatePlayBtn();
+}
+
+function currentStepInterval() {
+  return CFG.storyDwellMs / Math.max(0.1, state.playSpeed || 1);
+}
+
+function setSpeed(mult) {
+  state.playSpeed = mult;
+  // при изменении speed пересчитываем lastStepMs, чтобы не произошло instant advance
+  lastStepMs = performance.now();
+}
+
+function onSliderInput() {
+  state.timelineMax = parseFloat(sliderEl.value) / 100;
+  if (playing) stopPlay();
+  updateLabel();
+  syncChatToTimeline(state);
+  rebuildSeen(state);
+}
+
+function togglePlay() {
+  if (playing) stopPlay(); else startPlay();
+}
+
+function isPlaying() { return playing; }
+
+function computeTsBounds() {
+  if (!state.nodes.length) return { tsMin: 0, tsMax: 1 };
+  let tsMin = Infinity, tsMax = -Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+  }
+  return { tsMin, tsMax };
+}
+
+function startPlay() {
+  if (!state.nodes.length) return;
+  sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
+  const atEnd = state.timelineMax >= 0.9999;
+  if (atEnd) {
+    resetStory();
+    state.timelineMax = 0;
+    stepIndex = 0;
+    // Ставим корни в центр viewport + полный reheat, чтобы первая нода появилась в поле зрения
+    centerRootsInViewport();
+    if (state.sim) reheat(state.sim, 0.8);
+  } else {
+    const { tsMin, tsMax } = computeTsBounds();
+    const range = Math.max(1, tsMax - tsMin);
+    const cutoff = tsMin + range * state.timelineMax;
+    stepIndex = 0;
+    for (let i = 0; i < sortedIds.length; i++) {
+      const node = state.byId.get(sortedIds[i]);
+      if (node && node.ts <= cutoff) stepIndex = i + 1;
+      else break;
+    }
+    // rebuild seen from DOM после manual drag
+    rebuildSeen(state);
+  }
+  setPlaying(true);
+  lastStepMs = performance.now();
+  updatePlayBtn();
+  updateLabel();
+  if (atEnd) advanceStep();
+}
+
+function stopPlay() {
+  setPlaying(false);
+  updatePlayBtn();
+}
+
+function advanceStep() {
+  if (stepIndex >= sortedIds.length) {
+    state.timelineMax = 1;
+    syncSlider();
+    updateLabel();
+    stopPlay();
+    return;
+  }
+  const id = sortedIds[stepIndex++];
+  const node = state.byId.get(id);
+  if (!node) return advanceStep();
+  const { tsMin, tsMax } = computeTsBounds();
+  const range = Math.max(1, tsMax - tsMin);
+  const desired = (node.ts - tsMin) / range;
+  state.timelineMax = Math.min(1, desired + 0.0001);
+  // небольшой re-heat чтобы новорождённая нода могла устаканиться
+  if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);
+  syncSlider();
+  updateLabel();
+}
+
+function tickPlay() {
+  if (!playing) return;
+  const now = performance.now();
+  const interval = currentStepInterval();
+  // строго 1 advance на кадр; если отстали — просто догоняем по 1 на кадр
+  if (now - lastStepMs >= interval) {
+    lastStepMs = now;
+    advanceStep();
+  }
+}
+
+function advanceTimeline(current, dt, duration) {
+  const next = current + dt / duration;
+  if (next >= 1) return { value: 1, finished: true };
+  return { value: next, finished: false };
+}
+
+function syncSlider() {
+  if (sliderEl) sliderEl.value = String(Math.round(state.timelineMax * 100));
+}
+
+function updatePlayBtn() {
+  if (!playBtn) return;
+  playBtn.textContent = playing ? '⏸' : '▶';
+  playBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  playBtn.classList.toggle('playing', playing);
+}
+
+function updateLabel() {
+  if (!labelEl) return;
+  if (!state.nodes.length) { labelEl.textContent = '—'; return; }
+  const { tsMin, tsMax } = computeTsBounds();
+  const t = tsMin + (tsMax - tsMin) * state.timelineMax;
+  const visible = state.nodes.filter(n => n.ts <= t).length;
+  labelEl.innerHTML = `<b>${visible}</b> / ${state.nodes.length} &middot; <span>${new Date(t).toISOString().replace('T', ' ').slice(0, 19)}</span>`;
+}
+
+function resetTimeline() {
+  stopPlay();
+  if (sliderEl) sliderEl.value = 100;
+  state.timelineMax = 1;
+  sortedIds = [];
+  stepIndex = 0;
+  updateLabel();
+}
+
+    return { initTimeline, setSpeed, togglePlay, isPlaying, tickPlay, advanceTimeline, resetTimeline };
+  })();
+
+  // --- src/ui/search.js ---
+  __M["src/ui/search.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
 
 let barEl, inputEl, countEl, closeEl;
 let matches = [];
 let currentIndex = 0;
-let getViewport = () => ({ cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
-function initSearch(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+let _srchGetViewport = () => ({ cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
+
+function initSearch(_srchGetViewportFn) {
+  if (_srchGetViewportFn) _srchGetViewport = _srchGetViewportFn;
   barEl = document.getElementById('search-bar');
   inputEl = document.getElementById('search-input');
   countEl = document.getElementById('search-count');
@@ -2643,6 +2779,7 @@ function closeSearch() {
   state.searchActive = null;
   updateCount();
 }
+
 function matchNodes(q, nodes) {
   const query = String(q || '').trim().toLowerCase();
   if (!query) return [];
@@ -2679,7 +2816,7 @@ function focusMatch() {
   if (!node) return;
   state.searchActive = id;
   state.selected = node;
-  const vp = getViewport();
+  const vp = _srchGetViewport();
   const cx = vp.cx != null ? vp.cx : window.innerWidth / 2;
   const cy = vp.cy != null ? vp.cy : window.innerHeight / 2;
   state.cameraTarget = {
@@ -2700,27 +2837,31 @@ function updateCount() {
   }
 }
 
+    return { initSearch, matchNodes };
+  })();
 
-// --- src/ui/live.js ---
-
-
-
-
-
-
+  // --- src/ui/live.js ---
+  __M["src/ui/live.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { parseLine } = __M["src/core/parser.js"];
+    const { appendRawNodes } = __M["src/core/graph.js"];
+    const { reheat } = __M["src/core/layout.js"];
+    const { ensureParticles } = __M["src/view/particles.js"];
 
 let urlInput, btnStart, btnStop, statusEl;
 let pollingId = null;
 let lastByteLen = 0;
 let lastUrl = '';
-let getViewport = () => ({
+let _liveGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
-function initLive(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+
+function initLive(_liveGetViewportFn) {
+  if (_liveGetViewportFn) _liveGetViewport = _liveGetViewportFn;
   urlInput = document.getElementById('live-url');
   btnStart = document.getElementById('btn-live-start');
   btnStop = document.getElementById('btn-live-stop');
@@ -2778,7 +2919,7 @@ async function pullOnce() {
       for (const p of parsed) newRaw.push(p);
     }
     if (newRaw.length) {
-      const added = appendRawNodes(state, newRaw, getViewport());
+      const added = appendRawNodes(state, newRaw, _liveGetViewport());
       ensureParticles(state.edges);
       if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное
@@ -2808,11 +2949,15 @@ function setStatus(s) {
   if (statusEl) statusEl.textContent = s;
 }
 
+    return { initLive };
+  })();
 
-// --- src/ui/filter.js ---
-
+  // --- src/ui/filter.js ---
+  __M["src/ui/filter.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
 
 const ROLES = ['user', 'assistant', 'tool_use'];
+
 function initFilter() {
   for (const role of ROLES) {
     const btn = document.querySelector(`.btn-role[data-role="${role}"]`);
@@ -2831,26 +2976,31 @@ function toggleRole(role, btn) {
     btn.classList.remove('active');
   }
 }
+
 function isRoleVisible(role) {
   return !state.hiddenRoles.has(role);
 }
 
+    return { initFilter, isRoleVisible };
+  })();
 
-// --- src/ui/minimap.js ---
-
-
+  // --- src/ui/minimap.js ---
+  __M["src/ui/minimap.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { state } = __M["src/view/state.js"];
 
 let canvasEl, ctx, dpr = 1;
 let tf = null; // сохранённая трансформация для click->world
 let frameCounter = 0;
-let getViewport = () => ({
+let _mmGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
-function initMinimap(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+
+function initMinimap(_mmGetViewportFn) {
+  if (_mmGetViewportFn) _mmGetViewport = _mmGetViewportFn;
   canvasEl = document.getElementById('minimap');
   if (!canvasEl) return;
   dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -2868,6 +3018,7 @@ function colorFor(role) {
   if (role === 'tool_use') return '#ECA040';
   return '#50D4B5';
 }
+
 function tickMinimap() {
   if (!canvasEl || !ctx) return;
   if ((frameCounter++) % CFG.minimapEveryNFrames !== 0) return;
@@ -2926,7 +3077,7 @@ function tickMinimap() {
 
   // viewport rectangle
   const cam = state.camera;
-  const vp = getViewport();
+  const vp = _mmGetViewport();
   const vw = vp.width / cam.scale;
   const vh = vp.height / cam.scale;
   const tl = w2m(cam.x, cam.y);
@@ -2949,7 +3100,7 @@ function onClick(ev) {
   const my = ev.clientY - rect.top;
   const wx = (mx - tf.ox) / tf.s + tf.minX;
   const wy = (my - tf.oy) / tf.s + tf.minY;
-  const vp = getViewport();
+  const vp = _mmGetViewport();
   const cx = vp.cx != null ? vp.cx : vp.width / 2;
   const cy = vp.cy != null ? vp.cy : vp.height / 2;
   state.cameraTarget = {
@@ -2959,28 +3110,370 @@ function onClick(ev) {
   };
 }
 
+    return { initMinimap, tickMinimap };
+  })();
 
-// --- src/ui/keyboard.js ---
+  // --- src/ui/freeze-toggle.js ---
+  __M["src/ui/freeze-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { freeze, unfreeze } = __M["src/core/layout.js"];
+
+let _frzBtn;
+
+function initFreezeToggle() {
+  _frzBtn = document.getElementById('btn-freeze');
+  if (_frzBtn) _frzBtn.addEventListener('click', toggle);
+  updateFreezeBtn();
+}
+
+function toggleFreeze() { toggle(); }
+
+function toggle() {
+  if (!state.sim) return;
+  if (state.sim.manualFrozen) unfreeze(state.sim);
+  else freeze(state.sim);
+  updateFreezeBtn();
+}
+
+/** Вызывается из interaction.js когда drag авто-размораживает, и при init. */
+function updateFreezeBtn() {
+  if (!_frzBtn) return;
+  const frozen = state.sim && state.sim.manualFrozen;
+  _frzBtn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
+  _frzBtn.classList.toggle('active-freeze', !!frozen);
+}
+
+    return { initFreezeToggle, toggleFreeze, updateFreezeBtn };
+  })();
+
+  // --- src/ui/speed-control.js ---
+  __M["src/ui/speed-control.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { setSpeed: timelineSetSpeed } = __M["src/ui/timeline.js"];
+
+let buttons = [];
+
+function initSpeedControl() {
+  const container = document.getElementById('speed-control');
+  if (!container) return;
+  const speeds = CFG.playSpeedOptions || [0.5, 1, 2, 5];
+  container.innerHTML = '';
+  for (const s of speeds) {
+    const b = document.createElement('button');
+    b.className = 'btn btn-speed';
+    b.dataset.speed = String(s);
+    b.textContent = s === 1 ? '1×' : `${s}×`;
+    if (s === 1) b.classList.add('active');
+    b.addEventListener('click', () => setSpeed(s));
+    container.appendChild(b);
+    buttons.push(b);
+  }
+}
+
+function setSpeed(mult) {
+  state.playSpeed = mult;
+  timelineSetSpeed(mult);
+  for (const b of buttons) b.classList.toggle('active', parseFloat(b.dataset.speed) === mult);
+}
+
+    return { initSpeedControl, setSpeed };
+  })();
+
+  // --- src/ui/orphans-toggle.js ---
+  __M["src/ui/orphans-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { reheat } = __M["src/core/layout.js"];
+
+let _orphBtn;
+
+function initOrphansToggle() {
+  _orphBtn = document.getElementById('btn-orphans');
+  if (_orphBtn) _orphBtn.addEventListener('click', toggle);
+  update();
+}
+
+function toggleOrphans() { toggle(); }
+
+function toggle() {
+  state.connectOrphans = !state.connectOrphans;
+  if (state.sim) reheat(state.sim, 0.5);
+  update();
+}
+
+function update() {
+  if (!_orphBtn) return;
+  _orphBtn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
+  _orphBtn.classList.toggle('active-orphans', state.connectOrphans);
+}
+
+    return { initOrphansToggle, toggleOrphans };
+  })();
+
+  // --- src/ui/theme-toggle.js ---
+  __M["src/ui/theme-toggle.js"] = (function () {
+// Dark/light toggle. Переключает CSS-переменные через [data-theme] на <html>.
+// Сохраняется в localStorage.
+
+let _themeBtn;
+const KEY = 'viz-theme';
+
+function initThemeToggle() {
+  _themeBtn = document.getElementById('btn-theme');
+  // Применяем сохранённое значение при старте
+  const saved = localStorage.getItem(KEY);
+  if (saved === 'light') applyTheme('light');
+  else applyTheme('dark');
+  if (_themeBtn) _themeBtn.addEventListener('click', toggle);
+  updateBtn();
+}
+
+function toggleTheme() { toggle(); }
+
+function toggle() {
+  const cur = document.documentElement.dataset.theme || 'dark';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+  updateBtn();
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(KEY, theme);
+}
+
+function updateBtn() {
+  if (!_themeBtn) return;
+  const theme = document.documentElement.dataset.theme || 'dark';
+  _themeBtn.textContent = theme === 'dark' ? '☀' : '🌙';
+  _themeBtn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+  _themeBtn.classList.toggle('active-theme', theme === 'light');
+}
+
+function getTheme() {
+  return document.documentElement.dataset.theme || 'dark';
+}
+
+    return { initThemeToggle, toggleTheme, getTheme };
+  })();
+
+  // --- src/ui/settings-modal.js ---
+  __M["src/ui/settings-modal.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { state } = __M["src/view/state.js"];
+    const { reheat } = __M["src/core/layout.js"];
+// Settings modal — live-update для основных CFG параметров.
+// Сохранение в localStorage.
 
 
+const KEY = 'viz-settings';
 
+// Описание регулируемых параметров (group, key, min, max, step, label)
+const PARAMS = [
+  // Physics
+  ['Physics', 'repulsion',       500,  30000, 100,  'Repulsion strength'],
+  ['Physics', 'spring',          0.01, 0.3,   0.01, 'Spring strength'],
+  ['Physics', 'springLen',       30,   300,   5,    'Spring rest length'],
+  ['Physics', 'centerPull',      0.0,  0.02,  0.0005, 'Center pull'],
+  ['Physics', 'velocityDecay',   0.1,  0.9,   0.02, 'Velocity decay (friction)'],
+  ['Physics', 'maxVelocity',     5,    200,   1,    'Max velocity clamp'],
+  ['Physics', 'alphaDecay',      0.005, 0.2,  0.002, 'Alpha decay rate'],
+  ['Physics', 'repulsionCutoff', 500,  6000,  100,  'Repulsion cutoff (px)'],
+  // Visual
+  ['Visual',  'particlesPerEdge', 0,    3,    1,   'Particles per edge (0 = off)'],
+  ['Visual',  'particleSpeed',   0.1,  2,     0.05, 'Particle speed'],
+  ['Visual',  'particleJitterPx',0,    6,     0.1, 'Particle jitter'],
+  ['Visual',  'starfieldCount',  0,    1000,  50,  'Starfield density'],
+  ['Visual',  'nodeGlowRadiusMul', 1,  4,     0.1, 'Node glow radius'],
+  ['Visual',  'nodeGlowAlphaBase', 0,  0.3,   0.01, 'Node glow alpha'],
+  // Playback
+  ['Playback','storyDwellMs',    400,  5000,  100, 'Play step interval (ms)'],
+  ['Playback','storyCharMs',     5,    80,    1,   'Typewriter speed (ms/char)'],
+  ['Playback','storyMaxChars',   80,   1200,  20,  'Max chars per bubble'],
+  ['Playback','storyPostGapMs',  200,  3000,  50,  'Min gap between bubbles'],
+  // Birth
+  ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
+];
 
+let modalEl, btn;
 
+function initSettingsModal() {
+  btn = document.getElementById('btn-settings');
+  if (btn) btn.addEventListener('click', toggle);
+  // Применяем saved settings
+  loadSaved();
+}
 
+function toggleSettings() { toggle(); }
 
+function toggle() {
+  if (modalEl) { close(); return; }
+  open();
+}
 
+function open() {
+  modalEl = document.createElement('div');
+  modalEl.id = 'settings-modal';
+  modalEl.className = 'settings-modal';
 
+  const inner = document.createElement('div');
+  inner.className = 'settings-body';
+  modalEl.appendChild(inner);
 
+  const header = document.createElement('div');
+  header.className = 'settings-header';
+  header.innerHTML = `<span>⚙ Settings</span>`;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'settings-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', close);
+  header.appendChild(closeBtn);
+  inner.appendChild(header);
 
+  const groups = new Map();
+  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, []);
+  for (const p of PARAMS) groups.get(p[0]).push(p);
 
-let getViewport = () => ({
+  for (const [groupName, items] of groups) {
+    const gTitle = document.createElement('div');
+    gTitle.className = 'settings-group-title';
+    gTitle.textContent = groupName.toUpperCase();
+    inner.appendChild(gTitle);
+    for (const [, key, min, max, step, label] of items) {
+      const row = document.createElement('div');
+      row.className = 'settings-row';
+      const lbl = document.createElement('label');
+      lbl.textContent = label;
+      const val = document.createElement('span');
+      val.className = 'settings-val';
+      val.textContent = formatValue(CFG[key]);
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(CFG[key]);
+      input.dataset.key = key;
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        CFG[key] = v;
+        val.textContent = formatValue(v);
+        save();
+        if (state.sim) reheat(state.sim, 0.3);
+      });
+      row.appendChild(lbl);
+      row.appendChild(input);
+      row.appendChild(val);
+      inner.appendChild(row);
+    }
+  }
+
+  const footer = document.createElement('div');
+  footer.className = 'settings-footer';
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'btn';
+  resetBtn.textContent = 'Reset to defaults';
+  resetBtn.addEventListener('click', () => {
+    localStorage.removeItem(KEY);
+    location.reload();
+  });
+  footer.appendChild(resetBtn);
+  inner.appendChild(footer);
+
+  document.body.appendChild(modalEl);
+  // Click outside to close
+  modalEl.addEventListener('click', (ev) => { if (ev.target === modalEl) close(); });
+}
+
+function close() {
+  if (modalEl) { modalEl.remove(); modalEl = null; }
+}
+
+function formatValue(v) {
+  if (typeof v !== 'number') return String(v);
+  if (Number.isInteger(v)) return String(v);
+  const abs = Math.abs(v);
+  if (abs < 0.001) return v.toFixed(5);
+  if (abs < 0.1) return v.toFixed(3);
+  if (abs < 10) return v.toFixed(2);
+  return v.toFixed(0);
+}
+
+function save() {
+  const obj = {};
+  for (const [, key] of PARAMS) obj[key] = CFG[key];
+  try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    for (const [, key] of PARAMS) {
+      if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
+    }
+  } catch {}
+}
+
+    return { initSettingsModal, toggleSettings };
+  })();
+
+  // --- src/ui/topics-toggle.js ---
+  __M["src/ui/topics-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { applyTopicsToNodes } = __M["src/view/topics.js"];
+
+let _topicBtn;
+
+function initTopicsToggle() {
+  _topicBtn = document.getElementById('btn-topics');
+  if (_topicBtn) _topicBtn.addEventListener('click', toggle);
+  updateBtn();
+}
+
+function toggleTopics() { toggle(); }
+
+function toggle() {
+  state.topicsMode = !state.topicsMode;
+  if (state.topicsMode && state.nodes.length) {
+    const top = applyTopicsToNodes(state.nodes);
+    console.log('[topics] top words:', top);
+  }
+  updateBtn();
+}
+
+function updateBtn() {
+  if (!_topicBtn) return;
+  _topicBtn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
+  _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
+}
+
+    return { initTopicsToggle, toggleTopics };
+  })();
+
+  // --- src/ui/keyboard.js ---
+  __M["src/ui/keyboard.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { togglePlay } = __M["src/ui/timeline.js"];
+    const { fitToView } = __M["src/core/layout.js"];
+    const { syncChatToTimeline } = __M["src/ui/story-mode.js"];
+    const { hideDetail } = __M["src/ui/detail-panel.js"];
+    const { toggleFreeze } = __M["src/ui/freeze-toggle.js"];
+    const { setSpeed } = __M["src/ui/speed-control.js"];
+    const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
+    const { toggleTheme } = __M["src/ui/theme-toggle.js"];
+    const { toggleSettings } = __M["src/ui/settings-modal.js"];
+    const { toggleTopics } = __M["src/ui/topics-toggle.js"];
+
+let _kbdGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
-function initKeyboard(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+
+function initKeyboard(_kbdGetViewportFn) {
+  if (_kbdGetViewportFn) _kbdGetViewport = _kbdGetViewportFn;
   window.addEventListener('keydown', onKey);
   // Чтобы Space/Enter на наших кнопках не триггерил shortcut повторно — blur после click
   document.querySelectorAll('button').forEach(b => {
@@ -3058,17 +3551,21 @@ function stepTimeline(dir) {
 
 function resetView() {
   if (!state.nodes.length) return;
-  const cam = fitToView(state.nodes, getViewport());
+  const cam = fitToView(state.nodes, _kbdGetViewport());
   state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
 }
 
+    return { initKeyboard };
+  })();
 
-// --- src/ui/stats-hud.js ---
-
-
+  // --- src/ui/stats-hud.js ---
+  __M["src/ui/stats-hud.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { toolIcon } = __M["src/view/tool-icons.js"];
 
 let panelEl, tokensEl, durationEl, topToolsEl, longestEl;
 let tickCounter = 0;
+
 function initStats() {
   panelEl = document.getElementById('stats-panel');
   tokensEl = document.getElementById('stat-tokens');
@@ -3076,6 +3573,7 @@ function initStats() {
   topToolsEl = document.getElementById('stat-top-tools');
   longestEl = document.getElementById('stat-longest');
 }
+
 function computeStats(nodes) {
   if (!nodes || !nodes.length) return null;
   let totalChars = 0;
@@ -3101,6 +3599,7 @@ function computeStats(nodes) {
     topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
   };
 }
+
 function formatDuration(sec) {
   if (sec < 0 || !isFinite(sec)) return '—';
   const h = Math.floor(sec / 3600);
@@ -3112,6 +3611,7 @@ function formatDuration(sec) {
   parts.push(s + 's');
   return parts.join(' ');
 }
+
 function formatTokens(n) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
@@ -3121,6 +3621,7 @@ function formatTokens(n) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
 function recomputeStats() {
   if (!panelEl) return;
   const s = computeStats(state.nodes);
@@ -3146,27 +3647,32 @@ function recomputeStats() {
     longestEl.textContent = '—';
   }
 }
+
 function tickStats() {
   if ((tickCounter++) % 180 !== 0) return;
   recomputeStats();
 }
 
+    return { initStats, computeStats, formatDuration, formatTokens, recomputeStats, tickStats };
+  })();
 
-// --- src/ui/layout-toggle.js ---
-
-
-
+  // --- src/ui/layout-toggle.js ---
+  __M["src/ui/layout-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { computeRadialLayout, computeSwimLanes, easeInOutQuad, fitToView, reheat } = __M["src/core/layout.js"];
 
 let btns = []; // {mode, el}
 let transition = null;
-let getViewport = () => ({
+let _ltGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
-function initLayoutToggle(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+
+function initLayoutToggle(_ltGetViewportFn) {
+  if (_ltGetViewportFn) _ltGetViewport = _ltGetViewportFn;
   const host = document.getElementById('layout-switch');
   if (!host) return;
   host.innerHTML = '';
@@ -3195,9 +3701,9 @@ function switchTo(toMode) {
   for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
   let to;
   if (toMode === 'radial') {
-    to = computeRadialLayout(state.nodes, state.byId, getViewport());
+    to = computeRadialLayout(state.nodes, state.byId, _ltGetViewport());
   } else if (toMode === 'swim') {
-    to = computeSwimLanes(state.nodes, getViewport());
+    to = computeSwimLanes(state.nodes, _ltGetViewport());
   } else {
     to = new Map();
     for (const n of state.nodes) {
@@ -3208,11 +3714,12 @@ function switchTo(toMode) {
   // Автофит камеры под новую раскладку после transition
   setTimeout(() => {
     if (state.nodes.length) {
-      const cam = fitToView(state.nodes, getViewport());
+      const cam = fitToView(state.nodes, _ltGetViewport());
       state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
     }
   }, CFG.layoutTransitionMs + 50);
 }
+
 function tickLayoutTransition() {
   if (!transition) return;
   const now = performance.now();
@@ -3234,6 +3741,7 @@ function tickLayoutTransition() {
     updateActive();
   }
 }
+
 function isRadialActive() {
   const m = (transition && transition.toMode) || state.layoutMode;
   return m === 'radial' || m === 'swim';
@@ -3243,9 +3751,11 @@ function updateActive() {
   for (const b of btns) b.el.classList.toggle('active', b.mode === state.layoutMode);
 }
 
+    return { initLayoutToggle, tickLayoutTransition, isRadialActive };
+  })();
 
-// --- src/ui/audio.js ---
-
+  // --- src/ui/audio.js ---
+  __M["src/ui/audio.js"] = (function () {
 // Generative ambient в стиле Brian Eno: drone pad + случайные ноты
 // пентатоники с медленным fade + delay/echo feedback + lowpass.
 // Плюс pitched chirp при рождении ноды.
@@ -3256,7 +3766,7 @@ let ambientNodes = [];
 let arpeggioTimer = null;
 let delayIn = null;
 let enabled = false;
-let btnEl;
+let _audioBtnEl;
 
 // Pad: C3 + G3 + C4 — открытая квинта с октавой (major key fundamental)
 const PAD_VOICES = [
@@ -3286,9 +3796,10 @@ const AMBIENT_PAD_GAIN = 0.018;
 const AMBIENT_ARP_GAIN = 0.035;
 const CHIRP_GAIN = 0.06;
 const CHIRP_DURATION = 0.32;
+
 function initAudio() {
-  btnEl = document.getElementById('btn-audio');
-  if (btnEl) btnEl.addEventListener('click', toggleAudio);
+  _audioBtnEl = document.getElementById('btn-audio');
+  if (_audioBtnEl) _audioBtnEl.addEventListener('click', toggleAudio);
   updateBtn();
 }
 
@@ -3434,11 +3945,12 @@ function toggleAudio() {
 }
 
 function updateBtn() {
-  if (!btnEl) return;
-  btnEl.textContent = enabled ? '♫' : '♪';
-  btnEl.setAttribute('aria-label', enabled ? 'Sound on' : 'Sound off');
-  btnEl.classList.toggle('active-audio', enabled);
+  if (!_audioBtnEl) return;
+  _audioBtnEl.textContent = enabled ? '♫' : '♪';
+  _audioBtnEl.setAttribute('aria-label', enabled ? 'Sound on' : 'Sound off');
+  _audioBtnEl.classList.toggle('active-audio', enabled);
 }
+
 function chirpFor(node) {
   if (!enabled || !audioCtx || !node) return;
   const freq = FREQ_BY_ROLE[node.role] || 440;
@@ -3457,11 +3969,14 @@ function chirpFor(node) {
   osc.start(now);
   osc.stop(now + CHIRP_DURATION + 0.02);
 }
+
 function isAudioEnabled() { return enabled; }
 
+    return { initAudio, chirpFor, isAudioEnabled };
+  })();
 
-// --- src/ui/recorder.js ---
-
+  // --- src/ui/recorder.js ---
+  __M["src/ui/recorder.js"] = (function () {
 // MediaRecorder-запись canvas графа в WebM.
 // Phone-mockup сам не попадает в запись (DOM-элемент не пишется в canvas-stream),
 // но пользователь может записать весь экран внешним screen-recording'ом для полной картины.
@@ -3469,11 +3984,12 @@ function isAudioEnabled() { return enabled; }
 let recorder = null;
 let chunks = [];
 let startedAt = 0;
-let btnEl;
+let _recBtnEl;
 let timerId = null;
+
 function initRecorder() {
-  btnEl = document.getElementById('btn-record');
-  if (btnEl) btnEl.addEventListener('click', toggle);
+  _recBtnEl = document.getElementById('btn-record');
+  if (_recBtnEl) _recBtnEl.addEventListener('click', toggle);
 }
 
 function getSupportedMime() {
@@ -3555,17 +4071,17 @@ function download() {
 }
 
 function updateBtn(recording) {
-  if (!btnEl) return;
-  btnEl.textContent = recording ? '● REC 0s' : 'Record';
-  btnEl.classList.toggle('recording', recording);
+  if (!_recBtnEl) return;
+  _recBtnEl.textContent = recording ? '● REC 0s' : 'Record';
+  _recBtnEl.classList.toggle('recording', recording);
 }
 
 function updateTimer() {
-  if (!btnEl || !recorder) return;
+  if (!_recBtnEl || !recorder) return;
   const sec = Math.floor((Date.now() - startedAt) / 1000);
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  btnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
 }
 
 function showToast(msg) {
@@ -3576,99 +4092,20 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 2500);
 }
 
+    return { initRecorder };
+  })();
 
-// --- src/ui/freeze-toggle.js ---
-
-
-
-let btn;
-function initFreezeToggle() {
-  btn = document.getElementById('btn-freeze');
-  if (btn) btn.addEventListener('click', toggle);
-  updateFreezeBtn();
-}
-function toggleFreeze() { toggle(); }
-
-function toggle() {
-  if (!state.sim) return;
-  if (state.sim.manualFrozen) unfreeze(state.sim);
-  else freeze(state.sim);
-  updateFreezeBtn();
-}
-
-/** Вызывается из interaction.js когда drag авто-размораживает, и при init. */
-function updateFreezeBtn() {
-  if (!btn) return;
-  const frozen = state.sim && state.sim.manualFrozen;
-  btn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
-  btn.classList.toggle('active-freeze', !!frozen);
-}
-
-
-// --- src/ui/speed-control.js ---
-
-
-
-
-let buttons = [];
-function initSpeedControl() {
-  const container = document.getElementById('speed-control');
-  if (!container) return;
-  const speeds = CFG.playSpeedOptions || [0.5, 1, 2, 5];
-  container.innerHTML = '';
-  for (const s of speeds) {
-    const b = document.createElement('button');
-    b.className = 'btn btn-speed';
-    b.dataset.speed = String(s);
-    b.textContent = s === 1 ? '1×' : `${s}×`;
-    if (s === 1) b.classList.add('active');
-    b.addEventListener('click', () => setSpeed(s));
-    container.appendChild(b);
-    buttons.push(b);
-  }
-}
-function setSpeed(mult) {
-  state.playSpeed = mult;
-  timelineSetSpeed(mult);
-  for (const b of buttons) b.classList.toggle('active', parseFloat(b.dataset.speed) === mult);
-}
-
-
-// --- src/ui/orphans-toggle.js ---
-
-
-
-let btn;
-function initOrphansToggle() {
-  btn = document.getElementById('btn-orphans');
-  if (btn) btn.addEventListener('click', toggle);
-  update();
-}
-function toggleOrphans() { toggle(); }
-
-function toggle() {
-  state.connectOrphans = !state.connectOrphans;
-  if (state.sim) reheat(state.sim, 0.5);
-  update();
-}
-
-function update() {
-  if (!btn) return;
-  btn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
-  btn.classList.toggle('active-orphans', state.connectOrphans);
-}
-
-
-// --- src/ui/snapshot.js ---
-
+  // --- src/ui/snapshot.js ---
+  __M["src/ui/snapshot.js"] = (function () {
 // PNG/SVG-снимок текущего view. PNG через canvas.toBlob, SVG через
 // ручную сериализацию (без html2canvas — zero deps принцип).
 
-let btn;
+let _snapBtn;
+
 function initSnapshot() {
-  btn = document.getElementById('btn-snapshot');
-  if (!btn) return;
-  btn.addEventListener('click', showMenu);
+  _snapBtn = document.getElementById('btn-snapshot');
+  if (!_snapBtn) return;
+  _snapBtn.addEventListener('click', showMenu);
 }
 
 function showMenu() {
@@ -3677,7 +4114,7 @@ function showMenu() {
   const menu = document.createElement('div');
   menu.id = 'snapshot-menu';
   menu.className = 'snapshot-menu';
-  const rect = btn.getBoundingClientRect();
+  const rect = _snapBtn.getBoundingClientRect();
   menu.style.left = rect.left + 'px';
   menu.style.top = (rect.bottom + 4) + 'px';
   const mkBtn = (label, fn) => {
@@ -3694,7 +4131,7 @@ function showMenu() {
   // Закрытие при клике вне
   setTimeout(() => {
     const off = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== btn) {
+      if (!menu.contains(ev.target) && ev.target !== _snapBtn) {
         menu.remove();
         document.removeEventListener('click', off);
       }
@@ -3808,246 +4245,294 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 2200);
 }
 
+    return { initSnapshot };
+  })();
 
-// --- src/ui/theme-toggle.js ---
+  // --- src/ui/diff-mode.js ---
+  __M["src/ui/diff-mode.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { parseJSONL } = __M["src/core/parser.js"];
+    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { seedJitter, computeBBox, fitToView } = __M["src/core/layout.js"];
+// Diff mode — сравнение двух сессий. Пользователь уже загрузил файл A,
+// нажимает "🔀 Diff" и дропает второй JSONL. Мы парсим B, хешируем
+// каждую ноду по (role + первые 300 символов text), находим совпадения
+// с A и подсвечиваем три группы:
+//   - _diffOrigin='A'     — нода только в A (розоватый)
+//   - _diffOrigin='B'     — нода только в B (бирюзовый)
+//   - _diffOrigin='both'  — нода в обоих (серый/общий)
+// Уникальные ноды B добавляются в state.nodes со сдвигом по X
+// (чтобы образовался «правый кластер»). Рёбра B, смотрящие на общие ноды,
+// перецепляются на A-id.
+//
+// Повторный клик по кнопке отключает режим: удаляем B-ноды/edges,
+// очищаем _diffOrigin, сбрасываем stats. Родной набор A никогда не
+// мутируется деструктивно (кроме очистки annotations).
 
-// Dark/light toggle. Переключает CSS-переменные через [data-theme] на <html>.
-// Сохраняется в localStorage.
 
-let btn;
-const KEY = 'viz-theme';
-function initThemeToggle() {
-  btn = document.getElementById('btn-theme');
-  // Применяем сохранённое значение при старте
-  const saved = localStorage.getItem(KEY);
-  if (saved === 'light') applyTheme('light');
-  else applyTheme('dark');
-  if (btn) btn.addEventListener('click', toggle);
+let _diffGetViewport;
+let _diffBtn;
+
+function initDiffMode(getViewportFn) {
+  _diffGetViewport = getViewportFn;
+  _diffBtn = document.getElementById('btn-diff');
+  if (_diffBtn) _diffBtn.addEventListener('click', onBtnClick);
+  initDropZone();
   updateBtn();
 }
-function toggleTheme() { toggle(); }
 
-function toggle() {
-  const cur = document.documentElement.dataset.theme || 'dark';
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
-  updateBtn();
-}
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem(KEY, theme);
-}
-
-function updateBtn() {
-  if (!btn) return;
-  const theme = document.documentElement.dataset.theme || 'dark';
-  btn.textContent = theme === 'dark' ? '☀' : '🌙';
-  btn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
-  btn.classList.toggle('active-theme', theme === 'light');
-}
-function getTheme() {
-  return document.documentElement.dataset.theme || 'dark';
-}
-
-
-// --- src/ui/settings-modal.js ---
-
-// Settings modal — live-update для основных CFG параметров.
-// Сохранение в localStorage.
-
-
-
-const KEY = 'viz-settings';
-
-// Описание регулируемых параметров (group, key, min, max, step, label)
-const PARAMS = [
-  // Physics
-  ['Physics', 'repulsion',       500,  30000, 100,  'Repulsion strength'],
-  ['Physics', 'spring',          0.01, 0.3,   0.01, 'Spring strength'],
-  ['Physics', 'springLen',       30,   300,   5,    'Spring rest length'],
-  ['Physics', 'centerPull',      0.0,  0.02,  0.0005, 'Center pull'],
-  ['Physics', 'velocityDecay',   0.1,  0.9,   0.02, 'Velocity decay (friction)'],
-  ['Physics', 'maxVelocity',     5,    200,   1,    'Max velocity clamp'],
-  ['Physics', 'alphaDecay',      0.005, 0.2,  0.002, 'Alpha decay rate'],
-  ['Physics', 'repulsionCutoff', 500,  6000,  100,  'Repulsion cutoff (px)'],
-  // Visual
-  ['Visual',  'particlesPerEdge', 0,    3,    1,   'Particles per edge (0 = off)'],
-  ['Visual',  'particleSpeed',   0.1,  2,     0.05, 'Particle speed'],
-  ['Visual',  'particleJitterPx',0,    6,     0.1, 'Particle jitter'],
-  ['Visual',  'starfieldCount',  0,    1000,  50,  'Starfield density'],
-  ['Visual',  'nodeGlowRadiusMul', 1,  4,     0.1, 'Node glow radius'],
-  ['Visual',  'nodeGlowAlphaBase', 0,  0.3,   0.01, 'Node glow alpha'],
-  // Playback
-  ['Playback','storyDwellMs',    400,  5000,  100, 'Play step interval (ms)'],
-  ['Playback','storyCharMs',     5,    80,    1,   'Typewriter speed (ms/char)'],
-  ['Playback','storyMaxChars',   80,   1200,  20,  'Max chars per bubble'],
-  ['Playback','storyPostGapMs',  200,  3000,  50,  'Min gap between bubbles'],
-  // Birth
-  ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
-];
-
-let modalEl, btn;
-function initSettingsModal() {
-  btn = document.getElementById('btn-settings');
-  if (btn) btn.addEventListener('click', toggle);
-  // Применяем saved settings
-  loadSaved();
-}
-function toggleSettings() { toggle(); }
-
-function toggle() {
-  if (modalEl) { close(); return; }
-  open();
-}
-
-function open() {
-  modalEl = document.createElement('div');
-  modalEl.id = 'settings-modal';
-  modalEl.className = 'settings-modal';
-
-  const inner = document.createElement('div');
-  inner.className = 'settings-body';
-  modalEl.appendChild(inner);
-
-  const header = document.createElement('div');
-  header.className = 'settings-header';
-  header.innerHTML = `<span>⚙ Settings</span>`;
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'settings-close';
-  closeBtn.textContent = '×';
-  closeBtn.addEventListener('click', close);
-  header.appendChild(closeBtn);
-  inner.appendChild(header);
-
-  const groups = new Map();
-  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, []);
-  for (const p of PARAMS) groups.get(p[0]).push(p);
-
-  for (const [groupName, items] of groups) {
-    const gTitle = document.createElement('div');
-    gTitle.className = 'settings-group-title';
-    gTitle.textContent = groupName.toUpperCase();
-    inner.appendChild(gTitle);
-    for (const [, key, min, max, step, label] of items) {
-      const row = document.createElement('div');
-      row.className = 'settings-row';
-      const lbl = document.createElement('label');
-      lbl.textContent = label;
-      const val = document.createElement('span');
-      val.className = 'settings-val';
-      val.textContent = formatValue(CFG[key]);
-      const input = document.createElement('input');
-      input.type = 'range';
-      input.min = String(min);
-      input.max = String(max);
-      input.step = String(step);
-      input.value = String(CFG[key]);
-      input.dataset.key = key;
-      input.addEventListener('input', () => {
-        const v = parseFloat(input.value);
-        CFG[key] = v;
-        val.textContent = formatValue(v);
-        save();
-        if (state.sim) reheat(state.sim, 0.3);
-      });
-      row.appendChild(lbl);
-      row.appendChild(input);
-      row.appendChild(val);
-      inner.appendChild(row);
-    }
+function onBtnClick() {
+  if (state.diffMode) {
+    clearDiff();
+  } else {
+    openDropZone();
   }
+}
 
-  const footer = document.createElement('div');
-  footer.className = 'settings-footer';
-  const resetBtn = document.createElement('button');
-  resetBtn.className = 'btn';
-  resetBtn.textContent = 'Reset to defaults';
-  resetBtn.addEventListener('click', () => {
-    localStorage.removeItem(KEY);
-    location.reload();
+function initDropZone() {
+  const overlay = document.getElementById('diff-drop');
+  if (!overlay) return;
+  const cancelBtn = document.getElementById('diff-cancel');
+  const fileInput = document.getElementById('diff-file-input');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeDropZone);
+  if (fileInput) fileInput.addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (f) { readAndApply(f); fileInput.value = ''; }
   });
-  footer.appendChild(resetBtn);
-  inner.appendChild(footer);
-
-  document.body.appendChild(modalEl);
-  // Click outside to close
-  modalEl.addEventListener('click', (ev) => { if (ev.target === modalEl) close(); });
+  const browseBtn = document.getElementById('diff-browse');
+  if (browseBtn && fileInput) browseBtn.addEventListener('click', () => fileInput.click());
+  overlay.addEventListener('dragover', (ev) => { ev.preventDefault(); overlay.classList.add('hover'); });
+  overlay.addEventListener('dragleave', () => overlay.classList.remove('hover'));
+  overlay.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    overlay.classList.remove('hover');
+    const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (f) readAndApply(f);
+  });
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay) closeDropZone();
+  });
 }
 
-function close() {
-  if (modalEl) { modalEl.remove(); modalEl = null; }
+function openDropZone() {
+  const overlay = document.getElementById('diff-drop');
+  if (overlay) overlay.classList.add('show');
+}
+function closeDropZone() {
+  const overlay = document.getElementById('diff-drop');
+  if (overlay) overlay.classList.remove('show');
 }
 
-function formatValue(v) {
-  if (typeof v !== 'number') return String(v);
-  if (Number.isInteger(v)) return String(v);
-  const abs = Math.abs(v);
-  if (abs < 0.001) return v.toFixed(5);
-  if (abs < 0.1) return v.toFixed(3);
-  if (abs < 10) return v.toFixed(2);
-  return v.toFixed(0);
-}
-
-function save() {
-  const obj = {};
-  for (const [, key] of PARAMS) obj[key] = CFG[key];
-  try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
-}
-
-function loadSaved() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    for (const [, key] of PARAMS) {
-      if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
+function readAndApply(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      applyDiffText(String(reader.result));
+      closeDropZone();
+    } catch (e) {
+      setDropError('Parse error: ' + e.message);
+      console.error(e);
     }
-  } catch {}
+  };
+  reader.onerror = () => setDropError('Read error: ' + (reader.error && reader.error.message));
+  reader.readAsText(file);
 }
 
-
-// --- src/ui/topics-toggle.js ---
-
-
-
-let btn;
-function initTopicsToggle() {
-  btn = document.getElementById('btn-topics');
-  if (btn) btn.addEventListener('click', toggle);
-  updateBtn();
+function setDropError(msg) {
+  const el = document.getElementById('diff-drop-error');
+  if (el) el.textContent = msg;
 }
-function toggleTopics() { toggle(); }
 
-function toggle() {
-  state.topicsMode = !state.topicsMode;
-  if (state.topicsMode && state.nodes.length) {
-    const top = applyTopicsToNodes(state.nodes);
-    console.log('[topics] top words:', top);
+function applyDiffText(text) {
+  if (!state.nodes.length) {
+    setDropError('Сначала загрузите первую сессию.');
+    return;
   }
+  const norm = normalizeToClaudeJsonl(text);
+  const parsed = parseJSONL(norm.text);
+  if (!parsed.nodes.length) {
+    setDropError('Во втором файле нет сообщений.');
+    return;
+  }
+  const stats = mergeDiff(state, parsed.nodes, _diffGetViewport());
+  state.diffMode = true;
+  state.diffStats = stats;
   updateBtn();
+  refitCamera();
+}
+
+/**
+ * Чистая функция слияния. Мутирует state.nodes/edges/byId, добавляя
+ * уникальные B-ноды, и помечает _diffOrigin на всех A и B.
+ *
+ * @returns {{ onlyA: number, onlyB: number, both: number }}
+ */
+function mergeDiff(target, rawNodesB, viewport) {
+  const hashA = new Map(); // hash → A-node
+  for (const a of target.nodes) {
+    a._diffOrigin = 'A';
+    hashA.set(hashNode(a), a);
+  }
+  // BBox для сдвига B-подграфа
+  const bbox = computeBBox(target.nodes);
+  const gap = 220;
+  const offsetX = (bbox.maxX ?? viewport.cx) + gap;
+  const centerY = ((bbox.minY ?? 0) + (bbox.maxY ?? 0)) / 2;
+
+  const mappedId = new Map(); // rawId → resolved id in target.byId
+  let onlyB = 0, both = 0;
+
+  // Первый проход — дедуп: либо совпадает по хэшу с A (both),
+  // либо добавляем новую B-ноду
+  for (const raw of rawNodesB) {
+    const h = hashNode(raw);
+    const existing = hashA.get(h);
+    if (existing) {
+      existing._diffOrigin = 'both';
+      mappedId.set(raw.id, existing.id);
+      both++;
+    } else {
+      const newId = 'B:' + raw.id;
+      mappedId.set(raw.id, newId);
+      // Позиция: ниже B-кластера + небольшое облако
+      const s = seedJitter(newId);
+      const node = {
+        ...raw,
+        id: newId,
+        parentId: null, // резолвим ниже
+        x: offsetX + (s.dx - 0.5) * 400,
+        y: centerY + (s.dy - 0.5) * 400,
+        vx: 0, vy: 0,
+        fxAcc: 0, fyAcc: 0,
+        r: CFG.minR,
+        recency: 1,
+        phase: ((s.dx + s.dy) * Math.PI),
+        degree: 0,
+        isHub: false,
+        _seedDx: s.dx,
+        _seedDy: s.dy,
+        _diffOrigin: 'B',
+      };
+      target.nodes.push(node);
+      target.byId.set(newId, node);
+      onlyB++;
+    }
+  }
+
+  // Второй проход — рёбра B: родитель резолвится через mappedId.
+  // Если raw.parentId → общая нода (both), edge свяжет её с B-ребёнком.
+  for (const raw of rawNodesB) {
+    const resolvedId = mappedId.get(raw.id);
+    const node = target.byId.get(resolvedId);
+    if (!node) continue;
+    if (!raw.parentId) continue;
+    const parentResolved = mappedId.get(raw.parentId);
+    if (!parentResolved) continue;
+    const parent = target.byId.get(parentResolved);
+    if (!parent) continue;
+    // Только для B-уникальной ноды добавим ребро; для both-ноды это её родная связь из A
+    if (resolvedId.startsWith('B:')) {
+      // Но только если такого ребра ещё нет (дубль из A)
+      const already = target.edges.some(e => e.source === parent.id && e.target === resolvedId);
+      if (!already) {
+        target.edges.push({
+          source: parent.id,
+          target: resolvedId,
+          a: parent,
+          b: node,
+          adopted: false,
+          diffSide: 'B',
+        });
+      }
+    }
+  }
+
+  // Пересчёт степеней
+  for (const n of target.nodes) n.degree = 0;
+  for (const e of target.edges) {
+    if (e.a) e.a.degree = (e.a.degree || 0) + 1;
+    if (e.b) e.b.degree = (e.b.degree || 0) + 1;
+  }
+
+  const onlyA = target.nodes.filter(n => n._diffOrigin === 'A').length;
+  return { onlyA, onlyB, both };
+}
+
+function clearDiff() {
+  if (!state.diffMode) return;
+  // Выкинуть все B-ноды (id начинается с 'B:') и их edges
+  const removeIds = new Set();
+  state.nodes = state.nodes.filter(n => {
+    if (typeof n.id === 'string' && n.id.startsWith('B:')) {
+      removeIds.add(n.id);
+      state.byId.delete(n.id);
+      return false;
+    }
+    return true;
+  });
+  state.edges = state.edges.filter(e => !removeIds.has(e.source) && !removeIds.has(e.target));
+  for (const n of state.nodes) delete n._diffOrigin;
+  state.diffMode = false;
+  state.diffStats = null;
+  updateBtn();
+  refitCamera();
+}
+
+function refitCamera() {
+  if (!state.nodes.length) return;
+  const cam = fitToView(state.nodes, _diffGetViewport());
+  state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
 }
 
 function updateBtn() {
-  if (!btn) return;
-  btn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
-  btn.classList.toggle('active-topics', !!state.topicsMode);
+  if (!_diffBtn) return;
+  if (state.diffMode && state.diffStats) {
+    const s = state.diffStats;
+    _diffBtn.textContent = `🔀 Diff A:${s.onlyA}/B:${s.onlyB}/= ${s.both}`;
+    _diffBtn.classList.add('active-diff');
+  } else {
+    _diffBtn.textContent = '🔀 Diff';
+    _diffBtn.classList.remove('active-diff');
+  }
 }
 
+// FNV-1a hash. Пусть две ноды считаются одинаковыми если совпадает
+// role + первые 300 символов текста (после trim и схлопывания whitespace).
+function hashNode(n) {
+  const role = n.role || '';
+  const raw = String(n.text || '').slice(0, 300).trim().replace(/\s+/g, ' ');
+  return fnv1a(role + '\u0001' + raw);
+}
 
-// --- src/ui/interaction.js ---
+function fnv1a(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0);
+}
 
+    return { initDiffMode, applyDiffText, mergeDiff, clearDiff, hashNode, fnv1a };
+  })();
 
-
-
-
-
-
-
+  // --- src/ui/interaction.js ---
+  __M["src/ui/interaction.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+    const { state } = __M["src/view/state.js"];
+    const { screenToWorld, applyZoom } = __M["src/view/camera.js"];
+    const { pathToRoot } = __M["src/view/path.js"];
+    const { reheat, unfreeze } = __M["src/core/layout.js"];
+    const { updateFreezeBtn } = __M["src/ui/freeze-toggle.js"];
+    const { showDetail, hideDetail } = __M["src/ui/detail-panel.js"];
+    const { showTooltip, hideTooltip } = __M["src/ui/tooltip.js"];
 
 let interactionCanvas;
 let dragging = false, dragStart = null, dragMoved = false, lastMouse = null;
 let draggedNode = null;
 let getViewportFn = () => ({ width: window.innerWidth, height: window.innerHeight, cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
+
 function initInteraction(canvasEl, getViewport) {
   interactionCanvas = canvasEl;
   if (getViewport) getViewportFn = getViewport;
@@ -4074,6 +4559,7 @@ function onDblClick(ev) {
   else state.collapsed.add(hit.id);
   if (state.sim) reheat(state.sim, 0.3);
 }
+
 function isPanning() { return dragging && !draggedNode; }
 function isDraggingNode() { return !!draggedNode; }
 
@@ -4202,21 +4688,25 @@ function onKey(ev) {
   }
 }
 
+    return { initInteraction, isPanning, isDraggingNode };
+  })();
 
-// --- src/ui/loader.js ---
-
-
-
-
-
-
-
-
-
-
+  // --- src/ui/loader.js ---
+  __M["src/ui/loader.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { parseJSONL } = __M["src/core/parser.js"];
+    const { buildGraph } = __M["src/core/graph.js"];
+    const { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } = __M["src/core/layout.js"];
+    const { SAMPLE_JSONL } = __M["src/core/sample.js"];
+    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
+    const { hideDetail } = __M["src/ui/detail-panel.js"];
+    const { hideTooltip } = __M["src/ui/tooltip.js"];
+    const { resetTimeline } = __M["src/ui/timeline.js"];
 
 let _getViewport;
 let _onReady = () => {};
+
 function initLoader(getViewportFn, onReady) {
   _getViewport = getViewportFn;
   if (onReady) _onReady = onReady;
@@ -4254,6 +4744,7 @@ function initDragDrop() {
     if (f) loadFile(f);
   });
 }
+
 function loadText(text) {
   try {
     hideError();
@@ -4369,17 +4860,22 @@ function hideError() {
   if (el) el.classList.remove('show');
 }
 
+    return { initLoader, loadText };
+  })();
 
-// --- src/ui/share.js ---
-
-
+  // --- src/ui/share.js ---
+  __M["src/ui/share.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { loadText } = __M["src/ui/loader.js"];
 
 let toastEl, btnShare;
+
 function initShare() {
   btnShare = document.getElementById('btn-share');
   toastEl = document.getElementById('toast');
   if (btnShare) btnShare.addEventListener('click', shareCurrent);
 }
+
 function buildShareUrl() {
   const params = new URLSearchParams();
   params.set('t', String(Math.round(state.timelineMax * 100)));
@@ -4388,6 +4884,7 @@ function buildShareUrl() {
   if (hidden.length) params.set('hide', hidden.join(','));
   return window.location.origin + window.location.pathname + '?' + params.toString();
 }
+
 function parseUrlParams(search) {
   const out = {};
   const p = new URLSearchParams(search || '');
@@ -4420,6 +4917,7 @@ function showToast(msg) {
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2000);
 }
+
 async function applyUrlParamsLate() {
   const params = parseUrlParams(window.location.search);
 
@@ -4458,37 +4956,41 @@ async function applyUrlParamsLate() {
   }
 }
 
+    return { initShare, buildShareUrl, parseUrlParams, applyUrlParamsLate };
+  })();
 
-// --- src/main.js ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  // --- src/main.js ---
+  __M["src/main.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { stepPhysics, createSim } = __M["src/core/layout.js"];
+    const { draw } = __M["src/view/renderer.js"];
+    const { generateStarfield, drawStarfield } = __M["src/view/starfield.js"];
+    const { ensureParticles, tickParticles, drawParticles } = __M["src/view/particles.js"];
+    const { initInteraction, isPanning, isDraggingNode } = __M["src/ui/interaction.js"];
+    const { initLoader } = __M["src/ui/loader.js"];
+    const { initDetail } = __M["src/ui/detail-panel.js"];
+    const { initTooltip } = __M["src/ui/tooltip.js"];
+    const { initTimeline, tickPlay, isPlaying } = __M["src/ui/timeline.js"];
+    const { initStory, tickStory, getFrontierNodeId, resetStory } = __M["src/ui/story-mode.js"];
+    const { initSearch } = __M["src/ui/search.js"];
+    const { initLive } = __M["src/ui/live.js"];
+    const { initKeyboard } = __M["src/ui/keyboard.js"];
+    const { initFilter } = __M["src/ui/filter.js"];
+    const { initMinimap, tickMinimap } = __M["src/ui/minimap.js"];
+    const { initStats, tickStats, recomputeStats } = __M["src/ui/stats-hud.js"];
+    const { initShare, applyUrlParamsLate } = __M["src/ui/share.js"];
+    const { initLayoutToggle, tickLayoutTransition, isRadialActive } = __M["src/ui/layout-toggle.js"];
+    const { initAudio, chirpFor } = __M["src/ui/audio.js"];
+    const { initRecorder } = __M["src/ui/recorder.js"];
+    const { initFreezeToggle } = __M["src/ui/freeze-toggle.js"];
+    const { initSpeedControl } = __M["src/ui/speed-control.js"];
+    const { initOrphansToggle } = __M["src/ui/orphans-toggle.js"];
+    const { initSnapshot } = __M["src/ui/snapshot.js"];
+    const { initThemeToggle } = __M["src/ui/theme-toggle.js"];
+    const { initSettingsModal } = __M["src/ui/settings-modal.js"];
+    const { initTopicsToggle } = __M["src/ui/topics-toggle.js"];
+    const { initDiffMode } = __M["src/ui/diff-mode.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -4541,6 +5043,7 @@ initSnapshot();
 initThemeToggle();
 initSettingsModal();
 initTopicsToggle();
+initDiffMode(getViewport);
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -4622,12 +5125,21 @@ function frame(tms) {
   tickStory(tms, state);
   tickMinimap();
   tickStats();
+  tickDiffLegend();
 
   requestAnimationFrame(frame);
+}
+
+let _diffLegendEl = null;
+function tickDiffLegend() {
+  if (!_diffLegendEl) _diffLegendEl = document.getElementById('diff-legend');
+  if (!_diffLegendEl) return;
+  _diffLegendEl.classList.toggle('show', !!state.diffMode);
 }
 requestAnimationFrame(frame);
 
 window.__viz = { state, CFG };
 
-
+    return {};
+  })();
 })(typeof window !== "undefined" ? window : this);

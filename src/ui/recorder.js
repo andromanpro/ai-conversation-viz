@@ -5,12 +5,12 @@
 let recorder = null;
 let chunks = [];
 let startedAt = 0;
-let btnEl;
+let _recBtnEl;
 let timerId = null;
 
 export function initRecorder() {
-  btnEl = document.getElementById('btn-record');
-  if (btnEl) btnEl.addEventListener('click', toggle);
+  _recBtnEl = document.getElementById('btn-record');
+  if (_recBtnEl) _recBtnEl.addEventListener('click', toggle);
 }
 
 function getSupportedMime() {
@@ -92,17 +92,17 @@ function download() {
 }
 
 function updateBtn(recording) {
-  if (!btnEl) return;
-  btnEl.textContent = recording ? '● REC 0s' : 'Record';
-  btnEl.classList.toggle('recording', recording);
+  if (!_recBtnEl) return;
+  _recBtnEl.textContent = recording ? '● REC 0s' : 'Record';
+  _recBtnEl.classList.toggle('recording', recording);
 }
 
 function updateTimer() {
-  if (!btnEl || !recorder) return;
+  if (!_recBtnEl || !recorder) return;
   const sec = Math.floor((Date.now() - startedAt) / 1000);
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  btnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
 }
 
 function showToast(msg) {

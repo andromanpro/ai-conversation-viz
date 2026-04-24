@@ -14,7 +14,28 @@ function timelineCutoff(state) {
   return tsMin + (tsMax - tsMin) * state.timelineMax;
 }
 
-function glowRgba(role, alpha, node, topicsMode) {
+// Diff palette
+//   A-only: розовато-фуксиевый (теряется в A)
+//   B-only: бирюзовый (добавлено в B)
+//   both  : нейтрально-тёплый серый
+function diffGlowRgba(origin, alpha) {
+  if (origin === 'A') return `rgba(255, 96, 175, ${alpha})`;
+  if (origin === 'B') return `rgba(90, 210, 255, ${alpha})`;
+  return `rgba(200, 200, 210, ${alpha * 0.75})`;
+}
+function diffCoreRgba(origin, alpha) {
+  if (origin === 'A') return `rgba(255, 130, 190, ${alpha})`;
+  if (origin === 'B') return `rgba(120, 220, 255, ${alpha})`;
+  return `rgba(220, 220, 230, ${alpha})`;
+}
+function diffCoreDark(origin, alpha) {
+  if (origin === 'A') return `rgba(140, 30, 90, ${alpha})`;
+  if (origin === 'B') return `rgba(20, 100, 140, ${alpha})`;
+  return `rgba(120, 120, 130, ${alpha})`;
+}
+
+function glowRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffGlowRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
   }
@@ -23,7 +44,8 @@ function glowRgba(role, alpha, node, topicsMode) {
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreRgba(role, alpha, node, topicsMode) {
+function coreRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffCoreRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
   }
@@ -32,7 +54,8 @@ function coreRgba(role, alpha, node, topicsMode) {
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreDarkRgba(role, alpha, node, topicsMode) {
+function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
+  if (diffMode && node && node._diffOrigin) return diffCoreDark(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
   }
@@ -41,7 +64,8 @@ function coreDarkRgba(role, alpha, node, topicsMode) {
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha) {
+function edgeRgba(childRole, alpha, edge, diffMode) {
+  if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
@@ -248,7 +272,7 @@ export function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
@@ -280,15 +304,16 @@ export function draw(ctx, state, tSec, viewport, extras) {
 
     // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
     const topicsMode = !!state.topicsMode;
+    const diffMode = !!state.diffMode;
     if (perfMode !== 'minimal') {
       const glowR = r * CFG.nodeGlowRadiusMul;
       const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
       if (perfMode === 'degraded') {
-        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode);
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode, diffMode);
       } else {
         const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode));
-        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode));
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode, diffMode));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode, diffMode));
         ctx.fillStyle = glowGrad;
       }
       ctx.beginPath();
@@ -298,11 +323,11 @@ export function draw(ctx, state, tSec, viewport, extras) {
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode));
-      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode));
+      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode, diffMode));
+      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode, diffMode));
       ctx.fillStyle = grad;
     } else {
-      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode);
+      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode, diffMode);
     }
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);

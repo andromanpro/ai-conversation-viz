@@ -1,16 +1,16 @@
 // Dark/light toggle. Переключает CSS-переменные через [data-theme] на <html>.
 // Сохраняется в localStorage.
 
-let btn;
+let _themeBtn;
 const KEY = 'viz-theme';
 
 export function initThemeToggle() {
-  btn = document.getElementById('btn-theme');
+  _themeBtn = document.getElementById('btn-theme');
   // Применяем сохранённое значение при старте
   const saved = localStorage.getItem(KEY);
   if (saved === 'light') applyTheme('light');
   else applyTheme('dark');
-  if (btn) btn.addEventListener('click', toggle);
+  if (_themeBtn) _themeBtn.addEventListener('click', toggle);
   updateBtn();
 }
 
@@ -28,11 +28,11 @@ function applyTheme(theme) {
 }
 
 function updateBtn() {
-  if (!btn) return;
+  if (!_themeBtn) return;
   const theme = document.documentElement.dataset.theme || 'dark';
-  btn.textContent = theme === 'dark' ? '☀' : '🌙';
-  btn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
-  btn.classList.toggle('active-theme', theme === 'light');
+  _themeBtn.textContent = theme === 'dark' ? '☀' : '🌙';
+  _themeBtn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+  _themeBtn.classList.toggle('active-theme', theme === 'light');
 }
 
 export function getTheme() {

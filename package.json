@@ -1,6 +1,6 @@
 {
   "name": "@andromanpro/ai-conversation-viz",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Force-directed visualization of human↔AI conversation sessions. Parses Claude Code JSONL, ChatGPT exports, Anthropic API messages. Zero deps, Canvas 2D (WebGL 3D option).",
   "type": "module",
   "main": "./dist/ai-conversation-viz.js",

@@ -3,10 +3,10 @@ import { state } from '../view/state.js';
 let barEl, inputEl, countEl, closeEl;
 let matches = [];
 let currentIndex = 0;
-let getViewport = () => ({ cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
+let _srchGetViewport = () => ({ cx: window.innerWidth / 2, cy: window.innerHeight / 2 });
 
-export function initSearch(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+export function initSearch(_srchGetViewportFn) {
+  if (_srchGetViewportFn) _srchGetViewport = _srchGetViewportFn;
   barEl = document.getElementById('search-bar');
   inputEl = document.getElementById('search-input');
   countEl = document.getElementById('search-count');
@@ -96,7 +96,7 @@ function focusMatch() {
   if (!node) return;
   state.searchActive = id;
   state.selected = node;
-  const vp = getViewport();
+  const vp = _srchGetViewport();
   const cx = vp.cx != null ? vp.cx : window.innerWidth / 2;
   const cy = vp.cy != null ? vp.cy : window.innerHeight / 2;
   state.cameraTarget = {

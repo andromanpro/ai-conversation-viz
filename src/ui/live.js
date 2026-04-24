@@ -9,15 +9,15 @@ let urlInput, btnStart, btnStop, statusEl;
 let pollingId = null;
 let lastByteLen = 0;
 let lastUrl = '';
-let getViewport = () => ({
+let _liveGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
 
-export function initLive(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+export function initLive(_liveGetViewportFn) {
+  if (_liveGetViewportFn) _liveGetViewport = _liveGetViewportFn;
   urlInput = document.getElementById('live-url');
   btnStart = document.getElementById('btn-live-start');
   btnStop = document.getElementById('btn-live-stop');
@@ -75,7 +75,7 @@ async function pullOnce() {
       for (const p of parsed) newRaw.push(p);
     }
     if (newRaw.length) {
-      const added = appendRawNodes(state, newRaw, getViewport());
+      const added = appendRawNodes(state, newRaw, _liveGetViewport());
       ensureParticles(state.edges);
       if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное

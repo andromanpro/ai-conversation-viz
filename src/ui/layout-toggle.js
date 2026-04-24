@@ -4,15 +4,15 @@ import { computeRadialLayout, computeSwimLanes, easeInOutQuad, fitToView, reheat
 
 let btns = []; // {mode, el}
 let transition = null;
-let getViewport = () => ({
+let _ltGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
 
-export function initLayoutToggle(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+export function initLayoutToggle(_ltGetViewportFn) {
+  if (_ltGetViewportFn) _ltGetViewport = _ltGetViewportFn;
   const host = document.getElementById('layout-switch');
   if (!host) return;
   host.innerHTML = '';
@@ -41,9 +41,9 @@ function switchTo(toMode) {
   for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
   let to;
   if (toMode === 'radial') {
-    to = computeRadialLayout(state.nodes, state.byId, getViewport());
+    to = computeRadialLayout(state.nodes, state.byId, _ltGetViewport());
   } else if (toMode === 'swim') {
-    to = computeSwimLanes(state.nodes, getViewport());
+    to = computeSwimLanes(state.nodes, _ltGetViewport());
   } else {
     to = new Map();
     for (const n of state.nodes) {
@@ -54,7 +54,7 @@ function switchTo(toMode) {
   // Автофит камеры под новую раскладку после transition
   setTimeout(() => {
     if (state.nodes.length) {
-      const cam = fitToView(state.nodes, getViewport());
+      const cam = fitToView(state.nodes, _ltGetViewport());
       state.cameraTarget = { x: cam.x, y: cam.y, scale: cam.scale };
     }
   }, CFG.layoutTransitionMs + 50);

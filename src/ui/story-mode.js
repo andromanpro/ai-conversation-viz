@@ -1,5 +1,5 @@
 import { CFG } from '../core/config.js';
-import { isPlaying } from './timeline.js';
+// isPlaying читается через state.isPlaying (избегаем циклического импорта с timeline.js)
 import { toolIcon } from '../view/tool-icons.js';
 
 let streamEl, phoneEl;
@@ -204,7 +204,7 @@ export function rebuildSeen(state) {
 }
 
 export function tickStory(nowMs, state) {
-  const active = isPlaying() && state.nodes.length > 0;
+  const active = !!state.isPlaying && state.nodes.length > 0;
   if (!active) {
     // Когда play выключен — чистим очередь (manual режим)
     if (pendingQueue.length) pendingQueue.length = 0;

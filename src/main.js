@@ -27,6 +27,7 @@ import { initSnapshot } from './ui/snapshot.js';
 import { initThemeToggle } from './ui/theme-toggle.js';
 import { initSettingsModal } from './ui/settings-modal.js';
 import { initTopicsToggle } from './ui/topics-toggle.js';
+import { initDiffMode } from './ui/diff-mode.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -79,6 +80,7 @@ initSnapshot();
 initThemeToggle();
 initSettingsModal();
 initTopicsToggle();
+initDiffMode(getViewport);
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -160,8 +162,16 @@ function frame(tms) {
   tickStory(tms, state);
   tickMinimap();
   tickStats();
+  tickDiffLegend();
 
   requestAnimationFrame(frame);
+}
+
+let _diffLegendEl = null;
+function tickDiffLegend() {
+  if (!_diffLegendEl) _diffLegendEl = document.getElementById('diff-legend');
+  if (!_diffLegendEl) return;
+  _diffLegendEl.classList.toggle('show', !!state.diffMode);
 }
 requestAnimationFrame(frame);
 

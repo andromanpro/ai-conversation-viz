@@ -8,7 +8,7 @@ let ambientNodes = [];
 let arpeggioTimer = null;
 let delayIn = null;
 let enabled = false;
-let btnEl;
+let _audioBtnEl;
 
 // Pad: C3 + G3 + C4 — открытая квинта с октавой (major key fundamental)
 const PAD_VOICES = [
@@ -40,8 +40,8 @@ const CHIRP_GAIN = 0.06;
 const CHIRP_DURATION = 0.32;
 
 export function initAudio() {
-  btnEl = document.getElementById('btn-audio');
-  if (btnEl) btnEl.addEventListener('click', toggleAudio);
+  _audioBtnEl = document.getElementById('btn-audio');
+  if (_audioBtnEl) _audioBtnEl.addEventListener('click', toggleAudio);
   updateBtn();
 }
 
@@ -187,10 +187,10 @@ function toggleAudio() {
 }
 
 function updateBtn() {
-  if (!btnEl) return;
-  btnEl.textContent = enabled ? '♫' : '♪';
-  btnEl.setAttribute('aria-label', enabled ? 'Sound on' : 'Sound off');
-  btnEl.classList.toggle('active-audio', enabled);
+  if (!_audioBtnEl) return;
+  _audioBtnEl.textContent = enabled ? '♫' : '♪';
+  _audioBtnEl.setAttribute('aria-label', enabled ? 'Sound on' : 'Sound off');
+  _audioBtnEl.classList.toggle('active-audio', enabled);
 }
 
 export function chirpFor(node) {

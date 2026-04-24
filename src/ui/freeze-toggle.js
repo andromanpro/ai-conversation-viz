@@ -1,11 +1,11 @@
 import { state } from '../view/state.js';
 import { freeze, unfreeze } from '../core/layout.js';
 
-let btn;
+let _frzBtn;
 
 export function initFreezeToggle() {
-  btn = document.getElementById('btn-freeze');
-  if (btn) btn.addEventListener('click', toggle);
+  _frzBtn = document.getElementById('btn-freeze');
+  if (_frzBtn) _frzBtn.addEventListener('click', toggle);
   updateFreezeBtn();
 }
 
@@ -20,8 +20,8 @@ function toggle() {
 
 /** Вызывается из interaction.js когда drag авто-размораживает, и при init. */
 export function updateFreezeBtn() {
-  if (!btn) return;
+  if (!_frzBtn) return;
   const frozen = state.sim && state.sim.manualFrozen;
-  btn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
-  btn.classList.toggle('active-freeze', !!frozen);
+  _frzBtn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
+  _frzBtn.classList.toggle('active-freeze', !!frozen);
 }

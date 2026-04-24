@@ -1,11 +1,11 @@
 import { state } from '../view/state.js';
 import { applyTopicsToNodes } from '../view/topics.js';
 
-let btn;
+let _topicBtn;
 
 export function initTopicsToggle() {
-  btn = document.getElementById('btn-topics');
-  if (btn) btn.addEventListener('click', toggle);
+  _topicBtn = document.getElementById('btn-topics');
+  if (_topicBtn) _topicBtn.addEventListener('click', toggle);
   updateBtn();
 }
 
@@ -21,7 +21,7 @@ function toggle() {
 }
 
 function updateBtn() {
-  if (!btn) return;
-  btn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
-  btn.classList.toggle('active-topics', !!state.topicsMode);
+  if (!_topicBtn) return;
+  _topicBtn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
+  _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
 }

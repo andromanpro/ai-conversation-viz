@@ -1,12 +1,12 @@
 // PNG/SVG-снимок текущего view. PNG через canvas.toBlob, SVG через
 // ручную сериализацию (без html2canvas — zero deps принцип).
 
-let btn;
+let _snapBtn;
 
 export function initSnapshot() {
-  btn = document.getElementById('btn-snapshot');
-  if (!btn) return;
-  btn.addEventListener('click', showMenu);
+  _snapBtn = document.getElementById('btn-snapshot');
+  if (!_snapBtn) return;
+  _snapBtn.addEventListener('click', showMenu);
 }
 
 function showMenu() {
@@ -15,7 +15,7 @@ function showMenu() {
   const menu = document.createElement('div');
   menu.id = 'snapshot-menu';
   menu.className = 'snapshot-menu';
-  const rect = btn.getBoundingClientRect();
+  const rect = _snapBtn.getBoundingClientRect();
   menu.style.left = rect.left + 'px';
   menu.style.top = (rect.bottom + 4) + 'px';
   const mkBtn = (label, fn) => {
@@ -32,7 +32,7 @@ function showMenu() {
   // Закрытие при клике вне
   setTimeout(() => {
     const off = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== btn) {
+      if (!menu.contains(ev.target) && ev.target !== _snapBtn) {
         menu.remove();
         document.removeEventListener('click', off);
       }

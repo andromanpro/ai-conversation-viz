@@ -65,6 +65,23 @@
   .snapshot-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
   .btn.active-theme { border-color: var(--accent); color: var(--accent); }
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
+  .btn.active-diff { border-color: #5ad2ff; color: #5ad2ff; }
+  #diff-drop { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.72); backdrop-filter: blur(5px); z-index: 60; display: none; align-items: center; justify-content: center; }
+  #diff-drop.show { display: flex; }
+  #diff-drop-body { width: min(520px, 90vw); padding: 28px 26px; background: var(--panel); border: 2px dashed rgba(90, 210, 255, 0.5); border-radius: 8px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.6); transition: border-color .15s, background .15s; }
+  #diff-drop.hover #diff-drop-body { border-color: #5ad2ff; background: rgba(90,210,255,0.06); }
+  #diff-drop h3 { margin: 0 0 10px; color: var(--text); font-size: 14px; letter-spacing: 0.08em; }
+  #diff-drop p { margin: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  #diff-drop-hint { color: #5ad2ff; font-family: ui-monospace, monospace; font-size: 12px; margin: 18px 0; }
+  #diff-drop-error { color: #ff9999; font-size: 11px; margin-top: 10px; min-height: 14px; }
+  #diff-drop-actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+  .diff-legend { position: fixed; bottom: 60px; right: 16px; z-index: 11; pointer-events: none; display: none; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; font-size: 11px; letter-spacing: 0.04em; }
+  .diff-legend.show { display: block; }
+  .diff-legend .row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .diff-legend .swatch { width: 10px; height: 10px; border-radius: 50%; }
+  .diff-legend .sw-a { background: #ff60af; box-shadow: 0 0 8px rgba(255,96,175,0.5); }
+  .diff-legend .sw-b { background: #5ad2ff; box-shadow: 0 0 8px rgba(90,210,255,0.5); }
+  .diff-legend .sw-both { background: #c8c8d6; }
   .settings-modal { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.5); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
   .settings-body { max-width: 540px; width: 90vw; max-height: 85vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
   .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 14px; letter-spacing: 0.08em; color: var(--text); }
@@ -204,8 +221,10 @@
     <button class="btn" id="btn-orphans" title="Toggle orphan connectivity (O)">🔗 Connect orphans</button>
     <button class="btn" id="btn-theme" title="Toggle light/dark theme (T)">☀</button>
     <button class="btn" id="btn-topics" title="TF-IDF topic clusters">🧬 Topics</button>
+    <button class="btn" id="btn-diff" title="Сравнить с другой сессией (diff)">🔀 Diff</button>
     <button class="btn" id="btn-settings" title="Settings (,)">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
+    <input type="file" id="diff-file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="live-row">
     <input type="text" id="live-url" placeholder="Live JSONL URL…">
@@ -275,6 +294,26 @@
 <div id="toast">—</div>
 <div id="drop-hint"><div class="box">drop jsonl to visualize</div></div>
 <div id="error"></div>
+
+<div id="diff-drop">
+  <div id="diff-drop-body">
+    <h3>🔀 Сравнить сессии</h3>
+    <p>Перетащите второй JSONL / ChatGPT-export / Anthropic messages</p>
+    <div id="diff-drop-hint">Drop file here</div>
+    <p>Одинаковые сообщения станут <span style="color:#c8c8d6">общими</span>, уникальные — <span style="color:#ff60af">A</span> / <span style="color:#5ad2ff">B</span>.</p>
+    <div id="diff-drop-error"></div>
+    <div id="diff-drop-actions">
+      <button class="btn" id="diff-browse">Открыть файл…</button>
+      <button class="btn" id="diff-cancel">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<div class="diff-legend" id="diff-legend">
+  <div class="row"><span class="swatch sw-a"></span>только A</div>
+  <div class="row"><span class="swatch sw-b"></span>только B</div>
+  <div class="row"><span class="swatch sw-both"></span>общие</div>
+</div>
 
 <script src="./dist/ai-conversation-viz.js"></script>
 </body>

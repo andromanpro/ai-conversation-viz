@@ -4,15 +4,15 @@ import { state } from '../view/state.js';
 let canvasEl, ctx, dpr = 1;
 let tf = null; // сохранённая трансформация для click->world
 let frameCounter = 0;
-let getViewport = () => ({
+let _mmGetViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
   cx: window.innerWidth / 2,
   cy: window.innerHeight / 2,
 });
 
-export function initMinimap(getViewportFn) {
-  if (getViewportFn) getViewport = getViewportFn;
+export function initMinimap(_mmGetViewportFn) {
+  if (_mmGetViewportFn) _mmGetViewport = _mmGetViewportFn;
   canvasEl = document.getElementById('minimap');
   if (!canvasEl) return;
   dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -89,7 +89,7 @@ export function tickMinimap() {
 
   // viewport rectangle
   const cam = state.camera;
-  const vp = getViewport();
+  const vp = _mmGetViewport();
   const vw = vp.width / cam.scale;
   const vh = vp.height / cam.scale;
   const tl = w2m(cam.x, cam.y);
@@ -112,7 +112,7 @@ function onClick(ev) {
   const my = ev.clientY - rect.top;
   const wx = (mx - tf.ox) / tf.s + tf.minX;
   const wy = (my - tf.oy) / tf.s + tf.minY;
-  const vp = getViewport();
+  const vp = _mmGetViewport();
   const cx = vp.cx != null ? vp.cx : vp.width / 2;
   const cy = vp.cy != null ? vp.cy : vp.height / 2;
   state.cameraTarget = {
