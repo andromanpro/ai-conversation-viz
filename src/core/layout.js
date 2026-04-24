@@ -12,6 +12,8 @@ export function createSim(opts = {}) {
     velocityDecay: opts.velocityDecay != null ? opts.velocityDecay : CFG.velocityDecay,
     frozen: false,
     manualFrozen: false,
+    // UI-флаг: включены ли adopted-edges в физику. Меняется из ui/orphans-toggle.
+    connectOrphans: !!opts.connectOrphans,
   };
 }
 
@@ -118,7 +120,10 @@ export function stepPhysics(nodes, edges, viewport, sim) {
   // spring (hub-safe: strength ~ 1/sqrt(min deg)); усиливаем для leaf-edges.
   // Adopted-edges (orphan → ts-predecessor) участвуют в физике только когда
   // включён connectOrphans. Иначе orphan forest лежит отдельно.
-  const connectOrphans = !!(edges.length && typeof window !== 'undefined' && window.__viz && window.__viz.state && window.__viz.state.connectOrphans);
+  //
+  // connectOrphans передаётся через sim.connectOrphans чтобы core-модуль
+  // не зависел от window.__viz.state (развязка core ↔ UI).
+  const connectOrphans = !!(sim && sim.connectOrphans);
   for (const e of edges) {
     if (e.adopted && !connectOrphans) continue;
     const a = e.a, b = e.b;

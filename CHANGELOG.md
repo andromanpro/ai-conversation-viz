@@ -1,0 +1,226 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+versioning follows [Semantic Versioning](https://semver.org/).
+
+## [1.0.0] — 2026-04-25
+
+First stable release. Feature-complete for the intended pet-project use case
+(visualizing Claude Code JSONL sessions + ChatGPT / Anthropic API exports).
+
+### Added
+
+- **Architecture decoupling** — `src/core/layout.js` no longer reads
+  `window.__viz.state`. `connectOrphans` flows through `sim.connectOrphans`.
+- **WebGL context-lost handling** — renderer tolerates GPU reset without
+  requiring a page reload.
+- **Live-stream node cap** (`CFG.liveMaxNodes = 5000`) with FIFO eviction by
+  timestamp, preventing unbounded growth in long-running tails.
+- **Session-picker LRU** — at most 20 sessions keep `.content` in memory;
+  older ones drop content (meta retained, re-fetch on click if remote).
+- **Typewriter GC guard** — detect detached DOM (`textEl.isConnected`) and
+  stop the timer to prevent closure leak.
+- **Snapshot menu** correctly removes its outside-click listener when a
+  menu item is clicked (previously leaked one listener per menu open).
+- `.editorconfig`, `.gitattributes`, expanded `.gitignore`.
+- `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`.
+
+### Changed
+
+- Removed `console.log('[topics] top words:')` from production.
+- Light theme removed (dark cyberpunk only).
+
+## [0.15.1] — 2026-04-25
+
+### Added
+
+- `samples/multi-agent-orchestration.jsonl` — realistic demo of a 4-subagent
+  security audit, ~60 nodes with deep tool_use chains and a final synthesis.
+- `SECURITY.md` documenting threat model, completed audit, and accepted risks
+  (Three.js without SRI).
+
+## [0.15.0] — 2026-04-25
+
+### Added
+
+- **i18n (RU / EN)** — `src/core/i18n.js` with ~120 keys, `t(key, params)`
+  with `{name}` interpolation, language persistence in localStorage.
+- `src/ui/lang-toggle.js` — toolbar button switches between RU and EN.
+- `data-i18n` / `data-i18n-title` / `data-i18n-placeholder` / `data-i18n-aria`
+  / `data-i18n-html` attributes in HTML.
+
+## [0.14.4] — 2026-04-25
+
+### Fixed
+
+- Toggle modules (freeze, orphans, topics, diff, sessions, bookmarks, render)
+  were overwriting `textContent` with long labels that overflowed 30×30
+  icon buttons. Now icon-only with full description in `title`.
+
+### Added
+
+- Count badges on icon buttons (`data-badge` attribute, CSS `::after`).
+
+## [0.14.3] — 2026-04-25
+
+### Changed
+
+- Toolbar split into two rows: primary (text) + secondary (icon-only with
+  separators). Fits comfortably on 1440px wide screens.
+- Light theme removed; always dark cyberpunk.
+
+## [0.14.2] — 2026-04-25
+
+### Added
+
+- **3D volumetric orbs** — custom `ShaderMaterial` with Fresnel rim, pulsing
+  white-hot core, breath animation. Replaces flat `MeshStandardMaterial`.
+- **UnrealBloomPass** for real glow. Orbs light up their surroundings.
+- **3D node dragging** — pointerdown picks, ray-plane intersect drives motion
+  in a plane coplanar to camera direction; `reheat(sim, 0.3)` at end.
+- Prominent "🌐 3D →" and "← 2D mode" navigation buttons.
+
+## [0.14.1] — 2026-04-25
+
+### Added
+
+- **WebGL renderer** made default. Five passes: starfield, edge lines, edge
+  particles, hub rings, nodes (multi-layer glow + individual breath pulse).
+- Fallback to Canvas 2D when WebGL unavailable.
+
+## [0.14.0] — 2026-04-24
+
+### Added
+
+- WebGL renderer (`src/view/renderer-webgl.js`) as alternative to Canvas 2D.
+  Nodes as `gl.POINTS`, edges as batched `gl.LINES` bezier segments.
+- Second `#graph-webgl` canvas + render-toggle.
+
+## [0.13.0] — 2026-04-24
+
+### Added
+
+- **Annotations** — star ⭐ and freeform note ✍ per node, persisted in
+  localStorage keyed by the first node's id.
+- **Bookmarks panel** — sidebar listing starred nodes, click zooms camera.
+- Hotkeys `S` (toggle star on selected), `B` (open bookmarks).
+
+## [0.12.4] — 2026-04-24
+
+### Fixed
+
+- Security audit — `safeFetch()` wraps all user-supplied URLs with scheme
+  whitelist (`http`/`https`/relative only). `?hide=<roles>` validated
+  against known roles.
+
+## [0.12.3] — 2026-04-24
+
+### Fixed
+
+- Session handoff 2D ↔ 3D via sessionStorage (was showing sample after
+  switching modes).
+- Halo visibility in 3D synced with node birth (was pre-filled before play).
+
+## [0.12.2] — 2026-04-24
+
+### Added
+
+- Clickable topic legend — click a topic to filter the graph.
+
+## [0.12.1] — 2026-04-24
+
+### Fixed
+
+- Topics algorithm picked action verbs (`implement`, `fix`) instead of
+  subject nouns (`authentication`, `database`). Switched from classic
+  `TF × log(N/df)` to `TF × log(1 + df)` with singleton filtering.
+
+## [0.12.0] — 2026-04-24
+
+### Added
+
+- 3D visual polish — edges track nodes (dynamic `LineSegments`), cross-torus
+  hub rings, halo glow, z-jitter for parallax.
+
+## [0.11.0] — 2026-04-24
+
+### Added
+
+- 3D feature parity — hub rings, orphan markers, topic/diff coloring,
+  search highlight, role filter, stats panel, dark/light theme (then
+  removed in 0.14.3).
+
+## [0.10.0] — 2026-04-24
+
+### Added
+
+- **Session picker** — drop multiple JSONL files, switch between them in
+  a sidebar. URL param `?sessions=<index-url>` for remote JSON index with
+  lazy content loading.
+
+## [0.9.0] — 2026-04-24
+
+### Added
+
+- **Diff mode** — drop a second JSONL to compare sessions. FNV-1a hash of
+  role + first 300 chars matches messages. Unique to A / B get distinct
+  colors, common gray.
+- Rewrote `build.cjs` as proper module-namespace bundler with topological
+  sort. Fixed silent collisions in pre-existing bundle (`let btn` × 6,
+  `let getViewport` × 5).
+- Broke timeline ↔ story-mode circular import via `state.isPlaying`.
+
+## [0.8.0] — 2026-04-24
+
+### Added
+
+- Settings modal with 19 live-tunable physics/visual/playback parameters.
+- TF-IDF topic clusters with hue-hashed coloring.
+
+## [0.7.0] — 2026-04-24
+
+### Added
+
+- Published to npm as `@andromanpro/ai-conversation-viz`.
+- `src/embed.js` — programmatic mount API.
+
+## [0.6.0] — 2026-04-24
+
+### Added
+
+- Radial sunburst + swim-lanes layouts (switchable with chip group).
+- ChatGPT export + Anthropic messages adapters.
+
+## [0.5.0] — 2026-04-24
+
+### Added
+
+- Physics rewrite — D3-style alpha cooling, Velocity Verlet, adaptive
+  centerPull, leaf-spring boost, soft-wall bounds, max-velocity clamp.
+- Hub auto-detection, freeze toggle, speed slider (0.5×/1×/2×/5×).
+
+## [0.4.0] — 2026-04-24
+
+### Added
+
+- Keyboard shortcuts, role filter, minimap, stats HUD, share URL.
+
+## [0.3.0] — 2026-04-24
+
+### Added
+
+- Tool icons, Ctrl+F search, live-stream URL polling, UX polish.
+
+## [0.2.0] — 2026-04-24
+
+### Added
+
+- Wow effects — particles along edges, starfield, phone mockup with
+  typewriter.
+
+## [0.1.0] — 2026-04-24
+
+### Added
+
+- Initial force-directed visualization of Claude Code JSONL sessions.

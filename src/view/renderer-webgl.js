@@ -303,6 +303,20 @@ export function initWebglRenderer(canvas) {
     || canvas.getContext('experimental-webgl', { antialias: true, premultipliedAlpha: false, alpha: false });
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
+  // WebGL context может быть потерян (вкладка в фоне долго, или GPU переключается
+  // между iGPU/dGPU). Предотвращаем default behavior (чтобы context можно было
+  // восстановить) и сбрасываем наш ref, чтобы drawWebgl() стал no-op.
+  canvas.addEventListener('webglcontextlost', (ev) => {
+    ev.preventDefault();
+    gl = null;
+    pointProg = hubProg = lineProg = particleProg = starProg = null;
+    pointBuf = hubBuf = lineBuf = particleBuf = starBuf = null;
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    // Рекомпилируем shaders и создаём buffers заново
+    try { initWebglRenderer(canvas); } catch (e) { /* браузер не восстановил */ }
+  }, false);
+
   pointProg = compileProgram(gl, POINT_VS, POINT_FS);
   hubProg = compileProgram(gl, HUB_VS, HUB_FS);
   lineProg = compileProgram(gl, LINE_VS, LINE_FS);

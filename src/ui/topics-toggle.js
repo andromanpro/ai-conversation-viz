@@ -18,7 +18,6 @@ function toggle() {
   state.topicsMode = !state.topicsMode;
   if (state.topicsMode && state.nodes.length) {
     const top = applyTopicsToNodes(state.nodes);
-    console.log('[topics] top words:', top);
     renderLegend(top);
   } else {
     state.topicFilter = null; // при выключении режима убираем и фильтр

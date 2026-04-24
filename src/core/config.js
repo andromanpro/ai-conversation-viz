@@ -73,6 +73,7 @@ export const CFG = {
   searchPulseFreq: 3.5,
   livePollMs: 800,
   liveReconnectMs: 2500,
+  liveMaxNodes: 5000,
   minimapW: 170,
   minimapH: 110,
   minimapEveryNFrames: 3,

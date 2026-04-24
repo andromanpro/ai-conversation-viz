@@ -51,6 +51,22 @@ function togglePanel() {
  * @param {FileList | Array<File>} files
  * @param {{ autoLoadFirst?: boolean }} opts
  */
+// Лимит на количество сессий с content в памяти. Выше — старые теряют
+// .content (meta остаётся, при клике re-load из File если локальная или
+// из remoteUrl если удалённая). Не даст 50-ти 30MB-файлам съесть 1.5GB RAM.
+const MAX_SESSIONS_WITH_CONTENT = 20;
+
+function evictOldestContent(keepId) {
+  // Простой LRU по touchedAt — но мы его не храним. Альтернатива:
+  // сохраняем порядок добавления (индекс массива) и сбрасываем content
+  // у самых старых (кроме активной).
+  const withContent = state.sessions.filter(s => s.content && s.id !== keepId);
+  while (withContent.length > MAX_SESSIONS_WITH_CONTENT - 1 && withContent.length) {
+    const victim = withContent.shift();
+    victim.content = null; // meta остаётся
+  }
+}
+
 export async function addSessionFiles(files, opts = {}) {
   if (!files || !files.length) return;
   const added = [];
@@ -72,10 +88,12 @@ export async function addSessionFiles(files, opts = {}) {
     if (existing >= 0) state.sessions[existing] = s;
     else state.sessions.push(s);
   }
+  // LRU eviction — держим в памяти только MAX_SESSIONS_WITH_CONTENT
+  evictOldestContent(added.length ? added[0].id : null);
   render();
   if (opts.autoLoadFirst && added.length) {
     selectSession(added[0].id);
-    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel(); // показать список когда 2+
+    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel();
   }
 }
 

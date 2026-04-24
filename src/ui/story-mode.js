@@ -55,6 +55,14 @@ function typeOut(textEl, fullText) {
     : 1;
   let i = 0;
   const tick = () => {
+    // Если bubble уже удалён из DOM (history trim / resetStory) —
+    // прекращаем таймер, иначе closure будет писать в detached DOM и
+    // удерживать его от GC. Проверка isConnected — ES2019+, в поддерживаемых
+    // браузерах всегда доступна.
+    if (!textEl.isConnected) {
+      textEl._typeTimer = null;
+      return;
+    }
     i = Math.min(total, i + stepPerTick);
     textEl.textContent = fullText.slice(0, i);
     if (streamEl) streamEl.scrollTop = streamEl.scrollHeight;

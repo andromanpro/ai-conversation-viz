@@ -1,0 +1,31 @@
+# Нормализуем line-endings — критично при Windows/Unix mix.
+# Без этого любой Windows-PR приносит CRLF в файлы и разрывает diff.
+* text=auto eol=lf
+
+# Явно text-файлы
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.svg   text eol=lf
+
+# Бинарные
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.webm  binary
+*.mp4   binary
+*.woff  binary
+*.woff2 binary
+
+# GitHub linguist — не засчитывать bundle как "наш" код
+dist/ai-conversation-viz.js linguist-generated=true
+samples/*.jsonl              linguist-generated=true

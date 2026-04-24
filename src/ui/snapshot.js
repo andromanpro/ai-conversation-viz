@@ -1,6 +1,8 @@
 // PNG/SVG-снимок текущего view. PNG через canvas.toBlob, SVG через
 // ручную сериализацию (без html2canvas — zero deps принцип).
 
+import { t } from '../core/i18n.js';
+
 let _snapBtn;
 
 export function initSnapshot() {
@@ -18,26 +20,36 @@ function showMenu() {
   const rect = _snapBtn.getBoundingClientRect();
   menu.style.left = rect.left + 'px';
   menu.style.top = (rect.bottom + 4) + 'px';
+
+  // Один handler закрытия меню, используется и для click-outside и для
+  // выбора пункта — гарантирует снятие global listener'а в любом случае.
+  let outsideHandler = null;
+  const closeMenu = () => {
+    menu.remove();
+    if (outsideHandler) {
+      document.removeEventListener('click', outsideHandler);
+      outsideHandler = null;
+    }
+  };
+
   const mkBtn = (label, fn) => {
     const b = document.createElement('button');
     b.className = 'snapshot-menu-item';
     b.textContent = label;
-    b.addEventListener('click', () => { menu.remove(); fn(); });
+    b.addEventListener('click', () => { closeMenu(); fn(); });
     menu.appendChild(b);
   };
-  mkBtn('⬇ PNG (1×)', () => savePng(1));
-  mkBtn('⬇ PNG (2× — retina)', () => savePng(2));
-  mkBtn('⬇ SVG (ноды и рёбра)', () => saveSvg());
+  mkBtn(t('snapshot.png_1x'), () => savePng(1));
+  mkBtn(t('snapshot.png_2x'), () => savePng(2));
+  mkBtn(t('snapshot.svg'), () => saveSvg());
   document.body.appendChild(menu);
-  // Закрытие при клике вне
+
+  // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)
   setTimeout(() => {
-    const off = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== _snapBtn) {
-        menu.remove();
-        document.removeEventListener('click', off);
-      }
+    outsideHandler = (ev) => {
+      if (!menu.contains(ev.target) && ev.target !== _snapBtn) closeMenu();
     };
-    document.addEventListener('click', off);
+    document.addEventListener('click', outsideHandler);
   }, 0);
 }
 

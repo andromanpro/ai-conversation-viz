@@ -79,6 +79,7 @@ const CFG = {
   searchPulseFreq: 3.5,
   livePollMs: 800,
   liveReconnectMs: 2500,
+  liveMaxNodes: 5000,
   minimapW: 170,
   minimapH: 110,
   minimapEveryNFrames: 3,
@@ -782,6 +783,8 @@ function createSim(opts = {}) {
     velocityDecay: opts.velocityDecay != null ? opts.velocityDecay : CFG.velocityDecay,
     frozen: false,
     manualFrozen: false,
+    // UI-флаг: включены ли adopted-edges в физику. Меняется из ui/orphans-toggle.
+    connectOrphans: !!opts.connectOrphans,
   };
 }
 
@@ -888,7 +891,10 @@ function stepPhysics(nodes, edges, viewport, sim) {
   // spring (hub-safe: strength ~ 1/sqrt(min deg)); усиливаем для leaf-edges.
   // Adopted-edges (orphan → ts-predecessor) участвуют в физике только когда
   // включён connectOrphans. Иначе orphan forest лежит отдельно.
-  const connectOrphans = !!(edges.length && typeof window !== 'undefined' && window.__viz && window.__viz.state && window.__viz.state.connectOrphans);
+  //
+  // connectOrphans передаётся через sim.connectOrphans чтобы core-модуль
+  // не зависел от window.__viz.state (развязка core ↔ UI).
+  const connectOrphans = !!(sim && sim.connectOrphans);
   for (const e of edges) {
     if (e.adopted && !connectOrphans) continue;
     const a = e.a, b = e.b;
@@ -1458,8 +1464,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v0.4 · force-directed',
-    'header.subtitle_standalone': 'v0.4 · standalone bundle',
+    'header.subtitle_force': 'v1.0 · force-directed',
+    'header.subtitle_standalone': 'v1.0 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1499,6 +1505,24 @@ const DICT = {
     'tip.render_canvas': 'Canvas 2D renderer — click to switch to WebGL',
     'tip.settings': 'Settings (,)',
     'tip.lang': 'Language / язык',
+    'aria.sample': 'Load sample session',
+    'aria.file': 'Open JSONL file',
+    'aria.reset': 'Reset camera to fit all nodes',
+    'aria.share': 'Copy URL with current view state',
+    'aria.audio': 'Toggle ambient sound',
+    'aria.record': 'Start or stop WebM recording',
+    'aria.snapshot': 'Save PNG or SVG snapshot',
+    'aria.freeze': 'Freeze or unfreeze graph physics',
+    'aria.orphans': 'Toggle orphan connectivity',
+    'aria.topics': 'Toggle TF-IDF topic coloring',
+    'aria.diff': 'Compare with another session',
+    'aria.sessions': 'Open sessions list',
+    'aria.bookmarks': 'Open bookmarks panel',
+    'aria.render': 'Switch rendering backend',
+    'aria.settings': 'Open settings',
+    'aria.lang': 'Switch language',
+    'aria.3d': 'Open 3D visualization',
+    'aria.close': 'Close',
     'tip.role_user': 'Toggle user',
     'tip.role_assistant': 'Toggle assistant',
     'tip.role_tool_use': 'Toggle tool_use',
@@ -1619,8 +1643,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v0.4 · force-directed',
-    'header.subtitle_standalone': 'v0.4 · standalone-сборка',
+    'header.subtitle_force': 'v1.0 · force-directed',
+    'header.subtitle_standalone': 'v1.0 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Загрузить пример',
@@ -1658,6 +1682,24 @@ const DICT = {
     'tip.render_canvas': 'Canvas 2D рендерер — клик для WebGL',
     'tip.settings': 'Настройки (,)',
     'tip.lang': 'Language / язык',
+    'aria.sample': 'Загрузить демо-сессию',
+    'aria.file': 'Открыть JSONL-файл',
+    'aria.reset': 'Сбросить камеру, уместить все ноды',
+    'aria.share': 'Скопировать URL с текущим состоянием',
+    'aria.audio': 'Переключить фоновый звук',
+    'aria.record': 'Начать/остановить запись WebM',
+    'aria.snapshot': 'Сохранить снимок PNG или SVG',
+    'aria.freeze': 'Заморозить или разморозить физику',
+    'aria.orphans': 'Переключить связь сиротских нод',
+    'aria.topics': 'Переключить кластеризацию тем',
+    'aria.diff': 'Сравнить с другой сессией',
+    'aria.sessions': 'Открыть список сессий',
+    'aria.bookmarks': 'Открыть панель закладок',
+    'aria.render': 'Переключить рендерер',
+    'aria.settings': 'Открыть настройки',
+    'aria.lang': 'Переключить язык',
+    'aria.3d': 'Открыть 3D-визуализацию',
+    'aria.close': 'Закрыть',
     'tip.role_user': 'Скрыть/показать user',
     'tip.role_assistant': 'Скрыть/показать assistant',
     'tip.role_tool_use': 'Скрыть/показать tool_use',
@@ -3137,6 +3179,20 @@ function initWebglRenderer(canvas) {
     || canvas.getContext('experimental-webgl', { antialias: true, premultipliedAlpha: false, alpha: false });
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
+  // WebGL context может быть потерян (вкладка в фоне долго, или GPU переключается
+  // между iGPU/dGPU). Предотвращаем default behavior (чтобы context можно было
+  // восстановить) и сбрасываем наш ref, чтобы drawWebgl() стал no-op.
+  canvas.addEventListener('webglcontextlost', (ev) => {
+    ev.preventDefault();
+    gl = null;
+    pointProg = hubProg = lineProg = particleProg = starProg = null;
+    pointBuf = hubBuf = lineBuf = particleBuf = starBuf = null;
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    // Рекомпилируем shaders и создаём buffers заново
+    try { initWebglRenderer(canvas); } catch (e) { /* браузер не восстановил */ }
+  }, false);
+
   pointProg = compileProgram(gl, POINT_VS, POINT_FS);
   hubProg = compileProgram(gl, HUB_VS, HUB_FS);
   lineProg = compileProgram(gl, LINE_VS, LINE_FS);
@@ -4039,6 +4095,14 @@ function typeOut(textEl, fullText) {
     : 1;
   let i = 0;
   const tick = () => {
+    // Если bubble уже удалён из DOM (history trim / resetStory) —
+    // прекращаем таймер, иначе closure будет писать в detached DOM и
+    // удерживать его от GC. Проверка isConnected — ES2019+, в поддерживаемых
+    // браузерах всегда доступна.
+    if (!textEl.isConnected) {
+      textEl._typeTimer = null;
+      return;
+    }
     i = Math.min(total, i + stepPerTick);
     textEl.textContent = fullText.slice(0, i);
     if (streamEl) streamEl.scrollTop = streamEl.scrollHeight;
@@ -4626,6 +4690,17 @@ async function pullOnce() {
     }
     if (newRaw.length) {
       const added = appendRawNodes(state, newRaw, _liveGetViewport());
+      // Cap суммарного количества нод в live-режиме. При переполнении отрезаем
+      // самые старые (по ts) — граф остаётся актуальным, но не съедает RAM.
+      const MAX_LIVE_NODES = CFG.liveMaxNodes || 5000;
+      if (state.nodes.length > MAX_LIVE_NODES) {
+        const drop = state.nodes.length - MAX_LIVE_NODES;
+        const sorted = [...state.nodes].sort((a, b) => a.ts - b.ts);
+        const toRemove = new Set(sorted.slice(0, drop).map(n => n.id));
+        state.nodes = state.nodes.filter(n => !toRemove.has(n.id));
+        state.edges = state.edges.filter(e => !toRemove.has(e.source) && !toRemove.has(e.target));
+        for (const id of toRemove) state.byId.delete(id);
+      }
       ensureParticles(state.edges);
       if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное
@@ -4908,7 +4983,11 @@ function toggleOrphans() { toggle(); }
 
 function toggle() {
   state.connectOrphans = !state.connectOrphans;
-  if (state.sim) reheat(state.sim, 0.5);
+  // Зеркалим флаг в sim чтобы core/layout не читал window.__viz.state
+  if (state.sim) {
+    state.sim.connectOrphans = state.connectOrphans;
+    reheat(state.sim, 0.5);
+  }
   update();
 }
 
@@ -5106,7 +5185,6 @@ function toggle() {
   state.topicsMode = !state.topicsMode;
   if (state.topicsMode && state.nodes.length) {
     const top = applyTopicsToNodes(state.nodes);
-    console.log('[topics] top words:', top);
     renderLegend(top);
   } else {
     state.topicFilter = null; // при выключении режима убираем и фильтр
@@ -6063,8 +6141,10 @@ function showToast(msg) {
 
   // --- src/ui/snapshot.js ---
   __M["src/ui/snapshot.js"] = (function () {
+    const { t } = __M["src/core/i18n.js"];
 // PNG/SVG-снимок текущего view. PNG через canvas.toBlob, SVG через
 // ручную сериализацию (без html2canvas — zero deps принцип).
+
 
 let _snapBtn;
 
@@ -6083,26 +6163,36 @@ function showMenu() {
   const rect = _snapBtn.getBoundingClientRect();
   menu.style.left = rect.left + 'px';
   menu.style.top = (rect.bottom + 4) + 'px';
+
+  // Один handler закрытия меню, используется и для click-outside и для
+  // выбора пункта — гарантирует снятие global listener'а в любом случае.
+  let outsideHandler = null;
+  const closeMenu = () => {
+    menu.remove();
+    if (outsideHandler) {
+      document.removeEventListener('click', outsideHandler);
+      outsideHandler = null;
+    }
+  };
+
   const mkBtn = (label, fn) => {
     const b = document.createElement('button');
     b.className = 'snapshot-menu-item';
     b.textContent = label;
-    b.addEventListener('click', () => { menu.remove(); fn(); });
+    b.addEventListener('click', () => { closeMenu(); fn(); });
     menu.appendChild(b);
   };
-  mkBtn('⬇ PNG (1×)', () => savePng(1));
-  mkBtn('⬇ PNG (2× — retina)', () => savePng(2));
-  mkBtn('⬇ SVG (ноды и рёбра)', () => saveSvg());
+  mkBtn(t('snapshot.png_1x'), () => savePng(1));
+  mkBtn(t('snapshot.png_2x'), () => savePng(2));
+  mkBtn(t('snapshot.svg'), () => saveSvg());
   document.body.appendChild(menu);
-  // Закрытие при клике вне
+
+  // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)
   setTimeout(() => {
-    const off = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== _snapBtn) {
-        menu.remove();
-        document.removeEventListener('click', off);
-      }
+    outsideHandler = (ev) => {
+      if (!menu.contains(ev.target) && ev.target !== _snapBtn) closeMenu();
     };
-    document.addEventListener('click', off);
+    document.addEventListener('click', outsideHandler);
   }, 0);
 }
 
@@ -6544,6 +6634,22 @@ function togglePanel() {
  * @param {FileList | Array<File>} files
  * @param {{ autoLoadFirst?: boolean }} opts
  */
+// Лимит на количество сессий с content в памяти. Выше — старые теряют
+// .content (meta остаётся, при клике re-load из File если локальная или
+// из remoteUrl если удалённая). Не даст 50-ти 30MB-файлам съесть 1.5GB RAM.
+const MAX_SESSIONS_WITH_CONTENT = 20;
+
+function evictOldestContent(keepId) {
+  // Простой LRU по touchedAt — но мы его не храним. Альтернатива:
+  // сохраняем порядок добавления (индекс массива) и сбрасываем content
+  // у самых старых (кроме активной).
+  const withContent = state.sessions.filter(s => s.content && s.id !== keepId);
+  while (withContent.length > MAX_SESSIONS_WITH_CONTENT - 1 && withContent.length) {
+    const victim = withContent.shift();
+    victim.content = null; // meta остаётся
+  }
+}
+
 async function addSessionFiles(files, opts = {}) {
   if (!files || !files.length) return;
   const added = [];
@@ -6565,10 +6671,12 @@ async function addSessionFiles(files, opts = {}) {
     if (existing >= 0) state.sessions[existing] = s;
     else state.sessions.push(s);
   }
+  // LRU eviction — держим в памяти только MAX_SESSIONS_WITH_CONTENT
+  evictOldestContent(added.length ? added[0].id : null);
   render();
   if (opts.autoLoadFirst && added.length) {
     selectSession(added[0].id);
-    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel(); // показать список когда 2+
+    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel();
   }
 }
 

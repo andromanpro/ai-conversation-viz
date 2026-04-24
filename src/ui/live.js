@@ -77,6 +77,17 @@ async function pullOnce() {
     }
     if (newRaw.length) {
       const added = appendRawNodes(state, newRaw, _liveGetViewport());
+      // Cap суммарного количества нод в live-режиме. При переполнении отрезаем
+      // самые старые (по ts) — граф остаётся актуальным, но не съедает RAM.
+      const MAX_LIVE_NODES = CFG.liveMaxNodes || 5000;
+      if (state.nodes.length > MAX_LIVE_NODES) {
+        const drop = state.nodes.length - MAX_LIVE_NODES;
+        const sorted = [...state.nodes].sort((a, b) => a.ts - b.ts);
+        const toRemove = new Set(sorted.slice(0, drop).map(n => n.id));
+        state.nodes = state.nodes.filter(n => !toRemove.has(n.id));
+        state.edges = state.edges.filter(e => !toRemove.has(e.source) && !toRemove.has(e.target));
+        for (const id of toRemove) state.byId.delete(id);
+      }
       ensureParticles(state.edges);
       if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное

@@ -15,7 +15,11 @@ export function toggleOrphans() { toggle(); }
 
 function toggle() {
   state.connectOrphans = !state.connectOrphans;
-  if (state.sim) reheat(state.sim, 0.5);
+  // Зеркалим флаг в sim чтобы core/layout не читал window.__viz.state
+  if (state.sim) {
+    state.sim.connectOrphans = state.connectOrphans;
+    reheat(state.sim, 0.5);
+  }
   update();
 }
 

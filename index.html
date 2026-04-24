@@ -51,6 +51,7 @@
   }
   .live-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; max-width: 340px; }
   #live-url { background: transparent; border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 11px; padding: 5px 8px; flex: 1; min-width: 0; outline: none; border-radius: 2px; }
+  #live-url:focus-visible { outline: 2px solid var(--assistant); outline-offset: 1px; }
   #live-url:focus { border-color: var(--assistant); }
   #live-url::placeholder { color: var(--muted); }
   #btn-live-start, #btn-live-stop { padding: 5px 10px; font-size: 10px; }
@@ -218,6 +219,7 @@
   #search-bar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 15; display: none; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
   #search-bar.show { display: flex; }
   #search-input { background: transparent; border: none; color: var(--text); font-family: inherit; font-size: 13px; outline: none; width: 300px; padding: 4px 0; }
+  #search-input:focus-visible { outline: 2px solid var(--assistant); outline-offset: 2px; border-radius: 2px; }
   #search-input::placeholder { color: var(--muted); }
   #search-count { font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
   #search-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
@@ -235,34 +237,34 @@
 
 <div class="hud" id="top-left">
   <div class="title" data-i18n="header.title">AI Conversation Viz</div>
-  <div class="subtitle" data-i18n="header.subtitle_force">v0.4 · force-directed</div>
+  <div class="subtitle" data-i18n="header.subtitle_force">v1.0 · force-directed</div>
   <!-- Primary row — основные действия с текстом -->
   <div class="controls controls-primary">
-    <button class="btn primary" id="btn-sample" data-i18n="btn.sample">Load sample</button>
-    <button class="btn" id="btn-file" data-i18n="btn.file">Open JSONL…</button>
-    <a class="btn btn-3d" href="./3d.html" data-i18n-title="tip.3d" data-i18n="btn.3d">🌐 3D →</a>
-    <button class="btn accent" id="btn-reset" data-i18n="btn.reset">Reset view</button>
-    <button class="btn" id="btn-share" data-i18n-title="tip.share" data-i18n="btn.share">🔗 Share</button>
+    <button class="btn primary" id="btn-sample" data-i18n="btn.sample" data-i18n-aria="aria.sample">Load sample</button>
+    <button class="btn" id="btn-file" data-i18n="btn.file" data-i18n-aria="aria.file">Open JSONL…</button>
+    <a class="btn btn-3d" href="./3d.html" data-i18n-title="tip.3d" data-i18n-aria="aria.3d" data-i18n="btn.3d">🌐 3D →</a>
+    <button class="btn accent" id="btn-reset" data-i18n="btn.reset" data-i18n-aria="aria.reset">Reset view</button>
+    <button class="btn" id="btn-share" data-i18n-title="tip.share" data-i18n-aria="aria.share" data-i18n="btn.share">🔗 Share</button>
   </div>
   <!-- Secondary row — переключатели и настройки иконками -->
   <div class="controls controls-secondary">
-    <div id="layout-switch" data-i18n-title="tip.layout"></div>
-    <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio">♪</button>
-    <button class="btn btn-icon" id="btn-record" data-i18n-title="tip.record">●</button>
-    <button class="btn btn-icon" id="btn-snapshot" data-i18n-title="tip.snapshot">📷</button>
-    <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
-    <button class="btn btn-icon" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
-    <button class="btn btn-icon" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
-    <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-diff" data-i18n-title="tip.diff_off">🔀</button>
-    <button class="btn btn-icon" id="btn-sessions" data-i18n-title="tip.sessions_empty">📚</button>
-    <button class="btn btn-icon" id="btn-bookmarks" data-i18n-title="tip.bookmarks_empty">⭐</button>
-    <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-render" data-i18n-title="tip.render_webgl">🎨</button>
-    <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
-    <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings">⚙</button>
+    <div id="layout-switch" data-i18n-title="tip.layout" role="group" aria-label="Layout mode"></div>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio" data-i18n-aria="aria.audio">♪</button>
+    <button class="btn btn-icon" id="btn-record" data-i18n-title="tip.record" data-i18n-aria="aria.record">●</button>
+    <button class="btn btn-icon" id="btn-snapshot" data-i18n-title="tip.snapshot" data-i18n-aria="aria.snapshot">📷</button>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <button class="btn btn-icon" id="btn-freeze" data-i18n-title="tip.freeze_on" data-i18n-aria="aria.freeze">❄</button>
+    <button class="btn btn-icon" id="btn-orphans" data-i18n-title="tip.orphans_off" data-i18n-aria="aria.orphans">🔗</button>
+    <button class="btn btn-icon" id="btn-topics" data-i18n-title="tip.topics_off" data-i18n-aria="aria.topics">🧬</button>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <button class="btn btn-icon" id="btn-diff" data-i18n-title="tip.diff_off" data-i18n-aria="aria.diff">🔀</button>
+    <button class="btn btn-icon" id="btn-sessions" data-i18n-title="tip.sessions_empty" data-i18n-aria="aria.sessions">📚</button>
+    <button class="btn btn-icon" id="btn-bookmarks" data-i18n-title="tip.bookmarks_empty" data-i18n-aria="aria.bookmarks">⭐</button>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <button class="btn btn-icon" id="btn-render" data-i18n-title="tip.render_webgl" data-i18n-aria="aria.render">🎨</button>
+    <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang" data-i18n-aria="aria.lang">EN</button>
+    <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
     <input type="file" id="diff-file-input" accept=".jsonl,.json,.txt">
   </div>
