@@ -2,6 +2,7 @@ import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
 import { screenToWorld, applyZoom } from '../view/camera.js';
 import { pathToRoot } from '../view/path.js';
+import { reheat, unfreeze } from '../core/layout.js';
 import { showDetail, hideDetail } from './detail-panel.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 
@@ -58,6 +59,9 @@ function onDown(ev) {
   draggedNode = hitTest(ev.clientX, ev.clientY);
   state.cameraTarget = null;
   if (draggedNode) {
+    // Auto-unfreeze + re-heat на drag ноды
+    if (state.sim && state.sim.manualFrozen) unfreeze(state.sim);
+    if (state.sim) { reheat(state.sim, 0.3); state.sim.alphaTarget = 0.3; }
     state.hover = draggedNode;
     state.pathSet = pathToRoot(draggedNode, state.byId);
     hideTooltip();
@@ -102,6 +106,7 @@ function onUp(ev) {
   interactionCanvas.classList.remove('dragging');
   const wasNodeDrag = !!draggedNode;
   draggedNode = null;
+  if (wasNodeDrag && state.sim) state.sim.alphaTarget = 0; // отпустили — cool down
   if (!dragMoved) {
     const hit = hitTest(ev.clientX, ev.clientY);
     if (hit) {

@@ -29,6 +29,13 @@ const CFG = {
   birthSpreadMax: 1.0,
   birthAlphaStart: 0.25,
   birthRadiusStart: 0.5,
+  // Auto-degrade пороги — при большом графе отключаем дорогие эффекты
+  perfDegradeThreshold: 400,   // выше — режим "performance"
+  perfHeavyThreshold: 1500,    // выше — совсем минимализм
+  perfMinimalParticles: 0,     // 0 = отключить частицы
+  perfMinimalStarCount: 80,
+  perfMinimalPrewarm: 40,
+  perfMinimalTypewriter: false,
 
   // v3 wow
   edgeCurveStrength: 0.18,
@@ -76,6 +83,20 @@ const CFG = {
   minimapPadding: 8,
   radialRingGap: 130,
   layoutTransitionMs: 900,
+  barnesHutThreshold: 300,
+  barnesHutTheta: 0.9,
+  bhLeafMinSize: 1.0,
+  // Physics v5 — D3-style cooling + clamps
+  alphaDecay: 0.0228,     // ≈ (1 − 0.001^(1/300)) — settles за ~300 iters
+  alphaMin: 0.001,
+  velocityDecay: 0.4,     // "friction": vx *= (1 − velocityDecay)
+  reheatAlpha: 0.3,
+  maxVelocity: 40,
+  repulsionCutoff: 1500,
+  wallStiffness: 0.08,
+  wallPaddingMul: 4,
+  playSpeedOptions: [0.5, 1, 2, 5],
+  storyPostGapMs: 800,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,
@@ -99,24 +120,189 @@ const COLORS = {
 
 // --- src/core/sample.js ---
 
+// Развёрнутое демо — ~30 сообщений с разветвлениями, tool_use + tool_result,
+// thinking-блоками, ошибкой от тула, изображением. Имитирует реальный debug-диалог.
+
+const T0 = Date.parse('2026-04-24T10:00:00.000Z');
+const step = (sec) => new Date(T0 + sec * 1000).toISOString();
+
+function entry(obj) { return JSON.stringify(obj); }
 const SAMPLE_JSONL = [
-  `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-04-23T10:00:00.000Z","content":"служебное, должно отфильтроваться"}`,
-  `{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-04-23T10:00:00.000Z","message":{"role":"user","content":"Хочу визуализировать разговор с ИИ как граф. Ноды = сообщения, рёбра = связи."}}`,
-  `{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-23T10:00:14.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Графом — хорошая идея. parentUuid даёт готовое дерево. Цветом по роли, размером по длине, пульсом по свежести."},{"type":"tool_use","id":"tu_a1_1","name":"Grep","input":{"pattern":"force.*directed","path":"src/"}}]}}`,
-  `{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-04-23T10:00:38.000Z","message":{"role":"user","content":"Да, именно так. А стек?"}}`,
-  `{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-04-23T10:00:50.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Canvas 2D без зависимостей — как lava-orb. Сначала один файл, потом модули."},{"type":"tool_use","id":"tu_a2_1","name":"Write","input":{"file_path":"index.html"}}]}}`,
-  `{"type":"user","uuid":"u3","parentUuid":"a2","timestamp":"2026-04-23T10:01:15.000Z","message":{"role":"user","content":"Физика какая?"}}`,
-  `{"type":"assistant","uuid":"a3","parentUuid":"u3","timestamp":"2026-04-23T10:01:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Классический spring-damper: Coulomb-repulsion, spring на рёбрах, damping 0.85, слабая центральная сила. До ~1000 нод без Barnes-Hut."}]}}`,
-  `{"type":"user","uuid":"u4","parentUuid":"a1","timestamp":"2026-04-23T10:01:45.000Z","message":{"role":"user","content":"А данные откуда?"}}`,
-  `{"type":"assistant","uuid":"a4","parentUuid":"u4","timestamp":"2026-04-23T10:02:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"JSONL-сессии Claude Code в ~/.claude/projects/. uuid + parentUuid — готовый граф."},{"type":"tool_use","id":"tu_a4_1","name":"Glob","input":{"pattern":"**/*.jsonl"}}]}}`,
-  `{"type":"user","uuid":"u5","parentUuid":"a3","timestamp":"2026-04-23T10:02:30.000Z","message":{"role":"user","content":"Интерактив?"}}`,
-  `{"type":"assistant","uuid":"a5","parentUuid":"u5","timestamp":"2026-04-23T10:02:48.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Zoom колесом, pan drag-ом, клик = панель с текстом, hover = тултип, timeline slider — видеть разговор во времени."}]}}`,
-  `{"type":"queue-operation","operation":"dequeue","timestamp":"2026-04-23T10:02:48.010Z"}`,
+  // --- Служебные (должны быть отфильтрованы) ---
+  entry({ type: 'queue-operation', operation: 'enqueue', timestamp: step(0) }),
+  entry({ type: 'system', subtype: 'stop_hook_summary' }),
+  entry({ type: 'custom-title', customTitle: 'Debug: force-directed visualizer' }),
+
+  // --- Основная цепочка ---
+  entry({ type: 'user', uuid: 'u1', parentUuid: null, timestamp: step(0),
+    message: { role: 'user', content: 'Привет! Нужно разобраться почему force-directed layout разваливается на больших графах. Есть ~5000 нод, всё лагает и ноды убегают к краям.' } }),
+
+  entry({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: step(5),
+    message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: 'Типичный симптом O(n²) repulsion. Для 5000 нод это 25 млн пар каждого кадра — FPS точно упадёт до 1-2. Ноды улетают потому что центральная сила слабее чем кумулятивный repulsion. Барнс-Хут решит первое, нужно ещё поднять центральную силу.' },
+      { type: 'text', text: 'Давай посмотрим на твоё stepPhysics и оценим вычислительную сложность.' },
+      { type: 'tool_use', id: 'tu_a1_1', name: 'Read', input: { file_path: 'src/physics.js' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u2', parentUuid: 'a1', timestamp: step(7),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a1_1', content: 'function stepPhysics(nodes, edges) {\n  for (let i = 0; i < nodes.length; i++) {\n    for (let j = i+1; j < nodes.length; j++) {\n      // coulomb repulsion\n      const f = REPULSION / d2;\n      a.vx += (dx/d)*f; b.vx -= (dx/d)*f;\n    }\n  }\n  // ... springs ...\n}' },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a2', parentUuid: 'u2', timestamp: step(12),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Да, классический O(n²). Для 5000 нод это ~12 млн пар в каждом кадре. Нужен Barnes-Hut — строим квадро-дерево, далёкие кластеры аппроксимируем центром масс. Сложность падает до O(n log n).' },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u3', parentUuid: 'a2', timestamp: step(25),
+    message: { role: 'user', content: 'Окей. А чтобы далеко не улетали?' } }),
+
+  entry({ type: 'assistant', uuid: 'a3', parentUuid: 'u3', timestamp: step(31),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Центральная сила к центру viewport. Плюс для больших графов она должна расти с количеством нод пропорционально.' },
+      { type: 'tool_use', id: 'tu_a3_1', name: 'Grep', input: { pattern: 'centerPull', path: 'src/' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u4', parentUuid: 'a3', timestamp: step(32),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a3_1', content: 'src/core/config.js: centerPull: 0.002\nsrc/core/layout.js:  n.vx += (cx - n.x) * CFG.centerPull;' },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a4', parentUuid: 'u4', timestamp: step(38),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: '0.002 — норм для малых графов, для 5000 поднять до 0.006-0.008.' },
+      { type: 'tool_use', id: 'tu_a4_1', name: 'Edit', input: { file_path: 'src/core/config.js', old: 'centerPull: 0.002', new: 'centerPull: 0.006' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u5', parentUuid: 'a4', timestamp: step(40),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a4_1', content: 'File updated successfully.' },
+    ] } }),
+
+  // --- Ветвление: параллельный вопрос от пользователя ---
+  entry({ type: 'user', uuid: 'u6', parentUuid: 'a2', timestamp: step(50),
+    message: { role: 'user', content: 'Ещё вопрос — как быть с 237 MB файлом сессии? FileReader зависает.' } }),
+
+  entry({ type: 'assistant', uuid: 'a5', parentUuid: 'u6', timestamp: step(56),
+    message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: 'Streaming JSONL через ReadableStream getReader + TextDecoder. Или простой — лимит maxMessages и stop на 5000.' },
+      { type: 'text', text: 'Вариантов два: streaming через getReader, или просто лимит maxMessages=5000 — парсер останавливается и не читает больше.' },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u7', parentUuid: 'a5', timestamp: step(72),
+    message: { role: 'user', content: 'Лимит проще. Но хочу увидеть конец сессии, не только начало.' } }),
+
+  entry({ type: 'assistant', uuid: 'a6', parentUuid: 'u7', timestamp: step(80),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Тогда поменяем стратегию: читаем файл назад chunk-ами. Вот посмотрим как устроено чтение сейчас:' },
+      { type: 'tool_use', id: 'tu_a6_1', name: 'Bash', input: { command: 'wc -l large-session.jsonl' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u8', parentUuid: 'a6', timestamp: step(82),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a6_1', content: '148203 large-session.jsonl', is_error: false },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a7', parentUuid: 'u8', timestamp: step(88),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: '148k строк. Возьмём последние 5000. Но осторожно — tail может разорвать JSON если chunk cut посередине строки.' },
+      { type: 'tool_use', id: 'tu_a7_1', name: 'Write', input: { file_path: 'src/core/stream-reader.js' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u9', parentUuid: 'a7', timestamp: step(90),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a7_1', content: 'File exists; use edit or force: true to overwrite.', is_error: true },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a8', parentUuid: 'u9', timestamp: step(95),
+    message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: 'Сначала прочитаю существующий файл, а не перезапишу слепо.' },
+      { type: 'text', text: 'Точно, сначала Read:' },
+      { type: 'tool_use', id: 'tu_a8_1', name: 'Read', input: { file_path: 'src/core/stream-reader.js' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u10', parentUuid: 'a8', timestamp: step(97),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a8_1', content: '// placeholder\nexport function streamReader() { /* TODO */ }' },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a9', parentUuid: 'u10', timestamp: step(104),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Пустой TODO, можно дописывать. Реализую tail-чтение: slice файла с конца, ищем \\n чтобы не резать JSON, парсим.' },
+      { type: 'tool_use', id: 'tu_a9_1', name: 'Edit', input: { file_path: 'src/core/stream-reader.js' } },
+      { type: 'tool_use', id: 'tu_a9_2', name: 'TodoWrite', input: { todos: [{ content: 'Test tail-read' }, { content: 'Add benchmark' }] } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u11', parentUuid: 'a9', timestamp: step(106),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a9_1', content: 'File updated.' },
+      { type: 'tool_result', tool_use_id: 'tu_a9_2', content: 'Todos created: 2' },
+    ] } }),
+
+  // --- Третье ветвление: вопрос про визуал ---
+  entry({ type: 'user', uuid: 'u12', parentUuid: 'a4', timestamp: step(130),
+    message: { role: 'user', content: 'А про визуальный стиль — можешь помочь с киберпанк эстетикой? Хочу чтобы рёбра светились.' } }),
+
+  entry({ type: 'assistant', uuid: 'a10', parentUuid: 'u12', timestamp: step(137),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Бегущие частицы по Bezier-рёбрам + additive blending + случайные вспышки = ощущение живых электрических разрядов. Сейчас найду пример из shared-backgrounds:' },
+      { type: 'tool_use', id: 'tu_a10_1', name: 'Glob', input: { pattern: '**/particles*.js' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u13', parentUuid: 'a10', timestamp: step(138),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a10_1', content: 'visual/shared-backgrounds/particles-flow.js\nvisual/lava-orb/src/orb/fire-particles.js\nvisual/ai-conversation-viz/src/view/particles.js' },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a11', parentUuid: 'u13', timestamp: step(145),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Посмотрим particles-flow.js — там чистая реализация trail+glow:' },
+      { type: 'tool_use', id: 'tu_a11_1', name: 'Read', input: { file_path: 'visual/shared-backgrounds/particles-flow.js', limit: 80 } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u14', parentUuid: 'a11', timestamp: step(147),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a11_1', content: 'for (const p of particles) {\n  // trail 6 points with decreasing alpha\n  // additive blending via globalCompositeOperation = "lighter"\n  // jitter perpendicular to tangent\n}' },
+    ] } }),
+
+  entry({ type: 'assistant', uuid: 'a12', parentUuid: 'u14', timestamp: step(152),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Адаптируем под наш force-graph. Плюс добавим halo + случайные полноцепочные вспышки (раз в ~10 сек на ребро). Вот итоговый draw:' },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u15', parentUuid: 'a12', timestamp: step(170),
+    message: { role: 'user', content: 'Супер. Закоммить всё и запушь в Gitea + GitHub.' } }),
+
+  entry({ type: 'assistant', uuid: 'a13', parentUuid: 'u15', timestamp: step(178),
+    message: { role: 'assistant', content: [
+      { type: 'text', text: 'Коммичу и пушу в оба remote.' },
+      { type: 'tool_use', id: 'tu_a13_1', name: 'Bash', input: { command: 'git add -A && git commit -m "Barnes-Hut + electric sparks" && git push origin main && git push github main' } },
+    ] } }),
+
+  entry({ type: 'user', uuid: 'u16', parentUuid: 'a13', timestamp: step(181),
+    message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tu_a13_1', content: '[main abc1234] Barnes-Hut + electric sparks\n 6 files changed, 412 insertions(+), 28 deletions(-)\nTo http://192.168.1.130:3000/androman/ai-conversation-viz.git\n   360158d..abc1234  main -> main\nTo https://github.com/andromanpro/ai-conversation-viz.git\n   360158d..abc1234  main -> main' },
+    ] } }),
+
+  // Финальное служебное
+  entry({ type: 'queue-operation', operation: 'dequeue', timestamp: step(200) }),
 ].join('\n');
 
 
 // --- src/core/parser.js ---
 
+
+function extractToolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts = [];
+  for (const b of content) {
+    if (!b) continue;
+    if (b.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+    else if (b.type === 'image') parts.push('[image]');
+  }
+  return parts.join('\n');
+}
 
 function classifyContent(content) {
   if (typeof content === 'string') return { text: content, toolUses: [] };
@@ -125,22 +311,47 @@ function classifyContent(content) {
   const toolUses = [];
   for (const block of content) {
     if (!block) continue;
-    if (block.type === 'text' && typeof block.text === 'string') {
-      textParts.push(block.text);
-    } else if (block.type === 'tool_use') {
-      toolUses.push({
-        id: block.id || null,
-        name: typeof block.name === 'string' ? block.name : 'tool',
-        input: block.input || {},
-      });
+    switch (block.type) {
+      case 'text':
+        if (typeof block.text === 'string') textParts.push(block.text);
+        break;
+      case 'thinking':
+        if (typeof block.thinking === 'string') {
+          textParts.push('💭 ' + block.thinking);
+        }
+        break;
+      case 'tool_use':
+        toolUses.push({
+          id: block.id || null,
+          name: typeof block.name === 'string' ? block.name : 'tool',
+          input: block.input || {},
+        });
+        break;
+      case 'tool_result': {
+        const rt = extractToolResultText(block.content);
+        const prefix = block.is_error ? '⚠ ' : '↩ ';
+        if (rt) textParts.push(prefix + rt);
+        break;
+      }
+      case 'image':
+        textParts.push('[image]');
+        break;
+      default:
+        // неизвестный тип — пропускаем
+        break;
     }
   }
-  return { text: textParts.join('\n'), toolUses };
+  return { text: textParts.join('\n\n'), toolUses };
 }
 function extractText(message) {
   if (!message) return '';
   return classifyContent(message.content).text;
 }
+
+const SERVICE_TYPES = new Set([
+  'queue-operation', 'last-prompt', 'progress', 'system',
+  'attachment', 'custom-title', 'ai-title', 'summary',
+]);
 function parseJSONL(text) {
   const lines = text.split(/\r?\n/);
   const nodes = [];
@@ -156,7 +367,7 @@ function parseJSONL(text) {
 
     const t = obj.type;
     if (t !== 'user' && t !== 'assistant') {
-      if (t) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
+      if (t && !SERVICE_TYPES.has(t)) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
       skipped++;
       continue;
     }
@@ -371,6 +582,7 @@ function normalizeToClaudeJsonl(text) {
 // --- src/core/graph.js ---
 
 
+
 function computeRadius(n) {
   const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
   const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
@@ -389,6 +601,26 @@ function recomputeRecency(nodes) {
     n.recency = (n.ts - tMin) / dt;
     n.r = computeRadius(n);
   }
+}
+
+function computeDegreesAndHubs(nodes, edges) {
+  for (const n of nodes) n.degree = 0;
+  for (const e of edges) {
+    if (e.a) e.a.degree = (e.a.degree || 0) + 1;
+    if (e.b) e.b.degree = (e.b.degree || 0) + 1;
+  }
+  // p90 of degree
+  if (!nodes.length) return;
+  const degs = nodes.map(n => n.degree).sort((a, b) => a - b);
+  const p90 = degs[Math.floor(degs.length * 0.9)] || 0;
+  const hubThreshold = Math.max(3, p90);
+  for (const n of nodes) n.isHub = n.degree > hubThreshold;
+}
+
+function applySeedJitter(n) {
+  const s = seedJitter(n.id || ('n' + Math.random()));
+  n._seedDx = s.dx;
+  n._seedDy = s.dy;
 }
 
 /**
@@ -411,10 +643,14 @@ function appendRawNodes(state, rawNodes, viewport) {
       x: parent ? parent.x + Math.cos(angle) * dist : cx + (Math.random() - 0.5) * 60,
       y: parent ? parent.y + Math.sin(angle) * dist : cy + (Math.random() - 0.5) * 60,
       vx: 0, vy: 0,
+      fxAcc: 0, fyAcc: 0,
       r: CFG.minR,
       recency: 1,
       phase: Math.random() * Math.PI * 2,
+      degree: 0,
+      isHub: false,
     };
+    applySeedJitter(node);
     state.nodes.push(node);
     state.byId.set(node.id, node);
     if (parent) {
@@ -423,6 +659,7 @@ function appendRawNodes(state, rawNodes, viewport) {
     added.push(node);
   }
   recomputeRecency(state.nodes);
+  computeDegreesAndHubs(state.nodes, state.edges);
   return added;
 }
 function buildGraph(parsed, viewport) {
@@ -433,15 +670,20 @@ function buildGraph(parsed, viewport) {
   const nodes = parsed.nodes.map((src, i) => {
     const angle = n ? (i / n) * Math.PI * 2 : 0;
     const spread = 80 + Math.random() * 60;
-    return {
+    const node = {
       ...src,
       x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
       y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
       vx: 0, vy: 0,
+      fxAcc: 0, fyAcc: 0,
       r: CFG.minR,
       recency: 0,
       phase: Math.random() * Math.PI * 2,
+      degree: 0,
+      isHub: false,
     };
+    applySeedJitter(node);
+    return node;
   });
 
   const byId = new Map(nodes.map(node => [node.id, node]));
@@ -467,97 +709,324 @@ function buildGraph(parsed, viewport) {
     const dt = Math.max(1, tMax - tMin);
     for (const node of nodes) {
       node.recency = (node.ts - tMin) / dt;
-      const baseR = CFG.minR + 2 * Math.log(node.textLen + 1);
-      const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-      node.r = node.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
+      node.r = computeRadius(node);
     }
   }
+
+  computeDegreesAndHubs(nodes, edges);
 
   return { nodes, edges, byId };
 }
 
 
+// --- src/core/quadtree.js ---
+
+
+function createQuad(x, y, s) {
+  return { x, y, s, cx: 0, cy: 0, mass: 0, point: null, children: null };
+}
+
+function findQuadrantIndex(q, px, py) {
+  const mx = q.x + q.s / 2;
+  const my = q.y + q.s / 2;
+  let idx = 0;
+  if (px >= mx) idx |= 1;
+  if (py >= my) idx |= 2;
+  return idx;
+}
+
+function insert(q, n) {
+  if (!q.children && !q.point) {
+    q.point = n;
+    q.cx = n.x;
+    q.cy = n.y;
+    q.mass = 1;
+    return;
+  }
+  if (!q.children) {
+    const old = q.point;
+    q.point = null;
+    const half = q.s / 2;
+    q.children = [
+      createQuad(q.x,        q.y,        half),
+      createQuad(q.x + half, q.y,        half),
+      createQuad(q.x,        q.y + half, half),
+      createQuad(q.x + half, q.y + half, half),
+    ];
+    q.mass = 0; q.cx = 0; q.cy = 0;
+    insert(q.children[findQuadrantIndex(q, old.x, old.y)], old);
+    q.mass = 1;
+    q.cx = old.x;
+    q.cy = old.y;
+  }
+  const newMass = q.mass + 1;
+  q.cx = (q.cx * q.mass + n.x) / newMass;
+  q.cy = (q.cy * q.mass + n.y) / newMass;
+  q.mass = newMass;
+  insert(q.children[findQuadrantIndex(q, n.x, n.y)], n);
+}
+function buildQuadtree(nodes) {
+  if (!nodes.length) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  }
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const size = Math.max(w, h) + 2;
+  const root = createQuad(minX - 1, minY - 1, size);
+  for (const n of nodes) insert(root, n);
+  return root;
+}
+
+/**
+ * Repulsion на node от всего дерева. cutoff2 — opt. squared-distance cutoff.
+ */
+function computeRepulsion(tree, node, theta, kRep, cutoff2) {
+  const acc = { fx: 0, fy: 0 };
+  if (!tree || tree.mass === 0) return acc;
+  _accumulate(tree, node, theta, kRep, cutoff2, acc);
+  return acc;
+}
+
+function _accumulate(q, node, theta, k, cutoff2, acc) {
+  if (!q || q.mass === 0) return;
+  if (q.point && q.point === node) return;
+  let dx = node.x - q.cx;
+  let dy = node.y - q.cy;
+  let d2 = dx * dx + dy * dy;
+  // cutoff для дальних кластеров (перформанс)
+  if (cutoff2 && d2 > cutoff2) {
+    // если это leaf с точкой — skip; для group с массой — тоже skip (вклад малый)
+    return;
+  }
+  if (d2 < 0.01) {
+    // deterministic offset по seed если есть
+    const sn = node._seedDx != null ? { dx: node._seedDx, dy: node._seedDy } : { dx: 0.01, dy: 0.01 };
+    const pt = q.point;
+    const sq = pt && pt._seedDx != null ? { dx: pt._seedDx, dy: pt._seedDy } : { dx: -0.01, dy: -0.01 };
+    dx = (sn.dx - sq.dx) || 0.01;
+    dy = (sn.dy - sq.dy) || 0.01;
+    d2 = dx * dx + dy * dy + 0.01;
+  }
+  const isLeaf = !q.children;
+  // leaf с мелким size — не рекурсим (bhLeafMinSize guard)
+  if (q.s < CFG.bhLeafMinSize) {
+    if (!isLeaf || !q.point || q.point === node) return;
+    const d = Math.sqrt(d2);
+    const f = (k * q.mass) / d2;
+    acc.fx += (dx / d) * f;
+    acc.fy += (dy / d) * f;
+    return;
+  }
+  const d = Math.sqrt(d2);
+  if (isLeaf || (q.s / d) < theta) {
+    const f = (k * q.mass) / d2;
+    acc.fx += (dx / d) * f;
+    acc.fy += (dy / d) * f;
+    return;
+  }
+  for (const ch of q.children) _accumulate(ch, node, theta, k, cutoff2, acc);
+}
+
+
 // --- src/core/layout.js ---
 
-function stepPhysics(nodes, edges, viewport) {
+
+
+// ---------- D3-style simulation state ----------
+function createSim(opts = {}) {
+  return {
+    alpha: 1,
+    alphaTarget: 0,
+    alphaDecay: opts.alphaDecay != null ? opts.alphaDecay : CFG.alphaDecay,
+    alphaMin: opts.alphaMin != null ? opts.alphaMin : CFG.alphaMin,
+    velocityDecay: opts.velocityDecay != null ? opts.velocityDecay : CFG.velocityDecay,
+    frozen: false,
+    manualFrozen: false,
+  };
+}
+function reheat(sim, a) {
+  if (!sim) return;
+  const target = a != null ? a : CFG.reheatAlpha;
+  sim.alpha = Math.max(sim.alpha, target);
+  sim.alphaTarget = target;
+  sim.frozen = false;
+}
+function freeze(sim) {
+  if (!sim) return;
+  sim.manualFrozen = true;
+  sim.frozen = true;
+}
+function unfreeze(sim) {
+  if (!sim) return;
+  sim.manualFrozen = false;
+  sim.frozen = false;
+  reheat(sim, CFG.reheatAlpha);
+}
+function isSettled(sim) {
+  if (!sim) return true;
+  return sim.alpha < sim.alphaMin && sim.alphaTarget === 0;
+}
+
+// ---------- deterministic hash for stable jitter ----------
+
+function hashStrToUnit(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+function seedJitter(id) {
+  const u1 = hashStrToUnit(id + '|x');
+  const u2 = hashStrToUnit(id + '|y');
+  return { dx: u1 - 0.5, dy: u2 - 0.5 };
+}
+
+// ---------- core step ----------
+function stepPhysics(nodes, edges, viewport, sim) {
+  const _sim = sim || createSim();
+
+  // alpha cooling (в начале step, до всех ранних return'ов)
+  _sim.alpha += (_sim.alphaTarget - _sim.alpha) * _sim.alphaDecay;
+  if (_sim.manualFrozen) { _sim.frozen = true; return; }
+  if (_sim.alpha < _sim.alphaMin && _sim.alphaTarget === 0) {
+    _sim.frozen = true;
+    return;
+  }
+  _sim.frozen = false;
+
   if (!nodes.length) return;
+
+  const alpha = _sim.alpha;
+  const N = nodes.length;
   const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
   const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
 
-  for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i];
-    for (let j = i + 1; j < nodes.length; j++) {
-      const b = nodes[j];
-      let dx = a.x - b.x, dy = a.y - b.y;
-      let d2 = dx * dx + dy * dy;
-      if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = dx * dx + dy * dy + 0.01; }
-      const d = Math.sqrt(d2);
-      const f = CFG.repulsion / d2;
-      const fx = (dx / d) * f, fy = (dy / d) * f;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
+  // accumulate forces в fxAcc/fyAcc
+  for (const n of nodes) { n.fxAcc = 0; n.fyAcc = 0; }
+
+  // adaptive repulsion strength — растёт логарифмически с N
+  const kRep = CFG.repulsion * (1 + Math.log(Math.max(1, N / 100))) * alpha;
+  const cutoff2 = CFG.repulsionCutoff * CFG.repulsionCutoff;
+
+  if (N > CFG.barnesHutThreshold) {
+    const tree = buildQuadtree(nodes);
+    for (const n of nodes) {
+      const f = computeRepulsion(tree, n, CFG.barnesHutTheta, kRep, cutoff2);
+      n.fxAcc += f.fx;
+      n.fyAcc += f.fy;
+    }
+  } else {
+    for (let i = 0; i < N; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < N; j++) {
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 > cutoff2) continue;
+        if (d2 < 0.01) {
+          const sa = a._seedDx != null ? { dx: a._seedDx, dy: a._seedDy } : seedJitter(a.id || ('n' + i));
+          const sb = b._seedDx != null ? { dx: b._seedDx, dy: b._seedDy } : seedJitter(b.id || ('n' + j));
+          dx = (sa.dx - sb.dx) || 0.01;
+          dy = (sa.dy - sb.dy) || 0.01;
+          d2 = dx * dx + dy * dy + 0.01;
+        }
+        const d = Math.sqrt(d2);
+        const f = kRep / d2;
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.fxAcc += fx; a.fyAcc += fy;
+        b.fxAcc -= fx; b.fyAcc -= fy;
+      }
     }
   }
 
+  // spring (hub-safe: strength ~ 1/min(deg(a), deg(b)))
   for (const e of edges) {
     const a = e.a, b = e.b;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
     const disp = d - CFG.springLen;
-    const f = CFG.spring * disp;
+    const degMin = Math.max(1, Math.min(a.degree || 1, b.degree || 1));
+    const kLink = (CFG.spring / Math.sqrt(degMin)) * alpha;
+    const f = kLink * disp;
     const fx = (dx / d) * f, fy = (dy / d) * f;
-    a.vx += fx; a.vy += fy;
-    b.vx -= fx; b.vy -= fy;
+    a.fxAcc += fx; a.fyAcc += fy;
+    b.fxAcc -= fx; b.fyAcc -= fy;
   }
 
+  // central pull
+  const kCenter = CFG.centerPull * alpha;
   for (const n of nodes) {
-    n.vx += (cx - n.x) * CFG.centerPull;
-    n.vy += (cy - n.y) * CFG.centerPull;
-    n.vx *= CFG.damping;
-    n.vy *= CFG.damping;
+    n.fxAcc += (cx - n.x) * kCenter;
+    n.fyAcc += (cy - n.y) * kCenter;
+  }
+
+  // bounds soft-wall
+  const pad = CFG.wallPaddingMul;
+  const halfW = (viewport.safeW != null ? viewport.safeW : viewport.width) * pad / 2;
+  const halfH = (viewport.safeH != null ? viewport.safeH : viewport.height) * pad / 2;
+  const wallLeft = cx - halfW, wallRight = cx + halfW;
+  const wallTop = cy - halfH, wallBottom = cy + halfH;
+  const kWall = CFG.wallStiffness;
+  for (const n of nodes) {
+    if (n.x < wallLeft) n.fxAcc += (wallLeft - n.x) * kWall;
+    else if (n.x > wallRight) n.fxAcc += (wallRight - n.x) * kWall;
+    if (n.y < wallTop) n.fyAcc += (wallTop - n.y) * kWall;
+    else if (n.y > wallBottom) n.fyAcc += (wallBottom - n.y) * kWall;
+  }
+
+  // Velocity Verlet: v = (v + f) * (1 - velocityDecay); x += v
+  const friction = 1 - _sim.velocityDecay;
+  const maxV = CFG.maxVelocity;
+  const maxV2 = maxV * maxV;
+  for (const n of nodes) {
+    n.vx = (n.vx + n.fxAcc) * friction;
+    n.vy = (n.vy + n.fyAcc) * friction;
+    // clamp
+    const sp2 = n.vx * n.vx + n.vy * n.vy;
+    if (sp2 > maxV2) {
+      const k = maxV / Math.sqrt(sp2);
+      n.vx *= k;
+      n.vy *= k;
+    }
     n.x += n.vx;
     n.y += n.vy;
   }
 }
-function prewarm(nodes, edges, viewport, iterations) {
-  const n = iterations == null ? CFG.prewarmIterations : iterations;
-  for (let i = 0; i < n; i++) stepPhysics(nodes, edges, viewport);
+function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
+  // Backward-compat: prewarm(nodes, edges, vp) или (nodes, edges, vp, sim) или (nodes, edges, vp, sim, iters)
+  // Старый вызов: prewarm(nodes, edges, vp) — используется в 3d/main.js
+  let sim, iters;
+  if (simOrIters == null) { sim = createSim(); iters = CFG.prewarmIterations; }
+  else if (typeof simOrIters === 'number') { sim = createSim(); iters = simOrIters; }
+  else { sim = simOrIters; iters = maybeIters != null ? maybeIters : CFG.prewarmIterations; }
+  const savedTarget = sim.alphaTarget;
+  sim.alphaTarget = 0; // prewarm остывает
+  for (let i = 0; i < iters; i++) stepPhysics(nodes, edges, viewport, sim);
+  sim.alphaTarget = savedTarget;
 }
-function computeBBox(nodes) {
-  if (!nodes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0, cx: 0, cy: 0 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    if (n.x - n.r < minX) minX = n.x - n.r;
-    if (n.y - n.r < minY) minY = n.y - n.r;
-    if (n.x + n.r > maxX) maxX = n.x + n.r;
-    if (n.y + n.r > maxY) maxY = n.y + n.r;
-  }
-  const w = maxX - minX, h = maxY - minY;
-  return { minX, minY, maxX, maxY, w, h, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
-}
+
+// ---------- radial / bbox / fit (без изменений) ----------
 function computeRadialLayout(nodes, byId, viewport) {
   const positions = new Map();
   if (!nodes.length) return positions;
   const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
   const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
 
-  // Построим дерево: parentId → [childId]
   const children = new Map();
   const roots = [];
   for (const n of nodes) children.set(n.id, []);
   for (const n of nodes) {
-    if (n.parentId && byId.has(n.parentId)) {
-      children.get(n.parentId).push(n.id);
-    } else {
-      roots.push(n.id);
-    }
+    if (n.parentId && byId.has(n.parentId)) children.get(n.parentId).push(n.id);
+    else roots.push(n.id);
   }
-  // Children сортируем по ts
-  for (const arr of children.values()) {
-    arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
-  }
+  for (const arr of children.values()) arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
 
-  // Считаем leaves в каждом subtree
   const leaves = new Map();
   const countLeaves = (id) => {
     const kids = children.get(id) || [];
@@ -573,10 +1042,7 @@ function computeRadialLayout(nodes, byId, viewport) {
   const assign = (id, depth, angleStart, angleEnd) => {
     const mid = (angleStart + angleEnd) / 2;
     const radius = depth * ring;
-    positions.set(id, {
-      x: cx + Math.cos(mid) * radius,
-      y: cy + Math.sin(mid) * radius,
-    });
+    positions.set(id, { x: cx + Math.cos(mid) * radius, y: cy + Math.sin(mid) * radius });
     const kids = children.get(id) || [];
     if (!kids.length) return;
     const total = leaves.get(id);
@@ -602,6 +1068,18 @@ function computeRadialLayout(nodes, byId, viewport) {
 function easeInOutQuad(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
+function computeBBox(nodes) {
+  if (!nodes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0, cx: 0, cy: 0 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x - n.r < minX) minX = n.x - n.r;
+    if (n.y - n.r < minY) minY = n.y - n.r;
+    if (n.x + n.r > maxX) maxX = n.x + n.r;
+    if (n.y + n.r > maxY) maxY = n.y + n.r;
+  }
+  const w = maxX - minX, h = maxY - minY;
+  return { minX, minY, maxX, maxY, w, h, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+}
 function fitToView(nodes, viewport) {
   const bbox = computeBBox(nodes);
   const areaW = viewport.safeW != null ? viewport.safeW : viewport.width;
@@ -609,11 +1087,7 @@ function fitToView(nodes, viewport) {
   const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
   const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
   if (bbox.w <= 0 || bbox.h <= 0) {
-    return {
-      scale: 1,
-      x: bbox.cx - cx,
-      y: bbox.cy - cy,
-    };
+    return { scale: 1, x: bbox.cx - cx, y: bbox.cy - cy };
   }
   const scale = Math.min(areaW / bbox.w, areaH / bbox.h) * CFG.fitPadding;
   return {
@@ -643,6 +1117,9 @@ const state = {
   searchActive: null,
   hiddenRoles: new Set(),
   layoutMode: 'force', // 'force' | 'radial'
+  perfMode: 'normal',  // 'normal' | 'degraded' | 'minimal'
+  sim: null,           // Physics simulation state (createSim)
+  playSpeed: 1,        // 0.5 | 1 | 2 | 5
 };
 function resetInteractionState() {
   state.selected = null;
@@ -746,11 +1223,12 @@ function colorsFor(role) {
   return { core: '240, 250, 255', mid: '160, 230, 255', halo: '70, 190, 255' };
 }
 
-function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera) {
+function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera, perfMode) {
   const a = { x: edge.a.x, y: edge.a.y };
   const b = { x: edge.b.x, y: edge.b.y };
   const colors = colorsFor(edge.b.role);
-  const trailN = CFG.particleTrailLen;
+  // degraded: короче trail, без halo
+  const trailN = perfMode === 'degraded' ? 2 : CFG.particleTrailLen;
   const gap = CFG.particleTrailGap;
   const sz = CFG.particleSize;
   const jitter = CFG.particleJitterPx;
@@ -783,17 +1261,20 @@ function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera) {
     const alpha = progressFade * trailFade * edgeAlpha;
     if (alpha < 0.02) continue;
 
-    const haloR = sz * CFG.particleHaloMul * trailFade * flash;
-    ctx.fillStyle = `rgba(${colors.halo}, ${alpha * 0.22})`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
-    ctx.fill();
+    if (perfMode !== 'degraded') {
+      // Full quality: halo + mid + core
+      const haloR = sz * CFG.particleHaloMul * trailFade * flash;
+      ctx.fillStyle = `rgba(${colors.halo}, ${alpha * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+      ctx.fill();
 
-    const midR = sz * CFG.particleMidMul * trailFade;
-    ctx.fillStyle = `rgba(${colors.mid}, ${alpha * 0.55})`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, midR, 0, Math.PI * 2);
-    ctx.fill();
+      const midR = sz * CFG.particleMidMul * trailFade;
+      ctx.fillStyle = `rgba(${colors.mid}, ${alpha * 0.55})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     const coreR = Math.max(0.6, sz * trailFade * 0.7);
     ctx.fillStyle = `rgba(${colors.core}, ${alpha})`;
@@ -999,7 +1480,7 @@ function birthFactor(bornAt, now, duration) {
 }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-function updateBirths(state, cutoff, nowMs) {
+function updateBirths(state, cutoff, nowMs, onBirth) {
   for (const n of state.nodes) {
     const alive = n.ts <= cutoff;
     if (alive && n.bornAt == null) {
@@ -1013,6 +1494,7 @@ function updateBirths(state, cutoff, nowMs) {
         n.vx = 0;
         n.vy = 0;
       }
+      if (onBirth) onBirth(n);
     } else if (!alive && n.bornAt != null) {
       n.bornAt = null;
     }
@@ -1030,7 +1512,8 @@ function draw(ctx, state, tSec, viewport, extras) {
   const cam = state.camera;
   const cutoff = timelineCutoff(state);
   const nowMs = tSec * 1000;
-  updateBirths(state, cutoff, nowMs);
+  updateBirths(state, cutoff, nowMs, extras && extras.onBirth);
+  const perfMode = (extras && extras.perfMode) || 'normal';
 
   const heartbeat = (extras && extras.allowHeartbeat !== false)
     ? 1 + Math.sin(tSec * CFG.heartbeatFreq) * CFG.heartbeatAmplitude
@@ -1105,18 +1588,26 @@ function draw(ctx, state, tSec, viewport, extras) {
     const boost = 0.3 + 0.7 * n.recency;
     const pulse = (Math.sin(tSec * CFG.pulseFreq + n.phase) + 1) * 0.5;
     const searchPulse = isMatch ? (0.5 + 0.5 * Math.sin(tSec * CFG.searchPulseFreq + n.phase)) : 0;
-    const r = (n.r * ss * (1 + searchPulse * 0.25) + pulse * 0.8 * boost * ss) * cam.scale;
+    const hubMul = n.isHub ? (1 + 0.3 * Math.sin(tSec * 1.8 + n.phase)) : 1;
+    const r = (n.r * ss * (1 + searchPulse * 0.25) * hubMul + pulse * 0.8 * boost * ss) * cam.scale;
     if (r <= 0) continue;
 
-    const glowR = r * CFG.nodeGlowRadiusMul;
-    const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
-    const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-    glowGrad.addColorStop(0, glowRgba(n.role, innerA));
-    glowGrad.addColorStop(1, glowRgba(n.role, 0));
-    ctx.fillStyle = glowGrad;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
-    ctx.fill();
+    // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
+    if (perfMode !== 'minimal') {
+      const glowR = r * CFG.nodeGlowRadiusMul;
+      const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
+      if (perfMode === 'degraded') {
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7);
+      } else {
+        const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0));
+        ctx.fillStyle = glowGrad;
+      }
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
@@ -1129,6 +1620,15 @@ function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    // Hub ring (yellow-gold outline для нод с high degree)
+    if (n.isHub && perfMode !== 'minimal') {
+      ctx.strokeStyle = `rgba(255, 215, 120, ${0.55 * ag})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Tool icon внутри tool_use ноды
     if (n.role === 'tool_use' && r >= CFG.toolIconMinR) {
@@ -1247,12 +1747,12 @@ function hideTooltip() {
 
 
 
+
 let sliderEl, labelEl, playBtn;
 let playing = false;
 let lastStepMs = 0;
 let sortedIds = [];
 let stepIndex = 0;
-const STEP_INTERVAL_MS = CFG.storyDwellMs;
 function initTimeline() {
   sliderEl = document.getElementById('timeline');
   labelEl = document.getElementById('timeline-label');
@@ -1263,11 +1763,21 @@ function initTimeline() {
   updatePlayBtn();
 }
 
+function currentStepInterval() {
+  return CFG.storyDwellMs / Math.max(0.1, state.playSpeed || 1);
+}
+function setSpeed(mult) {
+  state.playSpeed = mult;
+  // при изменении speed пересчитываем lastStepMs, чтобы не произошло instant advance
+  lastStepMs = performance.now();
+}
+
 function onSliderInput() {
   state.timelineMax = parseFloat(sliderEl.value) / 100;
   if (playing) stopPlay();
   updateLabel();
   syncChatToTimeline(state);
+  rebuildSeen(state);
 }
 function togglePlay() {
   if (playing) stopPlay(); else startPlay();
@@ -1289,12 +1799,10 @@ function startPlay() {
   sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
   const atEnd = state.timelineMax >= 0.9999;
   if (atEnd) {
-    // Досмотрено — начать заново
     resetStory();
     state.timelineMax = 0;
     stepIndex = 0;
   } else {
-    // Возобновить с текущей позиции — вычисляем stepIndex по cutoff
     const { tsMin, tsMax } = computeTsBounds();
     const range = Math.max(1, tsMax - tsMin);
     const cutoff = tsMin + range * state.timelineMax;
@@ -1304,12 +1812,14 @@ function startPlay() {
       if (node && node.ts <= cutoff) stepIndex = i + 1;
       else break;
     }
+    // rebuild seen from DOM после manual drag
+    rebuildSeen(state);
   }
   playing = true;
   lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
-  if (atEnd) advanceStep(); // в рестарте сразу показываем первую
+  if (atEnd) advanceStep();
 }
 
 function stopPlay() {
@@ -1331,15 +1841,18 @@ function advanceStep() {
   const { tsMin, tsMax } = computeTsBounds();
   const range = Math.max(1, tsMax - tsMin);
   const desired = (node.ts - tsMin) / range;
-  // Небольшая дельта, чтобы cutoff строго >= ts ноды
   state.timelineMax = Math.min(1, desired + 0.0001);
+  // небольшой re-heat чтобы новорождённая нода могла устаканиться
+  if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);
   syncSlider();
   updateLabel();
 }
 function tickPlay() {
   if (!playing) return;
   const now = performance.now();
-  if (now - lastStepMs >= STEP_INTERVAL_MS) {
+  const interval = currentStepInterval();
+  // строго 1 advance на кадр; если отстали — просто догоняем по 1 на кадр
+  if (now - lastStepMs >= interval) {
     lastStepMs = now;
     advanceStep();
   }
@@ -1387,6 +1900,8 @@ function resetTimeline() {
 let streamEl, phoneEl;
 
 const seen = new Set();
+const pendingQueue = [];
+let lastPostMs = 0;
 let activeNodeId = null;
 function initStory() {
   streamEl = document.getElementById('chat-stream');
@@ -1464,10 +1979,18 @@ function postBubble(node) {
   const { wrap, textEl, fullText } = buildBubble(node);
   wrap.dataset.nodeId = node.id;
   streamEl.appendChild(wrap);
+  const heavy = fullText.length > 800;
+  const perfMinimal = (window.__viz && window.__viz.state && window.__viz.state.perfMode === 'minimal');
   requestAnimationFrame(() => {
     wrap.classList.add('show');
     streamEl.scrollTop = streamEl.scrollHeight;
-    typeOut(textEl, fullText);
+    if (heavy || perfMinimal) {
+      // длинное сообщение или большой граф — показываем мгновенно без typewriter
+      textEl.textContent = fullText;
+      textEl.classList.remove('typing');
+    } else {
+      typeOut(textEl, fullText);
+    }
   });
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
@@ -1504,12 +2027,10 @@ function cutoffTs(state) {
 function syncChatToTimeline(state) {
   if (!streamEl) return;
   const cutoff = cutoffTs(state);
-  // Определяем целевой набор id (все ноды с ts <= cutoff)
   const targetIds = new Set();
   for (const n of state.nodes) {
     if (n.ts <= cutoff) targetIds.add(n.id);
   }
-  // Удаляем те bubble которые больше не должны быть
   for (const child of [...streamEl.children]) {
     const id = child.dataset.nodeId;
     if (!targetIds.has(id)) {
@@ -1517,7 +2038,6 @@ function syncChatToTimeline(state) {
       seen.delete(id);
     }
   }
-  // Добавляем недостающие — мгновенно, без typewriter
   const toAdd = [];
   for (const n of state.nodes) {
     if (!targetIds.has(n.id)) continue;
@@ -1526,29 +2046,68 @@ function syncChatToTimeline(state) {
   }
   toAdd.sort((a, b) => a.ts - b.ts);
   for (const n of toAdd) postBubbleInstant(n);
-  // Обрезка по лимиту
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
-  // Скролл вниз чтобы видно было новейшие
   streamEl.scrollTop = streamEl.scrollHeight;
   if (phoneEl) {
     if (streamEl.children.length > 0) phoneEl.classList.add('active');
     else phoneEl.classList.remove('active');
   }
+
+  // Синхронизация bornAt чтобы draw() не триггерил лишнюю birth-анимацию
+  const nowMs = performance.now();
+  const longAgo = nowMs - CFG.birthDurationMs - 50;
+  for (const n of state.nodes) {
+    const alive = n.ts <= cutoff;
+    if (alive && n.bornAt == null) n.bornAt = longAgo;
+    else if (!alive && n.bornAt != null) n.bornAt = null;
+  }
+
+  // Сбрасываем очередь на случай если она не очищена
+  pendingQueue.length = 0;
+}
+
+/** Перестраивает seen-set из текущего содержимого DOM. Вызывается после manual drag. */
+function rebuildSeen(state) {
+  seen.clear();
+  if (!streamEl) return;
+  for (const child of streamEl.children) {
+    if (child.dataset.nodeId) seen.add(child.dataset.nodeId);
+  }
 }
 function tickStory(nowMs, state) {
   const active = isPlaying() && state.nodes.length > 0;
-  if (!active) return;
+  if (!active) {
+    // Когда play выключен — чистим очередь (manual режим)
+    if (pendingQueue.length) pendingQueue.length = 0;
+    return;
+  }
+  // Накапливаем новых в очередь (может прийти несколько за кадр при frame drop)
   const newly = collectNew(state);
-  for (const n of newly) postBubble(n);
+  if (newly.length) pendingQueue.push(...newly);
+
+  // Выдаём не чаще одной bubble за MIN_POST_GAP_MS (учитывая playSpeed)
+  const minGap = CFG.storyPostGapMs / Math.max(0.1, state.playSpeed || 1);
+  while (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
+    const n = pendingQueue.shift();
+    postBubble(n);
+    lastPostMs = nowMs;
+    break; // ровно одна за кадр — чтобы typewriter не накладывался
+  }
 }
 function getFrontierNodeId() { return activeNodeId; }
 function resetStory() {
   seen.clear();
+  pendingQueue.length = 0;
+  lastPostMs = 0;
   activeNodeId = null;
+  // Сбросить bornAt у всех нод — физика возьмётся рожать их заново как freshly-born
+  if (window.__viz && window.__viz.state && Array.isArray(window.__viz.state.nodes)) {
+    for (const n of window.__viz.state.nodes) n.bornAt = null;
+  }
   if (streamEl) streamEl.innerHTML = '';
   if (phoneEl) phoneEl.classList.remove('active');
 }
@@ -1680,6 +2239,7 @@ function updateCount() {
 
 
 
+
 let urlInput, btnStart, btnStop, statusEl;
 let pollingId = null;
 let lastByteLen = 0;
@@ -1751,6 +2311,7 @@ async function pullOnce() {
     if (newRaw.length) {
       const added = appendRawNodes(state, newRaw, getViewport());
       ensureParticles(state.edges);
+      if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное
       updateStatsHUD();
       setStatus(`+${added.length} @ ${timeNow()} (${state.nodes.length} total)`);
@@ -1937,6 +2498,8 @@ function onClick(ev) {
 
 
 
+
+
 let getViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
@@ -1979,7 +2542,13 @@ function onKey(ev) {
       state.cameraTarget = null;
       hideDetail();
     }
-  }
+  } else if (ev.key === 'f' || ev.key === 'F') {
+    ev.preventDefault();
+    toggleFreeze();
+  } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
+  else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
+  else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }
+  else if (ev.key === '5') { ev.preventDefault(); setSpeed(5); }
 }
 
 function stepTimeline(dir) {
@@ -2030,12 +2599,14 @@ function computeStats(nodes) {
   let totalChars = 0;
   let tsMin = Infinity, tsMax = -Infinity;
   let longest = null;
+  let hubs = 0;
   const toolCounts = new Map();
   for (const n of nodes) {
     if (typeof n.textLen === 'number') totalChars += n.textLen;
     if (n.ts < tsMin) tsMin = n.ts;
     if (n.ts > tsMax) tsMax = n.ts;
     if (!longest || n.textLen > longest.textLen) longest = n;
+    if (n.isHub) hubs++;
     if (n.role === 'tool_use' && n.toolName) {
       toolCounts.set(n.toolName, (toolCounts.get(n.toolName) || 0) + 1);
     }
@@ -2044,6 +2615,7 @@ function computeStats(nodes) {
     tokens: Math.round(totalChars / 4),
     durationSec: (tsMax - tsMin) / 1000,
     longest,
+    hubs,
     topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
   };
 }
@@ -2081,6 +2653,9 @@ function recomputeStats() {
   } else {
     topToolsEl.innerHTML = '<span class="muted">—</span>';
   }
+  // Hubs
+  const hubsLabel = document.getElementById('stat-hubs');
+  if (hubsLabel) hubsLabel.textContent = s.hubs > 0 ? String(s.hubs) : '—';
   if (s.longest) {
     const preview = (s.longest.text || '').slice(0, 36).replace(/\n/g, ' ');
     const ellipsis = (s.longest.text || '').length > 36 ? '…' : '';
@@ -2156,6 +2731,8 @@ function tickLayoutTransition() {
   }
   if (t >= 1) {
     state.layoutMode = transition.toMode;
+    // При возврате в force — reheat чтобы физика мягко раскидала идеальные кольца
+    if (transition.toMode === 'force' && state.sim) reheat(state.sim, 0.5);
     transition = null;
     updateBtnLabel();
   }
@@ -2171,7 +2748,400 @@ function updateBtnLabel() {
 }
 
 
+// --- src/ui/audio.js ---
+
+// Generative ambient в стиле Brian Eno: drone pad + случайные ноты
+// пентатоники с медленным fade + delay/echo feedback + lowpass.
+// Плюс pitched chirp при рождении ноды.
+
+let audioCtx = null;
+let ambientMaster = null;
+let ambientNodes = [];
+let arpeggioTimer = null;
+let delayIn = null;
+let enabled = false;
+let btnEl;
+
+// Pad: C3 + G3 + C4 — открытая квинта с октавой (major key fundamental)
+const PAD_VOICES = [
+  { freq: 130.81, detune: -5, type: 'sine' },      // C3
+  { freq: 196.00, detune: +4, type: 'sine' },      // G3
+  { freq: 261.63, detune: -2, type: 'triangle' },  // C4 (triangle добавляет обертоны)
+];
+
+// Пентатоника C major — используется для arpeggio-нот
+const PENTATONIC = [
+  523.25, // C5
+  587.33, // D5
+  659.25, // E5
+  783.99, // G5
+  880.00, // A5
+  1046.50,// C6
+];
+
+// Чирп при рождении ноды (отдельно от ambient)
+const FREQ_BY_ROLE = {
+  user: 440,        // A4
+  assistant: 554.37,// C#5
+  tool_use: 659.25, // E5
+};
+
+const AMBIENT_PAD_GAIN = 0.018;
+const AMBIENT_ARP_GAIN = 0.035;
+const CHIRP_GAIN = 0.06;
+const CHIRP_DURATION = 0.32;
+function initAudio() {
+  btnEl = document.getElementById('btn-audio');
+  if (btnEl) btnEl.addEventListener('click', toggleAudio);
+  updateBtn();
+}
+
+function ensureCtx() {
+  if (audioCtx) return audioCtx;
+  const Cls = window.AudioContext || window.webkitAudioContext;
+  if (!Cls) return null;
+  audioCtx = new Cls();
+  return audioCtx;
+}
+
+function buildDelayNetwork(ctx, destination) {
+  // Input → wet (delay + feedback loop) + dry → output
+  const input = ctx.createGain();
+  const dry = ctx.createGain();
+  const wet = ctx.createGain();
+  dry.gain.value = 1.0;
+  wet.gain.value = 0.55;
+
+  const delay = ctx.createDelay(3.0);
+  delay.delayTime.value = 0.45;
+  const feedback = ctx.createGain();
+  feedback.gain.value = 0.4;
+
+  // delay loop: delay -> feedback -> delay
+  delay.connect(feedback).connect(delay);
+
+  input.connect(dry).connect(destination);
+  input.connect(delay);
+  delay.connect(wet).connect(destination);
+
+  return input;
+}
+
+function startAmbient() {
+  const ctx = ensureCtx();
+  if (!ctx || ambientNodes.length) return;
+  const now = ctx.currentTime;
+
+  // Master
+  ambientMaster = ctx.createGain();
+  ambientMaster.gain.value = 0;
+  ambientMaster.connect(ctx.destination);
+
+  // Lowpass — убирает резкие верха
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 1600;
+  filter.Q.value = 0.6;
+  filter.connect(ambientMaster);
+
+  // Delay network перед фильтром: arpeggio-ноты идут через него для эха
+  delayIn = buildDelayNetwork(ctx, filter);
+
+  // Медленный LFO для filter cutoff — плавное «дыхание»
+  const fLfo = ctx.createOscillator();
+  fLfo.frequency.value = 0.06;
+  const fLfoGain = ctx.createGain();
+  fLfoGain.gain.value = 400;
+  fLfo.connect(fLfoGain).connect(filter.frequency);
+  fLfo.start(now);
+  ambientNodes.push(fLfo);
+
+  // PAD — голоса подключаются прямо к filter (без delay, drone без эха)
+  for (const v of PAD_VOICES) {
+    const osc = ctx.createOscillator();
+    osc.type = v.type;
+    osc.frequency.value = v.freq;
+    osc.detune.value = v.detune;
+    const voiceGain = ctx.createGain();
+    voiceGain.gain.value = AMBIENT_PAD_GAIN;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.05 + Math.random() * 0.1;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0.008;
+    lfo.connect(lfoGain).connect(voiceGain.gain);
+    osc.connect(voiceGain).connect(filter);
+    osc.start(now);
+    lfo.start(now);
+    ambientNodes.push(osc, lfo);
+  }
+
+  // Плавный fade-in pad'а за 3 сек
+  ambientMaster.gain.linearRampToValueAtTime(1.0, now + 3.0);
+
+  // Запускаем цикл arpeggio
+  scheduleNextArp(400);
+}
+
+function playArpeggioNote() {
+  if (!enabled || !audioCtx || !delayIn) return;
+  const ctx = audioCtx;
+  const now = ctx.currentTime;
+  const note = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
+  // Иногда октавой ниже для разнообразия
+  const freq = Math.random() < 0.3 ? note / 2 : note;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  const g = ctx.createGain();
+  const dur = 3.5 + Math.random() * 2;
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(AMBIENT_ARP_GAIN, now + 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0006, now + dur);
+  osc.connect(g).connect(delayIn);
+  osc.start(now);
+  osc.stop(now + dur + 0.05);
+}
+
+function scheduleNextArp(ms) {
+  clearTimeout(arpeggioTimer);
+  arpeggioTimer = setTimeout(() => {
+    if (!enabled) return;
+    playArpeggioNote();
+    // следующая нота через 2.5–6 сек
+    scheduleNextArp(2500 + Math.random() * 3500);
+  }, ms);
+}
+
+function stopAmbient() {
+  if (!audioCtx || !ambientMaster) return;
+  const now = audioCtx.currentTime;
+  ambientMaster.gain.cancelScheduledValues(now);
+  ambientMaster.gain.linearRampToValueAtTime(0, now + 1.0);
+  clearTimeout(arpeggioTimer);
+  arpeggioTimer = null;
+  const toKill = ambientNodes.slice();
+  ambientNodes = [];
+  const master = ambientMaster;
+  ambientMaster = null;
+  delayIn = null;
+  setTimeout(() => {
+    for (const n of toKill) { try { n.stop(); } catch {} }
+    try { master && master.disconnect(); } catch {}
+  }, 1100);
+}
+
+function toggleAudio() {
+  enabled = !enabled;
+  if (enabled) startAmbient();
+  else stopAmbient();
+  updateBtn();
+}
+
+function updateBtn() {
+  if (!btnEl) return;
+  btnEl.textContent = enabled ? '♫' : '♪';
+  btnEl.setAttribute('aria-label', enabled ? 'Sound on' : 'Sound off');
+  btnEl.classList.toggle('active-audio', enabled);
+}
+function chirpFor(node) {
+  if (!enabled || !audioCtx || !node) return;
+  const freq = FREQ_BY_ROLE[node.role] || 440;
+  const ctx = audioCtx;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(CHIRP_GAIN, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0008, now + CHIRP_DURATION);
+  // Чирпы тоже через delay — звучат "в пространстве"
+  const dest = delayIn || ctx.destination;
+  osc.connect(gain).connect(dest);
+  osc.start(now);
+  osc.stop(now + CHIRP_DURATION + 0.02);
+}
+function isAudioEnabled() { return enabled; }
+
+
+// --- src/ui/recorder.js ---
+
+// MediaRecorder-запись canvas графа в WebM.
+// Phone-mockup сам не попадает в запись (DOM-элемент не пишется в canvas-stream),
+// но пользователь может записать весь экран внешним screen-recording'ом для полной картины.
+
+let recorder = null;
+let chunks = [];
+let startedAt = 0;
+let btnEl;
+let timerId = null;
+function initRecorder() {
+  btnEl = document.getElementById('btn-record');
+  if (btnEl) btnEl.addEventListener('click', toggle);
+}
+
+function getSupportedMime() {
+  if (typeof MediaRecorder === 'undefined') return null;
+  const candidates = [
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+    'video/mp4',
+  ];
+  for (const m of candidates) {
+    try { if (MediaRecorder.isTypeSupported(m)) return m; } catch {}
+  }
+  return 'video/webm';
+}
+
+function toggle() {
+  if (recorder && recorder.state === 'recording') stop();
+  else start();
+}
+
+function start() {
+  const canvas = document.getElementById('graph');
+  if (!canvas || !canvas.captureStream) {
+    showToast('Recording not supported in this browser');
+    return;
+  }
+  const mime = getSupportedMime();
+  if (!mime) {
+    showToast('MediaRecorder not available');
+    return;
+  }
+  let stream;
+  try { stream = canvas.captureStream(30); } catch (e) {
+    showToast('captureStream failed');
+    return;
+  }
+  try {
+    recorder = new MediaRecorder(stream, { mimeType: mime });
+  } catch (e) {
+    console.error('[recorder]', e);
+    showToast('Recorder init failed');
+    return;
+  }
+  chunks = [];
+  recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+  recorder.onstop = download;
+  recorder.start(250); // chunks of 250ms
+  startedAt = Date.now();
+  updateBtn(true);
+  timerId = setInterval(updateTimer, 250);
+}
+
+function stop() {
+  if (!recorder) return;
+  try { recorder.stop(); } catch {}
+  clearInterval(timerId);
+  timerId = null;
+  updateBtn(false);
+}
+
+function download() {
+  if (!chunks.length) return;
+  const type = chunks[0].type || 'video/webm';
+  const blob = new Blob(chunks, { type });
+  const url = URL.createObjectURL(blob);
+  const ext = type.includes('mp4') ? 'mp4' : 'webm';
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `conversation-viz-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  const size = (blob.size / (1024 * 1024)).toFixed(1);
+  showToast(`Saved ${a.download} (${size} MB)`);
+  recorder = null;
+  chunks = [];
+}
+
+function updateBtn(recording) {
+  if (!btnEl) return;
+  btnEl.textContent = recording ? '● REC 0s' : 'Record';
+  btnEl.classList.toggle('recording', recording);
+}
+
+function updateTimer() {
+  if (!btnEl || !recorder) return;
+  const sec = Math.floor((Date.now() - startedAt) / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  btnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+
+// --- src/ui/freeze-toggle.js ---
+
+
+
+let btn;
+function initFreezeToggle() {
+  btn = document.getElementById('btn-freeze');
+  if (btn) btn.addEventListener('click', toggle);
+  update();
+}
+function toggleFreeze() { toggle(); }
+
+function toggle() {
+  if (!state.sim) return;
+  if (state.sim.manualFrozen) unfreeze(state.sim);
+  else freeze(state.sim);
+  update();
+}
+
+function update() {
+  if (!btn) return;
+  const frozen = state.sim && state.sim.manualFrozen;
+  btn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
+  btn.classList.toggle('active-freeze', !!frozen);
+}
+
+// Периодически обновляем label (если auto-unfreeze через drag в interaction.js)
+setInterval(update, 400);
+
+
+// --- src/ui/speed-control.js ---
+
+
+
+
+let buttons = [];
+function initSpeedControl() {
+  const container = document.getElementById('speed-control');
+  if (!container) return;
+  const speeds = CFG.playSpeedOptions || [0.5, 1, 2, 5];
+  container.innerHTML = '';
+  for (const s of speeds) {
+    const b = document.createElement('button');
+    b.className = 'btn btn-speed';
+    b.dataset.speed = String(s);
+    b.textContent = s === 1 ? '1×' : `${s}×`;
+    if (s === 1) b.classList.add('active');
+    b.addEventListener('click', () => setSpeed(s));
+    container.appendChild(b);
+    buttons.push(b);
+  }
+}
+function setSpeed(mult) {
+  state.playSpeed = mult;
+  timelineSetSpeed(mult);
+  for (const b of buttons) b.classList.toggle('active', parseFloat(b.dataset.speed) === mult);
+}
+
+
 // --- src/ui/interaction.js ---
+
 
 
 
@@ -2230,6 +3200,9 @@ function onDown(ev) {
   draggedNode = hitTest(ev.clientX, ev.clientY);
   state.cameraTarget = null;
   if (draggedNode) {
+    // Auto-unfreeze + re-heat на drag ноды
+    if (state.sim && state.sim.manualFrozen) unfreeze(state.sim);
+    if (state.sim) { reheat(state.sim, 0.3); state.sim.alphaTarget = 0.3; }
     state.hover = draggedNode;
     state.pathSet = pathToRoot(draggedNode, state.byId);
     hideTooltip();
@@ -2274,6 +3247,7 @@ function onUp(ev) {
   interactionCanvas.classList.remove('dragging');
   const wasNodeDrag = !!draggedNode;
   draggedNode = null;
+  if (wasNodeDrag && state.sim) state.sim.alphaTarget = 0; // отпустили — cool down
   if (!dragMoved) {
     const hit = hitTest(ev.clientX, ev.clientY);
     if (hit) {
@@ -2319,6 +3293,7 @@ function onKey(ev) {
 
 
 // --- src/ui/loader.js ---
+
 
 
 
@@ -2381,7 +3356,16 @@ function loadText(text) {
     if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
     const vp = _getViewport();
     const g = buildGraph(parsed, vp);
-    prewarm(g.nodes, g.edges, vp);
+    // Auto-degrade: при больших графах уменьшаем prewarm чтобы не зафризить UI
+    const n = g.nodes.length;
+    if (n >= CFG.perfHeavyThreshold) state.perfMode = 'minimal';
+    else if (n >= CFG.perfDegradeThreshold) state.perfMode = 'degraded';
+    else state.perfMode = 'normal';
+    const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
+      : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
+      : CFG.prewarmIterations;
+    state.sim = createSim();
+    prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
     state.nodes = g.nodes;
     state.edges = g.edges;
     state.byId = g.byId;
@@ -2426,8 +3410,11 @@ function updateStatsHUD() {
   if (!s) { el.textContent = '—'; return; }
   const fmtEl = document.getElementById('load-format');
   const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}`;
-  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}`;
+  const perfSuffix = state.perfMode && state.perfMode !== 'normal'
+    ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
+    : '';
+  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}${perfSuffix}`;
+  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {
@@ -2564,6 +3551,10 @@ async function applyUrlParamsLate() {
 
 
 
+
+
+
+
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 
@@ -2606,12 +3597,11 @@ initMinimap(getViewport);
 initStats();
 initShare();
 initLayoutToggle(getViewport);
-initInteraction(canvas, getViewport);
-initLoader(getViewport, onGraphReady);
-initKeyboard(getViewport);
-
-state.stars = generateStarfield(CFG.starfieldCount);
-
+initAudio();
+initRecorder();
+initFreezeToggle();
+initSpeedControl();
+state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
   ensureParticles(state.edges);
@@ -2623,6 +3613,12 @@ function onGraphReady() {
   }
 }
 
+initInteraction(canvas, getViewport);
+initLoader(getViewport, onGraphReady);
+initKeyboard(getViewport);
+
+state.stars = generateStarfield(CFG.starfieldCount);
+
 let lastMs = performance.now();
 function frame(tms) {
   const tSec = tms / 1000;
@@ -2632,8 +3628,8 @@ function frame(tms) {
 
   tickPlay();
   tickLayoutTransition();
-  const physicsDisabled = isRadialActive();
-  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp);
+  const physicsDisabled = isRadialActive() || (state.sim && state.sim.frozen && !isDraggingNode());
+  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp, state.sim);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)
@@ -2666,10 +3662,13 @@ function frame(tms) {
 
   const allowHeartbeat = !isDraggingNode() && !isPanning();
 
+  const perfMode = state.perfMode || 'normal';
   draw(ctx, state, tSec, vp, {
-    allowHeartbeat,
-    starfield: (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
-    particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf),
+    allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
+    starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
+    particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf, perfMode),
+    onBirth: chirpFor,
+    perfMode,
   });
 
   // Story mode должен читать bornAt после того как draw()/updateBirths его обновил

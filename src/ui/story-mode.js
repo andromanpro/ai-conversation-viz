@@ -5,6 +5,8 @@ import { toolIcon } from '../view/tool-icons.js';
 let streamEl, phoneEl;
 
 const seen = new Set();
+const pendingQueue = [];
+let lastPostMs = 0;
 let activeNodeId = null;
 
 export function initStory() {
@@ -83,10 +85,18 @@ function postBubble(node) {
   const { wrap, textEl, fullText } = buildBubble(node);
   wrap.dataset.nodeId = node.id;
   streamEl.appendChild(wrap);
+  const heavy = fullText.length > 800;
+  const perfMinimal = (window.__viz && window.__viz.state && window.__viz.state.perfMode === 'minimal');
   requestAnimationFrame(() => {
     wrap.classList.add('show');
     streamEl.scrollTop = streamEl.scrollHeight;
-    typeOut(textEl, fullText);
+    if (heavy || perfMinimal) {
+      // длинное сообщение или большой граф — показываем мгновенно без typewriter
+      textEl.textContent = fullText;
+      textEl.classList.remove('typing');
+    } else {
+      typeOut(textEl, fullText);
+    }
   });
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
@@ -124,12 +134,10 @@ function cutoffTs(state) {
 export function syncChatToTimeline(state) {
   if (!streamEl) return;
   const cutoff = cutoffTs(state);
-  // Определяем целевой набор id (все ноды с ts <= cutoff)
   const targetIds = new Set();
   for (const n of state.nodes) {
     if (n.ts <= cutoff) targetIds.add(n.id);
   }
-  // Удаляем те bubble которые больше не должны быть
   for (const child of [...streamEl.children]) {
     const id = child.dataset.nodeId;
     if (!targetIds.has(id)) {
@@ -137,7 +145,6 @@ export function syncChatToTimeline(state) {
       seen.delete(id);
     }
   }
-  // Добавляем недостающие — мгновенно, без typewriter
   const toAdd = [];
   for (const n of state.nodes) {
     if (!targetIds.has(n.id)) continue;
@@ -146,32 +153,71 @@ export function syncChatToTimeline(state) {
   }
   toAdd.sort((a, b) => a.ts - b.ts);
   for (const n of toAdd) postBubbleInstant(n);
-  // Обрезка по лимиту
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
-  // Скролл вниз чтобы видно было новейшие
   streamEl.scrollTop = streamEl.scrollHeight;
   if (phoneEl) {
     if (streamEl.children.length > 0) phoneEl.classList.add('active');
     else phoneEl.classList.remove('active');
   }
+
+  // Синхронизация bornAt чтобы draw() не триггерил лишнюю birth-анимацию
+  const nowMs = performance.now();
+  const longAgo = nowMs - CFG.birthDurationMs - 50;
+  for (const n of state.nodes) {
+    const alive = n.ts <= cutoff;
+    if (alive && n.bornAt == null) n.bornAt = longAgo;
+    else if (!alive && n.bornAt != null) n.bornAt = null;
+  }
+
+  // Сбрасываем очередь на случай если она не очищена
+  pendingQueue.length = 0;
+}
+
+/** Перестраивает seen-set из текущего содержимого DOM. Вызывается после manual drag. */
+export function rebuildSeen(state) {
+  seen.clear();
+  if (!streamEl) return;
+  for (const child of streamEl.children) {
+    if (child.dataset.nodeId) seen.add(child.dataset.nodeId);
+  }
 }
 
 export function tickStory(nowMs, state) {
   const active = isPlaying() && state.nodes.length > 0;
-  if (!active) return;
+  if (!active) {
+    // Когда play выключен — чистим очередь (manual режим)
+    if (pendingQueue.length) pendingQueue.length = 0;
+    return;
+  }
+  // Накапливаем новых в очередь (может прийти несколько за кадр при frame drop)
   const newly = collectNew(state);
-  for (const n of newly) postBubble(n);
+  if (newly.length) pendingQueue.push(...newly);
+
+  // Выдаём не чаще одной bubble за MIN_POST_GAP_MS (учитывая playSpeed)
+  const minGap = CFG.storyPostGapMs / Math.max(0.1, state.playSpeed || 1);
+  while (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
+    const n = pendingQueue.shift();
+    postBubble(n);
+    lastPostMs = nowMs;
+    break; // ровно одна за кадр — чтобы typewriter не накладывался
+  }
 }
 
 export function getFrontierNodeId() { return activeNodeId; }
 
 export function resetStory() {
   seen.clear();
+  pendingQueue.length = 0;
+  lastPostMs = 0;
   activeNodeId = null;
+  // Сбросить bornAt у всех нод — физика возьмётся рожать их заново как freshly-born
+  if (window.__viz && window.__viz.state && Array.isArray(window.__viz.state.nodes)) {
+    for (const n of window.__viz.state.nodes) n.bornAt = null;
+  }
   if (streamEl) streamEl.innerHTML = '';
   if (phoneEl) phoneEl.classList.remove('active');
 }

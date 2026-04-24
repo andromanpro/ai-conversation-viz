@@ -2,6 +2,7 @@ import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
 import { parseLine } from '../core/parser.js';
 import { appendRawNodes } from '../core/graph.js';
+import { reheat } from '../core/layout.js';
 import { ensureParticles } from '../view/particles.js';
 
 let urlInput, btnStart, btnStop, statusEl;
@@ -76,6 +77,7 @@ async function pullOnce() {
     if (newRaw.length) {
       const added = appendRawNodes(state, newRaw, getViewport());
       ensureParticles(state.edges);
+      if (state.sim) reheat(state.sim, 0.2);
       state.timelineMax = 1; // показываем актуальное
       updateStatsHUD();
       setStatus(`+${added.length} @ ${timeNow()} (${state.nodes.length} total)`);

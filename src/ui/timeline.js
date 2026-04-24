@@ -1,13 +1,13 @@
 import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
-import { resetStory, syncChatToTimeline } from './story-mode.js';
+import { resetStory, syncChatToTimeline, rebuildSeen } from './story-mode.js';
+import { reheat } from '../core/layout.js';
 
 let sliderEl, labelEl, playBtn;
 let playing = false;
 let lastStepMs = 0;
 let sortedIds = [];
 let stepIndex = 0;
-const STEP_INTERVAL_MS = CFG.storyDwellMs;
 
 export function initTimeline() {
   sliderEl = document.getElementById('timeline');
@@ -19,11 +19,22 @@ export function initTimeline() {
   updatePlayBtn();
 }
 
+function currentStepInterval() {
+  return CFG.storyDwellMs / Math.max(0.1, state.playSpeed || 1);
+}
+
+export function setSpeed(mult) {
+  state.playSpeed = mult;
+  // при изменении speed пересчитываем lastStepMs, чтобы не произошло instant advance
+  lastStepMs = performance.now();
+}
+
 function onSliderInput() {
   state.timelineMax = parseFloat(sliderEl.value) / 100;
   if (playing) stopPlay();
   updateLabel();
   syncChatToTimeline(state);
+  rebuildSeen(state);
 }
 
 export function togglePlay() {
@@ -47,12 +58,10 @@ function startPlay() {
   sortedIds = [...state.nodes].sort((a, b) => a.ts - b.ts).map(n => n.id);
   const atEnd = state.timelineMax >= 0.9999;
   if (atEnd) {
-    // Досмотрено — начать заново
     resetStory();
     state.timelineMax = 0;
     stepIndex = 0;
   } else {
-    // Возобновить с текущей позиции — вычисляем stepIndex по cutoff
     const { tsMin, tsMax } = computeTsBounds();
     const range = Math.max(1, tsMax - tsMin);
     const cutoff = tsMin + range * state.timelineMax;
@@ -62,12 +71,14 @@ function startPlay() {
       if (node && node.ts <= cutoff) stepIndex = i + 1;
       else break;
     }
+    // rebuild seen from DOM после manual drag
+    rebuildSeen(state);
   }
   playing = true;
   lastStepMs = performance.now();
   updatePlayBtn();
   updateLabel();
-  if (atEnd) advanceStep(); // в рестарте сразу показываем первую
+  if (atEnd) advanceStep();
 }
 
 function stopPlay() {
@@ -89,8 +100,9 @@ function advanceStep() {
   const { tsMin, tsMax } = computeTsBounds();
   const range = Math.max(1, tsMax - tsMin);
   const desired = (node.ts - tsMin) / range;
-  // Небольшая дельта, чтобы cutoff строго >= ts ноды
   state.timelineMax = Math.min(1, desired + 0.0001);
+  // небольшой re-heat чтобы новорождённая нода могла устаканиться
+  if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);
   syncSlider();
   updateLabel();
 }
@@ -98,7 +110,9 @@ function advanceStep() {
 export function tickPlay() {
   if (!playing) return;
   const now = performance.now();
-  if (now - lastStepMs >= STEP_INTERVAL_MS) {
+  const interval = currentStepInterval();
+  // строго 1 advance на кадр; если отстали — просто догоняем по 1 на кадр
+  if (now - lastStepMs >= interval) {
     lastStepMs = now;
     advanceStep();
   }

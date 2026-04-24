@@ -60,11 +60,12 @@ function colorsFor(role) {
   return { core: '240, 250, 255', mid: '160, 230, 255', halo: '70, 190, 255' };
 }
 
-function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera) {
+function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera, perfMode) {
   const a = { x: edge.a.x, y: edge.a.y };
   const b = { x: edge.b.x, y: edge.b.y };
   const colors = colorsFor(edge.b.role);
-  const trailN = CFG.particleTrailLen;
+  // degraded: короче trail, без halo
+  const trailN = perfMode === 'degraded' ? 2 : CFG.particleTrailLen;
   const gap = CFG.particleTrailGap;
   const sz = CFG.particleSize;
   const jitter = CFG.particleJitterPx;
@@ -97,17 +98,20 @@ function drawSpark(ctx, edge, cp, progress, edgeAlpha, camera) {
     const alpha = progressFade * trailFade * edgeAlpha;
     if (alpha < 0.02) continue;
 
-    const haloR = sz * CFG.particleHaloMul * trailFade * flash;
-    ctx.fillStyle = `rgba(${colors.halo}, ${alpha * 0.22})`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
-    ctx.fill();
+    if (perfMode !== 'degraded') {
+      // Full quality: halo + mid + core
+      const haloR = sz * CFG.particleHaloMul * trailFade * flash;
+      ctx.fillStyle = `rgba(${colors.halo}, ${alpha * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+      ctx.fill();
 
-    const midR = sz * CFG.particleMidMul * trailFade;
-    ctx.fillStyle = `rgba(${colors.mid}, ${alpha * 0.55})`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, midR, 0, Math.PI * 2);
-    ctx.fill();
+      const midR = sz * CFG.particleMidMul * trailFade;
+      ctx.fillStyle = `rgba(${colors.mid}, ${alpha * 0.55})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     const coreR = Math.max(0.6, sz * trailFade * 0.7);
     ctx.fillStyle = `rgba(${colors.core}, ${alpha})`;

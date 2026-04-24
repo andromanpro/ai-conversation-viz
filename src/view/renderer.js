@@ -46,7 +46,7 @@ export function birthFactor(bornAt, now, duration) {
 
 export function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-function updateBirths(state, cutoff, nowMs) {
+function updateBirths(state, cutoff, nowMs, onBirth) {
   for (const n of state.nodes) {
     const alive = n.ts <= cutoff;
     if (alive && n.bornAt == null) {
@@ -60,6 +60,7 @@ function updateBirths(state, cutoff, nowMs) {
         n.vx = 0;
         n.vy = 0;
       }
+      if (onBirth) onBirth(n);
     } else if (!alive && n.bornAt != null) {
       n.bornAt = null;
     }
@@ -78,7 +79,8 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const cam = state.camera;
   const cutoff = timelineCutoff(state);
   const nowMs = tSec * 1000;
-  updateBirths(state, cutoff, nowMs);
+  updateBirths(state, cutoff, nowMs, extras && extras.onBirth);
+  const perfMode = (extras && extras.perfMode) || 'normal';
 
   const heartbeat = (extras && extras.allowHeartbeat !== false)
     ? 1 + Math.sin(tSec * CFG.heartbeatFreq) * CFG.heartbeatAmplitude
@@ -153,18 +155,26 @@ export function draw(ctx, state, tSec, viewport, extras) {
     const boost = 0.3 + 0.7 * n.recency;
     const pulse = (Math.sin(tSec * CFG.pulseFreq + n.phase) + 1) * 0.5;
     const searchPulse = isMatch ? (0.5 + 0.5 * Math.sin(tSec * CFG.searchPulseFreq + n.phase)) : 0;
-    const r = (n.r * ss * (1 + searchPulse * 0.25) + pulse * 0.8 * boost * ss) * cam.scale;
+    const hubMul = n.isHub ? (1 + 0.3 * Math.sin(tSec * 1.8 + n.phase)) : 1;
+    const r = (n.r * ss * (1 + searchPulse * 0.25) * hubMul + pulse * 0.8 * boost * ss) * cam.scale;
     if (r <= 0) continue;
 
-    const glowR = r * CFG.nodeGlowRadiusMul;
-    const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
-    const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-    glowGrad.addColorStop(0, glowRgba(n.role, innerA));
-    glowGrad.addColorStop(1, glowRgba(n.role, 0));
-    ctx.fillStyle = glowGrad;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
-    ctx.fill();
+    // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
+    if (perfMode !== 'minimal') {
+      const glowR = r * CFG.nodeGlowRadiusMul;
+      const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
+      if (perfMode === 'degraded') {
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7);
+      } else {
+        const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0));
+        ctx.fillStyle = glowGrad;
+      }
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
@@ -177,6 +187,15 @@ export function draw(ctx, state, tSec, viewport, extras) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    // Hub ring (yellow-gold outline для нод с high degree)
+    if (n.isHub && perfMode !== 'minimal') {
+      ctx.strokeStyle = `rgba(255, 215, 120, ${0.55 * ag})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Tool icon внутри tool_use ноды
     if (n.role === 'tool_use' && r >= CFG.toolIconMinR) {

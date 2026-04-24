@@ -23,6 +23,13 @@ export const CFG = {
   birthSpreadMax: 1.0,
   birthAlphaStart: 0.25,
   birthRadiusStart: 0.5,
+  // Auto-degrade пороги — при большом графе отключаем дорогие эффекты
+  perfDegradeThreshold: 400,   // выше — режим "performance"
+  perfHeavyThreshold: 1500,    // выше — совсем минимализм
+  perfMinimalParticles: 0,     // 0 = отключить частицы
+  perfMinimalStarCount: 80,
+  perfMinimalPrewarm: 40,
+  perfMinimalTypewriter: false,
 
   // v3 wow
   edgeCurveStrength: 0.18,
@@ -70,6 +77,20 @@ export const CFG = {
   minimapPadding: 8,
   radialRingGap: 130,
   layoutTransitionMs: 900,
+  barnesHutThreshold: 300,
+  barnesHutTheta: 0.9,
+  bhLeafMinSize: 1.0,
+  // Physics v5 — D3-style cooling + clamps
+  alphaDecay: 0.0228,     // ≈ (1 − 0.001^(1/300)) — settles за ~300 iters
+  alphaMin: 0.001,
+  velocityDecay: 0.4,     // "friction": vx *= (1 − velocityDecay)
+  reheatAlpha: 0.3,
+  maxVelocity: 40,
+  repulsionCutoff: 1500,
+  wallStiffness: 0.08,
+  wallPaddingMul: 4,
+  playSpeedOptions: [0.5, 1, 2, 5],
+  storyPostGapMs: 800,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
   cameraTargetLerp: 0.15,

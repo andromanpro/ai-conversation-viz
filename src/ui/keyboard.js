@@ -3,6 +3,8 @@ import { togglePlay } from './timeline.js';
 import { fitToView } from '../core/layout.js';
 import { syncChatToTimeline } from './story-mode.js';
 import { hideDetail } from './detail-panel.js';
+import { toggleFreeze } from './freeze-toggle.js';
+import { setSpeed } from './speed-control.js';
 
 let getViewport = () => ({
   width: window.innerWidth,
@@ -47,7 +49,13 @@ function onKey(ev) {
       state.cameraTarget = null;
       hideDetail();
     }
-  }
+  } else if (ev.key === 'f' || ev.key === 'F') {
+    ev.preventDefault();
+    toggleFreeze();
+  } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
+  else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
+  else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }
+  else if (ev.key === '5') { ev.preventDefault(); setSpeed(5); }
 }
 
 function stepTimeline(dir) {

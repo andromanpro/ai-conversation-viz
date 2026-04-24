@@ -15,6 +15,9 @@ export const state = {
   searchActive: null,
   hiddenRoles: new Set(),
   layoutMode: 'force', // 'force' | 'radial'
+  perfMode: 'normal',  // 'normal' | 'degraded' | 'minimal'
+  sim: null,           // Physics simulation state (createSim)
+  playSpeed: 1,        // 0.5 | 1 | 2 | 5
 };
 
 export function resetInteractionState() {

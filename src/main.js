@@ -1,6 +1,6 @@
 import { state } from './view/state.js';
 import { CFG } from './core/config.js';
-import { stepPhysics } from './core/layout.js';
+import { stepPhysics, createSim } from './core/layout.js';
 import { draw } from './view/renderer.js';
 import { generateStarfield, drawStarfield } from './view/starfield.js';
 import { ensureParticles, tickParticles, drawParticles } from './view/particles.js';
@@ -18,6 +18,10 @@ import { initMinimap, tickMinimap } from './ui/minimap.js';
 import { initStats, tickStats, recomputeStats } from './ui/stats-hud.js';
 import { initShare, applyUrlParamsLate } from './ui/share.js';
 import { initLayoutToggle, tickLayoutTransition, isRadialActive } from './ui/layout-toggle.js';
+import { initAudio, chirpFor } from './ui/audio.js';
+import { initRecorder } from './ui/recorder.js';
+import { initFreezeToggle } from './ui/freeze-toggle.js';
+import { initSpeedControl } from './ui/speed-control.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -61,12 +65,11 @@ initMinimap(getViewport);
 initStats();
 initShare();
 initLayoutToggle(getViewport);
-initInteraction(canvas, getViewport);
-initLoader(getViewport, onGraphReady);
-initKeyboard(getViewport);
-
-state.stars = generateStarfield(CFG.starfieldCount);
-
+initAudio();
+initRecorder();
+initFreezeToggle();
+initSpeedControl();
+state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
   ensureParticles(state.edges);
@@ -78,6 +81,12 @@ function onGraphReady() {
   }
 }
 
+initInteraction(canvas, getViewport);
+initLoader(getViewport, onGraphReady);
+initKeyboard(getViewport);
+
+state.stars = generateStarfield(CFG.starfieldCount);
+
 let lastMs = performance.now();
 function frame(tms) {
   const tSec = tms / 1000;
@@ -87,8 +96,8 @@ function frame(tms) {
 
   tickPlay();
   tickLayoutTransition();
-  const physicsDisabled = isRadialActive();
-  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp);
+  const physicsDisabled = isRadialActive() || (state.sim && state.sim.frozen && !isDraggingNode());
+  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp, state.sim);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)
@@ -121,10 +130,13 @@ function frame(tms) {
 
   const allowHeartbeat = !isDraggingNode() && !isPanning();
 
+  const perfMode = state.perfMode || 'normal';
   draw(ctx, state, tSec, vp, {
-    allowHeartbeat,
-    starfield: (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
-    particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf),
+    allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
+    starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),
+    particles: (c, alphaOf) => drawParticles(c, state.edges, state.camera, alphaOf, perfMode),
+    onBirth: chirpFor,
+    perfMode,
   });
 
   // Story mode должен читать bornAt после того как draw()/updateBirths его обновил

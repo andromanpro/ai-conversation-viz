@@ -17,12 +17,14 @@ export function computeStats(nodes) {
   let totalChars = 0;
   let tsMin = Infinity, tsMax = -Infinity;
   let longest = null;
+  let hubs = 0;
   const toolCounts = new Map();
   for (const n of nodes) {
     if (typeof n.textLen === 'number') totalChars += n.textLen;
     if (n.ts < tsMin) tsMin = n.ts;
     if (n.ts > tsMax) tsMax = n.ts;
     if (!longest || n.textLen > longest.textLen) longest = n;
+    if (n.isHub) hubs++;
     if (n.role === 'tool_use' && n.toolName) {
       toolCounts.set(n.toolName, (toolCounts.get(n.toolName) || 0) + 1);
     }
@@ -31,6 +33,7 @@ export function computeStats(nodes) {
     tokens: Math.round(totalChars / 4),
     durationSec: (tsMax - tsMin) / 1000,
     longest,
+    hubs,
     topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
   };
 }
@@ -71,6 +74,9 @@ export function recomputeStats() {
   } else {
     topToolsEl.innerHTML = '<span class="muted">—</span>';
   }
+  // Hubs
+  const hubsLabel = document.getElementById('stat-hubs');
+  if (hubsLabel) hubsLabel.textContent = s.hubs > 0 ? String(s.hubs) : '—';
   if (s.longest) {
     const preview = (s.longest.text || '').slice(0, 36).replace(/\n/g, ' ');
     const ellipsis = (s.longest.text || '').length > 36 ? '…' : '';

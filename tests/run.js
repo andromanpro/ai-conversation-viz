@@ -2,7 +2,9 @@ import { parseJSONL, extractText, parseLine } from '../src/core/parser.js';
 import { detectFormat, chatgptToClaudeJsonl, anthropicMessagesToClaudeJsonl, normalizeToClaudeJsonl } from '../src/core/adapters.js';
 import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph, appendRawNodes } from '../src/core/graph.js';
-import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad } from '../src/core/layout.js';
+import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad, createSim, reheat, freeze, unfreeze, isSettled, seedJitter } from '../src/core/layout.js';
+import { buildQuadtree, computeRepulsion } from '../src/core/quadtree.js';
+import { computeDepths } from '../src/core/tree.js';
 import { advanceTimeline } from '../src/ui/timeline.js';
 import { birthFactor, easeOutCubic } from '../src/view/renderer.js';
 import { pathToRoot } from '../src/view/path.js';
@@ -52,7 +54,7 @@ test('parser: combines multiple text blocks', () => {
   const t = '{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]}}';
   const r = parseJSONL(t);
   eq(r.nodes.length, 1);
-  eq(r.nodes[0].text, 'hello\nworld');
+  eq(r.nodes[0].text, 'hello\n\nworld');
 });
 
 test('parser: creates tool_use subnodes with parent link', () => {
@@ -228,10 +230,11 @@ test('layout: fitToView respects safe-area (cx/cy + safeW/safeH)', () => {
 });
 
 test('layout: stepPhysics moves isolated pair apart (repulsion)', () => {
-  const a = { x: 400, y: 300, vx: 0, vy: 0, r: 5 };
-  const b = { x: 405, y: 300, vx: 0, vy: 0, r: 5 };
+  const a = { id: 'a', x: 400, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
+  const b = { id: 'b', x: 405, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
   const d0 = Math.abs(b.x - a.x);
-  stepPhysics([a, b], [], { width: 800, height: 600 });
+  const sim = createSim();
+  stepPhysics([a, b], [], { width: 800, height: 600, cx: 400, cy: 300 }, sim);
   const d1 = Math.abs(b.x - a.x);
   assert(d1 > d0, 'nodes should repel');
 });
@@ -435,6 +438,33 @@ test('parseLine: assistant with tool_use → main + subnode', () => {
   eq(r[1].toolName, 'Grep');
 });
 
+test('parseLine: user with tool_result block has text', () => {
+  const r = parseLine('{"type":"user","uuid":"u1","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"output of grep"}]}}');
+  eq(r.length, 1);
+  assert(r[0].text.includes('output of grep'), 'tool_result text должен попадать в body');
+});
+
+test('parseLine: user with tool_result array blocks', () => {
+  const r = parseLine('{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}]}}');
+  eq(r.length, 1);
+  assert(r[0].text.includes('line1'));
+  assert(r[0].text.includes('line2'));
+});
+
+test('parseLine: assistant with thinking block shows it', () => {
+  const r = parseLine('{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Hmm, let me think"},{"type":"text","text":"Answer"}]}}');
+  eq(r.length, 1);
+  assert(r[0].text.includes('Hmm, let me think'));
+  assert(r[0].text.includes('Answer'));
+});
+
+test('parseLine: image block replaced by placeholder', () => {
+  const r = parseLine('{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{}},{"type":"text","text":"see"}]}}');
+  eq(r.length, 1);
+  assert(r[0].text.includes('[image]'));
+  assert(r[0].text.includes('see'));
+});
+
 test('appendRawNodes: deduplicates by id', () => {
   const state = {
     nodes: [], edges: [], byId: new Map(),
@@ -564,6 +594,151 @@ test('radial: children laid on outer ring', () => {
 test('radial: empty input returns empty Map', () => {
   const pos = computeRadialLayout([], new Map(), { width: 800, height: 600, cx: 400, cy: 300 });
   eq(pos.size, 0);
+});
+
+// ==== BARNES-HUT QUADTREE ====
+test('quadtree: buildQuadtree accumulates mass', () => {
+  const nodes = [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 },
+  ];
+  const tree = buildQuadtree(nodes);
+  eq(tree.mass, 4);
+  // Центр масс — среднее
+  approx(tree.cx, 50);
+  approx(tree.cy, 50);
+});
+
+test('quadtree: empty array returns null', () => {
+  eq(buildQuadtree([]), null);
+});
+
+test('quadtree: computeRepulsion excludes self', () => {
+  const a = { x: 0, y: 0 };
+  const b = { x: 100, y: 0 };
+  const tree = buildQuadtree([a, b]);
+  const fa = computeRepulsion(tree, a, 0.6, 9000);
+  // сила от b на a направлена по -x (отталкивает влево)
+  assert(fa.fx < 0, 'должна быть отталкивающая x-компонента');
+  approx(fa.fy, 0, 1e-6);
+});
+
+test('quadtree: Barnes-Hut approximates O(n²) for far groups', () => {
+  // Создаём два кластера далеко друг от друга: в каждом по 3 ноды близко
+  const nodes = [
+    { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },           // cluster A (близко)
+    { x: 500, y: 500 }, { x: 501, y: 500 }, { x: 500, y: 501 }, // cluster B
+  ];
+  const target = nodes[0];
+  const tree = buildQuadtree(nodes);
+  const f = computeRepulsion(tree, target, 0.6, 9000);
+  // Сила на target должна быть отлична от 0 (и от A, и от B)
+  assert(Math.abs(f.fx) > 0 || Math.abs(f.fy) > 0);
+});
+
+// ==== TREE UTILS ====
+test('tree: computeDepths BFS from roots', () => {
+  const n1 = { id: 'r', parentId: null };
+  const n2 = { id: 'c1', parentId: 'r' };
+  const n3 = { id: 'c2', parentId: 'r' };
+  const n4 = { id: 'gc', parentId: 'c1' };
+  const byId = new Map([['r', n1], ['c1', n2], ['c2', n3], ['gc', n4]]);
+  const depths = computeDepths([n1, n2, n3, n4], byId);
+  eq(depths.get('r'), 0);
+  eq(depths.get('c1'), 1);
+  eq(depths.get('c2'), 1);
+  eq(depths.get('gc'), 2);
+});
+
+test('tree: orphan gets depth 0', () => {
+  const orphan = { id: 'o', parentId: 'GHOST' };
+  const byId = new Map([['o', orphan]]);
+  const depths = computeDepths([orphan], byId);
+  eq(depths.get('o'), 0);
+});
+
+test('quadtree: stepPhysics использует BH при большом N', () => {
+  const nodes = [];
+  for (let i = 0; i < 500; i++) {
+    nodes.push({ id: 'n'+i, x: Math.random() * 1000, y: Math.random() * 1000, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 });
+  }
+  const before = nodes.map(n => ({ x: n.x, y: n.y }));
+  const sim = createSim();
+  stepPhysics(nodes, [], { width: 2000, height: 2000, cx: 500, cy: 500 }, sim);
+  let moved = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].x !== before[i].x || nodes[i].y !== before[i].y) moved++;
+  }
+  assert(moved > nodes.length * 0.9, 'большинство нод должны сдвинуться');
+});
+
+// ==== SIM (v5 physics) ====
+test('sim: createSim defaults correct', () => {
+  const s = createSim();
+  eq(s.alpha, 1);
+  eq(s.alphaTarget, 0);
+  eq(s.frozen, false);
+  eq(s.manualFrozen, false);
+  assert(s.alphaDecay > 0 && s.alphaDecay < 0.1);
+});
+
+test('sim: alpha cools each step', () => {
+  const s = createSim();
+  const a0 = s.alpha;
+  stepPhysics([], [], { width: 800, height: 600 }, s);
+  assert(s.alpha < a0, 'alpha должен уменьшиться');
+});
+
+test('sim: isSettled true after long cooling', () => {
+  const s = createSim();
+  const a = { id: 'a', x: 400, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
+  for (let i = 0; i < 500; i++) stepPhysics([a], [], { width: 800, height: 600 }, s);
+  assert(isSettled(s), 'после 500 iters система должна быть settled');
+});
+
+test('sim: reheat raises alpha back', () => {
+  const s = createSim();
+  for (let i = 0; i < 500; i++) stepPhysics([], [], { width: 800, height: 600 }, s);
+  reheat(s, 0.3);
+  assert(s.alpha >= 0.3, 'reheat должен поднять alpha');
+  assert(!s.frozen);
+});
+
+test('sim: velocity clamp caps extreme force', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 400, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
+  const b = { id: 'b', x: 400.001, y: 300.001, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
+  stepPhysics([a, b], [], { width: 800, height: 600, cx: 400, cy: 300 }, sim);
+  const speedA = Math.hypot(a.vx, a.vy);
+  assert(speedA <= 41, `velocity должен быть clamp-нут (<=40), получили ${speedA}`);
+});
+
+test('sim: freeze stops, unfreeze resumes', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 400, y: 300, vx: 5, vy: 5, r: 5, fxAcc: 0, fyAcc: 0 };
+  freeze(sim);
+  const before = { x: a.x, y: a.y };
+  stepPhysics([a], [], { width: 800, height: 600 }, sim);
+  eq(a.x, before.x);
+  eq(a.y, before.y);
+  unfreeze(sim);
+  assert(!sim.manualFrozen);
+  assert(sim.alpha > 0);
+});
+
+test('sim: seedJitter deterministic', () => {
+  const a = seedJitter('node-1');
+  const b = seedJitter('node-1');
+  eq(a.dx, b.dx);
+  eq(a.dy, b.dy);
+  const c = seedJitter('node-2');
+  assert(c.dx !== a.dx || c.dy !== a.dy);
+});
+
+test('sim: bounds soft-wall pulls outlier back', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 10000, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
+  stepPhysics([a], [], { width: 800, height: 600, cx: 400, cy: 300, safeW: 800, safeH: 600 }, sim);
+  assert(a.vx < 0, 'нода за стеной должна получить толчок внутрь');
 });
 
 // ==== ADAPTERS ====

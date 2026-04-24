@@ -1,7 +1,8 @@
 import { state } from '../view/state.js';
+import { CFG } from '../core/config.js';
 import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
-import { fitToView, prewarm } from '../core/layout.js';
+import { fitToView, prewarm, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
@@ -62,7 +63,16 @@ export function loadText(text) {
     if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
     const vp = _getViewport();
     const g = buildGraph(parsed, vp);
-    prewarm(g.nodes, g.edges, vp);
+    // Auto-degrade: при больших графах уменьшаем prewarm чтобы не зафризить UI
+    const n = g.nodes.length;
+    if (n >= CFG.perfHeavyThreshold) state.perfMode = 'minimal';
+    else if (n >= CFG.perfDegradeThreshold) state.perfMode = 'degraded';
+    else state.perfMode = 'normal';
+    const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
+      : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
+      : CFG.prewarmIterations;
+    state.sim = createSim();
+    prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
     state.nodes = g.nodes;
     state.edges = g.edges;
     state.byId = g.byId;
@@ -107,8 +117,11 @@ function updateStatsHUD() {
   if (!s) { el.textContent = '—'; return; }
   const fmtEl = document.getElementById('load-format');
   const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}`;
-  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}`;
+  const perfSuffix = state.perfMode && state.perfMode !== 'normal'
+    ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
+    : '';
+  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}${perfSuffix}`;
+  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {

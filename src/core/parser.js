@@ -1,5 +1,17 @@
 import { CFG } from './config.js';
 
+function extractToolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts = [];
+  for (const b of content) {
+    if (!b) continue;
+    if (b.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+    else if (b.type === 'image') parts.push('[image]');
+  }
+  return parts.join('\n');
+}
+
 function classifyContent(content) {
   if (typeof content === 'string') return { text: content, toolUses: [] };
   if (!Array.isArray(content)) return { text: '', toolUses: [] };
@@ -7,23 +19,48 @@ function classifyContent(content) {
   const toolUses = [];
   for (const block of content) {
     if (!block) continue;
-    if (block.type === 'text' && typeof block.text === 'string') {
-      textParts.push(block.text);
-    } else if (block.type === 'tool_use') {
-      toolUses.push({
-        id: block.id || null,
-        name: typeof block.name === 'string' ? block.name : 'tool',
-        input: block.input || {},
-      });
+    switch (block.type) {
+      case 'text':
+        if (typeof block.text === 'string') textParts.push(block.text);
+        break;
+      case 'thinking':
+        if (typeof block.thinking === 'string') {
+          textParts.push('💭 ' + block.thinking);
+        }
+        break;
+      case 'tool_use':
+        toolUses.push({
+          id: block.id || null,
+          name: typeof block.name === 'string' ? block.name : 'tool',
+          input: block.input || {},
+        });
+        break;
+      case 'tool_result': {
+        const rt = extractToolResultText(block.content);
+        const prefix = block.is_error ? '⚠ ' : '↩ ';
+        if (rt) textParts.push(prefix + rt);
+        break;
+      }
+      case 'image':
+        textParts.push('[image]');
+        break;
+      default:
+        // неизвестный тип — пропускаем
+        break;
     }
   }
-  return { text: textParts.join('\n'), toolUses };
+  return { text: textParts.join('\n\n'), toolUses };
 }
 
 export function extractText(message) {
   if (!message) return '';
   return classifyContent(message.content).text;
 }
+
+const SERVICE_TYPES = new Set([
+  'queue-operation', 'last-prompt', 'progress', 'system',
+  'attachment', 'custom-title', 'ai-title', 'summary',
+]);
 
 export function parseJSONL(text) {
   const lines = text.split(/\r?\n/);
@@ -40,7 +77,7 @@ export function parseJSONL(text) {
 
     const t = obj.type;
     if (t !== 'user' && t !== 'assistant') {
-      if (t) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
+      if (t && !SERVICE_TYPES.has(t)) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
       skipped++;
       continue;
     }

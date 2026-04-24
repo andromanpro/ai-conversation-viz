@@ -1,6 +1,6 @@
 import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
-import { computeRadialLayout, easeInOutQuad, fitToView } from '../core/layout.js';
+import { computeRadialLayout, easeInOutQuad, fitToView, reheat } from '../core/layout.js';
 
 let btn;
 let transition = null;
@@ -60,6 +60,8 @@ export function tickLayoutTransition() {
   }
   if (t >= 1) {
     state.layoutMode = transition.toMode;
+    // При возврате в force — reheat чтобы физика мягко раскидала идеальные кольца
+    if (transition.toMode === 'force' && state.sim) reheat(state.sim, 0.5);
     transition = null;
     updateBtnLabel();
   }
