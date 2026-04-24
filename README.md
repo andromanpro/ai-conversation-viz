@@ -2,9 +2,9 @@
 
 Force-directed visualization of human↔AI conversation sessions.
 
-[🌐 Live demo](https://andromanpro.github.io/ai-conversation-viz/) · [🌐 3D](https://andromanpro.github.io/ai-conversation-viz/3d.html)
+[🌐 Live demo](https://andromanpro.github.io/ai-conversation-viz/) · [🌐 3D](https://andromanpro.github.io/ai-conversation-viz/3d.html) · [🤖 Multi-agent orchestration demo](https://andromanpro.github.io/ai-conversation-viz/?jsonl=samples/multi-agent-orchestration.jsonl)
 
-Parses Claude Code JSONL, ChatGPT exports (`conversations.json`) and Anthropic API `messages[]`. Zero dependencies. Canvas 2D primary + Three.js 3D alternative.
+Parses Claude Code JSONL, ChatGPT exports (`conversations.json`) and Anthropic API `messages[]`. Zero dependencies. Canvas 2D primary + Three.js 3D alternative. RU / EN interface.
 
 ## Features
 
