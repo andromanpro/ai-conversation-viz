@@ -22,6 +22,7 @@ import { initAudio, chirpFor } from './ui/audio.js';
 import { initRecorder } from './ui/recorder.js';
 import { initFreezeToggle } from './ui/freeze-toggle.js';
 import { initSpeedControl } from './ui/speed-control.js';
+import { initOrphansToggle } from './ui/orphans-toggle.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -69,6 +70,7 @@ initAudio();
 initRecorder();
 initFreezeToggle();
 initSpeedControl();
+initOrphansToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -88,16 +90,23 @@ initKeyboard(getViewport);
 state.stars = generateStarfield(CFG.starfieldCount);
 
 let lastMs = performance.now();
+let frameIdx = 0;
 function frame(tms) {
   const tSec = tms / 1000;
   const dt = Math.min(0.1, (tms - lastMs) / 1000);
   lastMs = tms;
+  frameIdx++;
   const vp = getViewport();
 
   tickPlay();
   tickLayoutTransition();
   const physicsDisabled = isRadialActive() || (state.sim && state.sim.frozen && !isDraggingNode());
-  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp, state.sim);
+  // На больших графах считаем физику раз в N кадров (render всегда)
+  const skip = state.perfMode === 'minimal' ? CFG.perfMinimalPhysicsSkip
+    : state.perfMode === 'degraded' ? CFG.perfDegradedPhysicsSkip
+    : 1;
+  const doPhysics = state.running && !physicsDisabled && (frameIdx % skip === 0);
+  if (doPhysics) stepPhysics(state.nodes, state.edges, vp, state.sim);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)

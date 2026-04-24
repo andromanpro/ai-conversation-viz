@@ -2,7 +2,7 @@ import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
 import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
-import { fitToView, prewarm, createSim } from '../core/layout.js';
+import { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
@@ -71,7 +71,9 @@ export function loadText(text) {
     const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
       : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
       : CFG.prewarmIterations;
-    state.sim = createSim();
+    // В minimal режиме — более быстрое охлаждение (physics быстрее дойдёт до settled)
+    const simOpts = state.perfMode === 'minimal' ? { alphaDecay: CFG.perfMinimalAlphaDecay } : {};
+    state.sim = createSim(simOpts);
     prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
     state.nodes = g.nodes;
     state.edges = g.edges;
@@ -80,7 +82,24 @@ export function loadText(text) {
     state.hover = null;
     state.pathSet = new Set();
     state.cameraTarget = null;
+    state.searchMatches = new Set();
+    state.searchActive = null;
+    state.collapsed = new Set();
     state.stats = parsed.stats;
+    // Если активен не-force layout — применяем его сразу к новым нодам
+    if (state.layoutMode === 'swim') {
+      const pos = computeSwimLanes(state.nodes, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    } else if (state.layoutMode === 'radial') {
+      const pos = computeRadialLayout(state.nodes, state.byId, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    }
     const cam = fitToView(state.nodes, vp);
     state.camera.scale = cam.scale;
     state.camera.x = cam.x;

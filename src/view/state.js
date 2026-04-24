@@ -18,6 +18,8 @@ export const state = {
   perfMode: 'normal',  // 'normal' | 'degraded' | 'minimal'
   sim: null,           // Physics simulation state (createSim)
   playSpeed: 1,        // 0.5 | 1 | 2 | 5
+  connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
+  collapsed: new Set(), // nodeId → tool_use-дети скрыты
 };
 
 export function resetInteractionState() {

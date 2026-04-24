@@ -5,6 +5,7 @@ import { syncChatToTimeline } from './story-mode.js';
 import { hideDetail } from './detail-panel.js';
 import { toggleFreeze } from './freeze-toggle.js';
 import { setSpeed } from './speed-control.js';
+import { toggleOrphans } from './orphans-toggle.js';
 
 let getViewport = () => ({
   width: window.innerWidth,
@@ -52,6 +53,9 @@ function onKey(ev) {
   } else if (ev.key === 'f' || ev.key === 'F') {
     ev.preventDefault();
     toggleFreeze();
+  } else if (ev.key === 'o' || ev.key === 'O') {
+    ev.preventDefault();
+    toggleOrphans();
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }

@@ -4,6 +4,7 @@ import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph, appendRawNodes } from '../src/core/graph.js';
 import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad, createSim, reheat, freeze, unfreeze, isSettled, seedJitter } from '../src/core/layout.js';
 import { buildQuadtree, computeRepulsion } from '../src/core/quadtree.js';
+import { computeSwimLanes } from '../src/core/layout.js';
 import { computeDepths } from '../src/core/tree.js';
 import { advanceTimeline } from '../src/ui/timeline.js';
 import { birthFactor, easeOutCubic } from '../src/view/renderer.js';
@@ -88,12 +89,12 @@ test('parser: string content for user message', () => {
   eq(r.nodes[0].text, 'hello');
 });
 
-test('parser: assistant without text blocks gives empty text node', () => {
-  const t = '{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"grep","input":{"p":"x"}}]}}';
+test('parser: assistant without text — text синтезируется из tool_use', () => {
+  const t = '{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"grep","input":{"pattern":"x"}}]}}';
   const r = parseJSONL(t);
   eq(r.nodes.length, 2);
-  eq(r.nodes[0].text, '');
-  eq(r.nodes[0].textLen, 0);
+  assert(r.nodes[0].text.length > 0, 'assistant text должен быть синтезирован');
+  assert(r.nodes[0].text.includes('grep'));
   eq(r.nodes[1].role, 'tool_use');
 });
 
@@ -141,7 +142,7 @@ test('camera: applyZoom clamps to max', () => {
 });
 
 // ==== GRAPH ====
-test('graph: edges only created for existing parents', () => {
+test('graph: orphan помечен _isOrphanRoot + adopted edge к предшественнику', () => {
   const parsed = { nodes: [
     { id: 'n1', parentId: null, role: 'user', ts: 1, text: '', textLen: 0 },
     { id: 'n2', parentId: 'n1', role: 'assistant', ts: 2, text: '', textLen: 0 },
@@ -149,9 +150,15 @@ test('graph: edges only created for existing parents', () => {
   ], stats: {} };
   const g = buildGraph(parsed, { width: 800, height: 600 });
   eq(g.nodes.length, 3);
-  eq(g.edges.length, 1);
-  eq(g.edges[0].source, 'n1');
-  eq(g.edges[0].target, 'n2');
+  const orphan = g.byId.get('n3');
+  eq(orphan._isOrphanRoot, true);
+  eq(orphan.parentId, 'GHOST'); // parentId НЕ меняется — сохраняем правду
+  eq(orphan._adoptedParentId, 'n2');
+  // edges: real n1→n2, adopted n2→n3
+  eq(g.edges.length, 2);
+  const adopted = g.edges.find(e => e.adopted);
+  eq(adopted.source, 'n2');
+  eq(adopted.target, 'n3');
 });
 
 test('graph: recency normalized to [0, 1]', () => {
@@ -438,6 +445,15 @@ test('parseLine: assistant with tool_use → main + subnode', () => {
   eq(r[1].toolName, 'Grep');
 });
 
+test('parseLine: assistant без text но с tool_use получает синтетический summary', () => {
+  const r = parseLine('{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Grep","input":{"pattern":"force.*directed"}},{"type":"tool_use","id":"tu_2","name":"Bash","input":{"command":"npm test"}}]}}');
+  const main = r.find(n => n.role === 'assistant');
+  assert(main.text.length > 0, 'ассистент больше не empty');
+  assert(main.text.includes('Grep'));
+  assert(main.text.includes('Bash'));
+  assert(main.text.includes('force.*directed'));
+});
+
 test('parseLine: user with tool_result block has text', () => {
   const r = parseLine('{"type":"user","uuid":"u1","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"output of grep"}]}}');
   eq(r.length, 1);
@@ -566,7 +582,7 @@ test('radial: easeInOutQuad endpoints', () => {
   approx(easeInOutQuad(0.5), 0.5, 1e-9);
 });
 
-test('radial: computeRadialLayout places root at center', () => {
+test('radial: computeRadialLayout places single root at center', () => {
   const n1 = { id: 'r', parentId: null };
   const byId = new Map([['r', n1]]);
   const vp = { width: 800, height: 600, cx: 400, cy: 300 };
@@ -574,6 +590,35 @@ test('radial: computeRadialLayout places root at center', () => {
   const p = pos.get('r');
   eq(p.x, 400);
   eq(p.y, 300);
+});
+
+test('swim-lanes: X по ts, Y по роли', () => {
+  const u = { id: 'u1', role: 'user', ts: 100, _seedDy: 0 };
+  const a = { id: 'a1', role: 'assistant', ts: 200, _seedDy: 0 };
+  const t = { id: 't1', role: 'tool_use', ts: 300, _seedDy: 0 };
+  const vp = { width: 1000, height: 600, safeW: 1000, safeH: 600, cx: 500, cy: 300 };
+  const pos = computeSwimLanes([u, a, t], vp);
+  // X монотонно растёт по ts
+  assert(pos.get('u1').x < pos.get('a1').x);
+  assert(pos.get('a1').x < pos.get('t1').x);
+  // Y: user выше assistant выше tool_use (меньше Y = выше)
+  assert(pos.get('u1').y < pos.get('a1').y);
+  assert(pos.get('a1').y < pos.get('t1').y);
+});
+
+test('radial: multi-root — корни на первом кольце (не слиты в центре)', () => {
+  const r1 = { id: 'r1', parentId: null, ts: 1 };
+  const r2 = { id: 'r2', parentId: null, ts: 2 };
+  const r3 = { id: 'r3', parentId: null, ts: 3 };
+  const byId = new Map([['r1', r1], ['r2', r2], ['r3', r3]]);
+  const vp = { width: 800, height: 600, cx: 400, cy: 300 };
+  const pos = computeRadialLayout([r1, r2, r3], byId, vp);
+  // Каждый root должен быть на радиусе ~ring от центра (не в точке)
+  for (const id of ['r1', 'r2', 'r3']) {
+    const p = pos.get(id);
+    const d = Math.hypot(p.x - 400, p.y - 300);
+    assert(d > 50, `root ${id} не должен быть в точке, d=${d}`);
+  }
 });
 
 test('radial: children laid on outer ring', () => {

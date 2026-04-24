@@ -47,6 +47,12 @@
   .btn.recording { border-color: #ff6666; color: #ff9999; animation: rec-pulse 1.1s ease infinite; }
   @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
   .btn.active-freeze { border-color: #7fd2ff; color: #7fd2ff; }
+  .btn.active-orphans { border-color: var(--tool); color: var(--tool); }
+  #layout-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .btn-layout-chip { background: transparent; border: 0; border-right: 1px solid var(--border); color: var(--muted); padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; transition: all .15s; }
+  .btn-layout-chip:last-child { border-right: 0; }
+  .btn-layout-chip:hover { color: var(--text); background: rgba(123,170,240,0.06); }
+  .btn-layout-chip.active { color: var(--assistant); background: rgba(80,212,181,0.12); }
   #speed-control { display: flex; gap: 3px; margin-left: 6px; }
   .btn-speed { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 3px 7px; font-family: inherit; font-size: 10px; cursor: pointer; border-radius: 2px; transition: all .15s; }
   .btn-speed.active { color: var(--assistant); border-color: var(--assistant); }
@@ -164,10 +170,11 @@
     <button class="btn" id="btn-file">Open JSONL…</button>
     <button class="btn accent" id="btn-reset">Reset view</button>
     <button class="btn" id="btn-share" title="Скопировать URL с текущим состоянием">Share</button>
-    <button class="btn" id="btn-layout" title="Toggle force ↔ radial layout">Radial</button>
+    <div id="layout-switch" title="Layout mode"></div>
     <button class="btn" id="btn-audio" title="Toggle ambient sound">♪</button>
     <button class="btn" id="btn-record" title="Record canvas to WebM">Record</button>
     <button class="btn" id="btn-freeze" title="Freeze/unfreeze physics (F)">❄ Freeze</button>
+    <button class="btn" id="btn-orphans" title="Toggle orphan connectivity (O)">🔗 Connect orphans</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="live-row">
@@ -195,7 +202,7 @@
 </div>
 
 <div class="hud" id="bottom-left">
-  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag</kbd> pan/node &nbsp; <kbd>click</kbd> msg &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step &nbsp; <kbd>Home</kbd> fit &nbsp; <kbd>Ctrl+F</kbd> search &nbsp; <kbd>Esc</kbd> close
+  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag</kbd> pan/node &nbsp; <kbd>dbl-click</kbd> collapse &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step &nbsp; <kbd>F</kbd> freeze &nbsp; <kbd>O</kbd> orphans &nbsp; <kbd>Ctrl+F</kbd> search &nbsp; <kbd>Esc</kbd> close
 </div>
 
 <div id="detail">

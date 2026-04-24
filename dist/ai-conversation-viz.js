@@ -36,6 +36,9 @@ const CFG = {
   perfMinimalStarCount: 80,
   perfMinimalPrewarm: 40,
   perfMinimalTypewriter: false,
+  perfMinimalPhysicsSkip: 2,   // в minimal — физика раз в 2 кадра
+  perfMinimalAlphaDecay: 0.06, // быстрее остывает, меньше work до settle
+  perfDegradedPhysicsSkip: 1,  // degraded — каждый кадр (как обычно)
 
   // v3 wow
   edgeCurveStrength: 0.18,
@@ -92,9 +95,11 @@ const CFG = {
   velocityDecay: 0.4,     // "friction": vx *= (1 − velocityDecay)
   reheatAlpha: 0.3,
   maxVelocity: 40,
-  repulsionCutoff: 1500,
-  wallStiffness: 0.08,
-  wallPaddingMul: 4,
+  repulsionCutoff: 3500,       // выше — дальние кластеры всё ещё отталкиваются
+  wallStiffness: 0.02,         // мягче — стена не формирует прямоугольник
+  wallPaddingMul: 8,           // дальше — почти не виден bbox
+  centerPullScaleN: 200,       // centerPull растёт как sqrt(N/200)
+  leafSpringBoost: 2.5,        // spring для degree-1 edges в 2.5× сильнее (root/leaf не отрываются)
   playSpeedOptions: [0.5, 1, 2, 5],
   storyPostGapMs: 800,
   focusDimAlpha: 0.3,
@@ -376,14 +381,18 @@ function parseJSONL(text) {
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
+    // Если у ассистента нет текста, но есть tool_use — формируем summary из тулов
+    const finalText = (t === 'assistant' && !msgText && toolUses.length)
+      ? buildAssistantSummary(toolUses)
+      : msgText;
 
     nodes.push({
       id: baseId,
       parentId,
       role: t,
       ts,
-      text: msgText,
-      textLen: msgText.length,
+      text: finalText,
+      textLen: finalText.length,
     });
     kept++;
 
@@ -419,6 +428,45 @@ function safeStringify(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
+// Ключевое поле input для известных тулов — то что говорит «что делает вызов»
+const TOOL_KEY_FIELD = {
+  bash: 'command', powershell: 'command', shell: 'command',
+  grep: 'pattern', glob: 'pattern', find: 'pattern',
+  read: 'file_path', write: 'file_path', edit: 'file_path',
+  multiedit: 'file_path', notebookedit: 'file_path',
+  webfetch: 'url', websearch: 'query',
+  task: 'description', agent: 'description',
+  skill: 'skill', scheduledwakeup: 'reason',
+};
+function summariseToolUse(tu) {
+  const name = tu && tu.name ? String(tu.name) : 'tool';
+  const key = name.toLowerCase().replace(/[^a-z]/g, '');
+  const input = (tu && tu.input) || {};
+  const field = TOOL_KEY_FIELD[key];
+  let val;
+  if (field && input[field] != null) {
+    val = input[field];
+  } else if (key === 'todowrite' && Array.isArray(input.todos)) {
+    return `${name} (${input.todos.length} todos)`;
+  } else {
+    // Первое строковое поле
+    for (const k of Object.keys(input)) {
+      if (typeof input[k] === 'string' && input[k].length) { val = input[k]; break; }
+    }
+  }
+  if (val == null) return name;
+  let s = String(val).replace(/\s+/g, ' ').trim();
+  if (s.length > 60) s = s.slice(0, 57) + '…';
+  return `${name} "${s}"`;
+}
+
+function buildAssistantSummary(toolUses) {
+  if (!toolUses.length) return '';
+  const parts = toolUses.slice(0, 4).map(summariseToolUse);
+  const extra = toolUses.length > 4 ? ` …+${toolUses.length - 4}` : '';
+  return '🔧 ' + parts.join(' · ') + extra;
+}
+
 /**
  * Парсит одну JSONL-строку. Возвращает массив raw-нод (0-N шт):
  *  - 0 если строка пустая/невалидная/служебный type
@@ -437,14 +485,17 @@ function parseLine(line, seedCounter) {
   const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
   const parentId = obj.parentUuid || null;
+  const finalText = (t === 'assistant' && !msgText && toolUses.length)
+    ? buildAssistantSummary(toolUses)
+    : msgText;
 
   const out = [{
     id: baseId,
     parentId,
     role: t,
     ts,
-    text: msgText,
-    textLen: msgText.length,
+    text: finalText,
+    textLen: finalText.length,
   }];
   if (t === 'assistant') {
     for (let i = 0; i < toolUses.length; i++) {
@@ -688,6 +739,21 @@ function buildGraph(parsed, viewport) {
 
   const byId = new Map(nodes.map(node => [node.id, node]));
 
+  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
+  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
+  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
+  // решает как их показывать: как отдельный forest (off, default) или
+  // пунктирно-связанными с основной цепью (on).
+  const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
+  for (let i = 0; i < sortedByTs.length; i++) {
+    const node = sortedByTs[i];
+    if (node.parentId && !byId.has(node.parentId)) {
+      node._isOrphanRoot = true;
+      const prev = i > 0 ? sortedByTs[i - 1] : null;
+      if (prev) node._adoptedParentId = prev.id;
+    }
+  }
+
   const edges = [];
   for (const node of nodes) {
     if (node.parentId && byId.has(node.parentId)) {
@@ -696,6 +762,16 @@ function buildGraph(parsed, viewport) {
         target: node.id,
         a: byId.get(node.parentId),
         b: node,
+        adopted: false,
+      });
+    } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
+      const parent = byId.get(node._adoptedParentId);
+      edges.push({
+        source: parent.id,
+        target: node.id,
+        a: parent,
+        b: node,
+        adopted: true,
       });
     }
   }
@@ -945,22 +1021,29 @@ function stepPhysics(nodes, edges, viewport, sim) {
     }
   }
 
-  // spring (hub-safe: strength ~ 1/min(deg(a), deg(b)))
+  // spring (hub-safe: strength ~ 1/sqrt(min deg)); усиливаем для leaf-edges.
+  // Adopted-edges (orphan → ts-predecessor) участвуют в физике только когда
+  // включён connectOrphans. Иначе orphan forest лежит отдельно.
+  const connectOrphans = !!(edges.length && typeof window !== 'undefined' && window.__viz && window.__viz.state && window.__viz.state.connectOrphans);
   for (const e of edges) {
+    if (e.adopted && !connectOrphans) continue;
     const a = e.a, b = e.b;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
     const disp = d - CFG.springLen;
     const degMin = Math.max(1, Math.min(a.degree || 1, b.degree || 1));
-    const kLink = (CFG.spring / Math.sqrt(degMin)) * alpha;
+    const leafBoost = (degMin === 1) ? CFG.leafSpringBoost : 1;
+    const adoptedMul = e.adopted ? 0.4 : 1; // adopted-edge слабее — хронология, не реальная связь
+    const kLink = (CFG.spring * leafBoost * adoptedMul / Math.sqrt(degMin)) * alpha;
     const f = kLink * disp;
     const fx = (dx / d) * f, fy = (dy / d) * f;
     a.fxAcc += fx; a.fyAcc += fy;
     b.fxAcc -= fx; b.fyAcc -= fy;
   }
 
-  // central pull
-  const kCenter = CFG.centerPull * alpha;
+  // central pull — растёт с N (sqrt-scaled), чтобы держать большой граф в окружности
+  const centerScale = Math.sqrt(Math.max(1, N / CFG.centerPullScaleN));
+  const kCenter = CFG.centerPull * centerScale * alpha;
   for (const n of nodes) {
     n.fxAcc += (cx - n.x) * kCenter;
     n.fyAcc += (cy - n.y) * kCenter;
@@ -1042,7 +1125,11 @@ function computeRadialLayout(nodes, byId, viewport) {
   const assign = (id, depth, angleStart, angleEnd) => {
     const mid = (angleStart + angleEnd) / 2;
     const radius = depth * ring;
-    positions.set(id, { x: cx + Math.cos(mid) * radius, y: cy + Math.sin(mid) * radius });
+    const x = cx + Math.cos(mid) * radius;
+    const y = cy + Math.sin(mid) * radius;
+    positions.set(id, { x, y });
+    const n = byId.get(id);
+    if (n) { n._radialX = x; n._radialY = y; }
     const kids = children.get(id) || [];
     if (!kids.length) return;
     const total = leaves.get(id);
@@ -1058,15 +1145,69 @@ function computeRadialLayout(nodes, byId, viewport) {
   if (roots.length === 1) {
     assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
   } else {
+    // Множественные roots — не сливать в точке. Ставим их на depth=1 (первое
+    // кольцо), оставляя центр свободным. Сортируем по ts для стабильного порядка.
+    roots.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
     const slice = (Math.PI * 2) / roots.length;
+    const startDepth = 1;
     for (let i = 0; i < roots.length; i++) {
-      assign(roots[i], 0, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+      assign(roots[i], startDepth, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
     }
   }
   return positions;
 }
 function easeInOutQuad(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+/**
+ * Time-as-river (swim-lanes) layout. X — по РАНГУ (индексу после сортировки
+ * по ts), не по сырому ts. Это распределяет ноды равномерно и разводит
+ * плотные кластеры. Y — по роли (три плавательные дорожки).
+ * Внутри lane локальный y-jitter + лёгкий x-offset чтобы ноды с близким
+ * рангом не накладывались.
+ */
+function computeSwimLanes(nodes, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const W = viewport.safeW != null ? viewport.safeW : viewport.width;
+  const H = viewport.safeH != null ? viewport.safeH : viewport.height;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+
+  // Длина реки зависит от количества нод: ~40px на ноду, но не меньше 2×W
+  const perNode = 40;
+  const lineW = Math.max(W * 2.0, nodes.length * perNode);
+  const left = cx - lineW / 2;
+  const right = cx + lineW / 2;
+
+  // Рангируем по ts (stable: tool_use подноды идут после своего parent assistant)
+  const sorted = [...nodes].sort((a, b) => a.ts - b.ts);
+  const rankById = new Map();
+  sorted.forEach((n, i) => rankById.set(n.id, i));
+  const lastRank = Math.max(1, sorted.length - 1);
+
+  const laneSpacing = H * 0.32;
+  const laneY = {
+    user: cy - laneSpacing,
+    assistant: cy,
+    tool_use: cy + laneSpacing,
+  };
+
+  for (const n of nodes) {
+    const rank = rankById.get(n.id) || 0;
+    const t = rank / lastRank;
+    const lane = laneY[n.role] != null ? laneY[n.role] : cy;
+    const yJ = (n._seedDy != null ? n._seedDy : 0) * laneSpacing * 0.45;
+    const xJ = (n._seedDx != null ? n._seedDx : 0) * 16;
+    const x = left + t * (right - left) + xJ;
+    const y = lane + yJ;
+    positions.set(n.id, { x, y });
+    // Сохраняем target на ноде — чтобы birth-animation в swim-режиме не тянула к parent
+    n._swimX = x;
+    n._swimY = y;
+  }
+  return positions;
 }
 function computeBBox(nodes) {
   if (!nodes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0, cx: 0, cy: 0 };
@@ -1120,6 +1261,8 @@ const state = {
   perfMode: 'normal',  // 'normal' | 'degraded' | 'minimal'
   sim: null,           // Physics simulation state (createSim)
   playSpeed: 1,        // 0.5 | 1 | 2 | 5
+  connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
+  collapsed: new Set(), // nodeId → tool_use-дети скрыты
 };
 function resetInteractionState() {
   state.selected = null;
@@ -1481,18 +1624,31 @@ function birthFactor(bornAt, now, duration) {
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 function updateBirths(state, cutoff, nowMs, onBirth) {
+  const mode = state.layoutMode;
   for (const n of state.nodes) {
     const alive = n.ts <= cutoff;
     if (alive && n.bornAt == null) {
       n.bornAt = nowMs;
-      const parent = n.parentId ? state.byId.get(n.parentId) : null;
-      if (parent && parent.bornAt != null) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = CFG.springLen * (CFG.birthSpreadMin + Math.random() * (CFG.birthSpreadMax - CFG.birthSpreadMin));
-        n.x = parent.x + Math.cos(angle) * dist;
-        n.y = parent.y + Math.sin(angle) * dist;
-        n.vx = 0;
-        n.vy = 0;
+      // В нестандартных раскладках (swim/radial) рождаем сразу на target-координатах
+      if (mode === 'swim' && n._swimX != null) {
+        n.x = n._swimX;
+        n.y = n._swimY;
+        n.vx = 0; n.vy = 0;
+      } else if (mode === 'radial' && n._radialX != null) {
+        n.x = n._radialX;
+        n.y = n._radialY;
+        n.vx = 0; n.vy = 0;
+      } else {
+        // force — у parent с jitter (органичная birth-animation)
+        const parent = n.parentId ? state.byId.get(n.parentId) : null;
+        if (parent && parent.bornAt != null) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = CFG.springLen * (CFG.birthSpreadMin + Math.random() * (CFG.birthSpreadMax - CFG.birthSpreadMin));
+          n.x = parent.x + Math.cos(angle) * dist;
+          n.y = parent.y + Math.sin(angle) * dist;
+          n.vx = 0;
+          n.vy = 0;
+        }
       }
       if (onBirth) onBirth(n);
     } else if (!alive && n.bornAt != null) {
@@ -1509,11 +1665,83 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
 }
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
+
+  // Radial vignette — тёмное свечение от центра к углам
+  const W = viewport.width, H = viewport.height;
+  const vcx = viewport.cx != null ? viewport.cx : W / 2;
+  const vcy = viewport.cy != null ? viewport.cy : H / 2;
+  const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
   const cam = state.camera;
   const cutoff = timelineCutoff(state);
   const nowMs = tSec * 1000;
   updateBirths(state, cutoff, nowMs, extras && extras.onBirth);
   const perfMode = (extras && extras.perfMode) || 'normal';
+
+  // Swim-mode guide lines (в world) + sticky labels вверху (screen-space)
+  if (state.layoutMode === 'swim') {
+    const laneSpacingWorld = (viewport.safeH != null ? viewport.safeH : viewport.height) * 0.32;
+    const vcx_world = viewport.cx != null ? viewport.cx : viewport.width / 2;
+    const vcy_world = viewport.cy != null ? viewport.cy : viewport.height / 2;
+    const lanes = [
+      { y: vcy_world - laneSpacingWorld, label: 'USER',      color: 'rgba(123,170,240,' },
+      { y: vcy_world,                    label: 'ASSISTANT', color: 'rgba(80,212,181,' },
+      { y: vcy_world + laneSpacingWorld, label: 'TOOL_USE',  color: 'rgba(236,160,64,' },
+    ];
+    // Линии в world-space (ездят с камерой)
+    ctx.save();
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([6, 8]);
+    for (const ln of lanes) {
+      const yS = (ln.y - cam.y) * cam.scale;
+      if (yS < -4 || yS > viewport.height + 4) continue;
+      ctx.strokeStyle = ln.color + '0.3)';
+      ctx.beginPath();
+      ctx.moveTo(0, yS);
+      ctx.lineTo(viewport.width, yS);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Sticky labels в screen-space: фиксированная полоса сверху, лейблы
+    // идут по вертикали возле соответствующего lane'а (с clamp чтобы всегда видно)
+    ctx.save();
+    ctx.font = 'bold 11px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const sideX = 20;
+    for (const ln of lanes) {
+      const yWorld = ln.y;
+      const yScreen = (yWorld - cam.y) * cam.scale;
+      // clamp вертикально в видимый диапазон с padding
+      const y = Math.max(22, Math.min(viewport.height - 22, yScreen));
+      // Chip-бекграунд
+      const txt = ln.label;
+      const w = ctx.measureText(txt).width + 16;
+      const h = 20;
+      ctx.fillStyle = 'rgba(10,14,26,0.85)';
+      if (ctx.roundRect) {
+        ctx.beginPath(); ctx.roundRect(sideX, y - h / 2, w, h, 4); ctx.fill();
+      } else {
+        ctx.fillRect(sideX, y - h / 2, w, h);
+      }
+      ctx.strokeStyle = ln.color + '0.55)';
+      ctx.lineWidth = 1;
+      if (ctx.roundRect) {
+        ctx.beginPath(); ctx.roundRect(sideX, y - h / 2, w, h, 4); ctx.stroke();
+      } else {
+        ctx.strokeRect(sideX, y - h / 2, w, h);
+      }
+      ctx.fillStyle = ln.color + '1)';
+      ctx.fillText(txt, sideX + 8, y + 1);
+    }
+    ctx.restore();
+  }
 
   const heartbeat = (extras && extras.allowHeartbeat !== false)
     ? 1 + Math.sin(tSec * CFG.heartbeatFreq) * CFG.heartbeatAmplitude
@@ -1537,7 +1765,10 @@ function draw(ctx, state, tSec, viewport, extras) {
   const bfOf = n => birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
-  const visible = n => n.ts <= cutoff && n.bornAt != null && !(state.hiddenRoles && state.hiddenRoles.has(n.role));
+  const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && state.collapsed && state.collapsed.has(n.parentId);
+  const visible = n => n.ts <= cutoff && n.bornAt != null
+    && !(state.hiddenRoles && state.hiddenRoles.has(n.role))
+    && !isCollapsedChild(n);
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
@@ -1554,19 +1785,31 @@ function draw(ctx, state, tSec, viewport, extras) {
     return (state.pathSet.has(e.a.id) && state.pathSet.has(e.b.id)) ? 1 : CFG.focusDimAlpha;
   };
 
-  // ---- EDGES (curved)
+  // ---- EDGES (curved) + fog при большом N
+  const N = state.nodes.length;
+  const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
+  const connectOrphans = !!state.connectOrphans;
   ctx.lineWidth = 0.8;
   const edgeCPs = new Map();
   for (const e of state.edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
+    if (e.adopted && !connectOrphans) continue; // скрываем adopted-edges при forest mode
     const ag = alpha(e.b) * edgeDim(e);
     const aS = worldToScreen(e.a.x, e.a.y, cam);
     const bS = worldToScreen(e.b.x, e.b.y, cam);
     const cpWorld = controlPoint({ x: e.a.x, y: e.a.y }, { x: e.b.x, y: e.b.y }, CFG.edgeCurveStrength);
     const cpS = worldToScreen(cpWorld.x, cpWorld.y, cam);
     edgeCPs.set(e, cpWorld);
-    ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag);
-    drawEdgeCurve(ctx, aS, bS, cpS);
+    if (e.adopted) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = `rgba(200, 180, 120, ${0.22 * ag * fogMul})`;
+      drawEdgeCurve(ctx, aS, bS, cpS);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul);
+      drawEdgeCurve(ctx, aS, bS, cpS);
+    }
   }
 
   // ---- PARTICLES (по кривым рёбер)
@@ -1589,7 +1832,9 @@ function draw(ctx, state, tSec, viewport, extras) {
     const pulse = (Math.sin(tSec * CFG.pulseFreq + n.phase) + 1) * 0.5;
     const searchPulse = isMatch ? (0.5 + 0.5 * Math.sin(tSec * CFG.searchPulseFreq + n.phase)) : 0;
     const hubMul = n.isHub ? (1 + 0.3 * Math.sin(tSec * 1.8 + n.phase)) : 1;
-    const r = (n.r * ss * (1 + searchPulse * 0.25) * hubMul + pulse * 0.8 * boost * ss) * cam.scale;
+    // При больших графах — уменьшаем node radius чтобы не «сетка»
+    const densityScale = N > 800 ? Math.max(0.55, 1 - (N - 800) / 4000) : 1;
+    const r = (n.r * ss * (1 + searchPulse * 0.25) * hubMul * densityScale + pulse * 0.8 * boost * ss * densityScale) * cam.scale;
     if (r <= 0) continue;
 
     // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
@@ -1628,6 +1873,42 @@ function draw(ctx, state, tSec, viewport, extras) {
       ctx.beginPath();
       ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Orphan-root marker: пунктирное кольцо
+    if (n._isOrphanRoot && perfMode !== 'minimal') {
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = `rgba(236, 160, 64, ${0.65 * ag})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Collapsed-marker: assistant нода с свёрнутыми tool_use детьми — бейдж "×N"
+    if (n.role === 'assistant' && state.collapsed && state.collapsed.has(n.id)) {
+      let count = 0;
+      for (const m of state.nodes) {
+        if (m.parentId === n.id && m.role === 'tool_use') count++;
+      }
+      if (count > 0) {
+        const badgeFs = Math.max(9, Math.round(r * 0.9));
+        ctx.font = `bold ${badgeFs}px ui-monospace, Consolas, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // фон бейджа
+        const label = '×' + count;
+        const w = ctx.measureText(label).width + 6;
+        const bx = s.x + r + 2, by = s.y - r - 2;
+        ctx.fillStyle = `rgba(236, 160, 64, ${0.85 * ag})`;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(bx - w / 2, by - badgeFs * 0.7, w, badgeFs * 1.3, 4) : ctx.rect(bx - w / 2, by - badgeFs * 0.7, w, badgeFs * 1.3);
+        ctx.fill();
+        ctx.fillStyle = '#1a1204';
+        ctx.fillText(label, bx, by);
+      }
     }
 
     // Tool icon внутри tool_use ноды
@@ -1748,6 +2029,33 @@ function hideTooltip() {
 
 
 
+function centerRootsInViewport() {
+  // Помещаем все "root"-ноды (без parent) в центр текущего viewport камеры,
+  // чтобы при рестарте play первая нода появлялась в поле зрения.
+  const cam = state.camera;
+  const vp = { w: window.innerWidth, h: window.innerHeight };
+  const cx = cam.x + (vp.w / 2) / cam.scale;
+  const cy = cam.y + (vp.h / 2) / cam.scale;
+  const roots = state.nodes.filter(n => !n.parentId || !state.byId.has(n.parentId));
+  if (!roots.length) return;
+  if (roots.length === 1) {
+    roots[0].x = cx;
+    roots[0].y = cy;
+    roots[0].vx = 0;
+    roots[0].vy = 0;
+  } else {
+    // Несколько корней — по небольшому кольцу вокруг центра
+    const R = 40;
+    for (let i = 0; i < roots.length; i++) {
+      const a = (i / roots.length) * Math.PI * 2;
+      roots[i].x = cx + Math.cos(a) * R;
+      roots[i].y = cy + Math.sin(a) * R;
+      roots[i].vx = 0;
+      roots[i].vy = 0;
+    }
+  }
+}
+
 let sliderEl, labelEl, playBtn;
 let playing = false;
 let lastStepMs = 0;
@@ -1802,6 +2110,9 @@ function startPlay() {
     resetStory();
     state.timelineMax = 0;
     stepIndex = 0;
+    // Ставим корни в центр viewport + полный reheat, чтобы первая нода появилась в поле зрения
+    centerRootsInViewport();
+    if (state.sim) reheat(state.sim, 0.8);
   } else {
     const { tsMin, tsMax } = computeTsBounds();
     const range = Math.max(1, tsMax - tsMin);
@@ -1962,16 +2273,30 @@ function typeOut(textEl, fullText) {
   tick();
 }
 
+function isPhoneWorthy(n) {
+  // Empty assistant-сообщения (только tool_use без текста) не показываем в phone —
+  // их tool_use подноды пойдут отдельно.
+  if (n.role === 'assistant' && (!n.text || !n.text.trim())) return false;
+  return true;
+}
+
 function collectNew(state) {
   const newly = [];
   for (const n of state.nodes) {
     if (n.bornAt == null) continue;
     if (seen.has(n.id)) continue;
+    seen.add(n.id); // помечаем даже если пропускаем — чтобы не перебирать снова
+    if (!isPhoneWorthy(n)) continue;
     newly.push(n);
-    seen.add(n.id);
   }
   newly.sort((a, b) => a.ts - b.ts);
   return newly;
+}
+
+function clearBubbleTimer(wrapOrText) {
+  if (!wrapOrText) return;
+  const t = wrapOrText.querySelector ? wrapOrText.querySelector('.chat-text') : wrapOrText;
+  if (t && t._typeTimer) { clearTimeout(t._typeTimer); t._typeTimer = null; }
 }
 
 function postBubble(node) {
@@ -1985,7 +2310,6 @@ function postBubble(node) {
     wrap.classList.add('show');
     streamEl.scrollTop = streamEl.scrollHeight;
     if (heavy || perfMinimal) {
-      // длинное сообщение или большой граф — показываем мгновенно без typewriter
       textEl.textContent = fullText;
       textEl.classList.remove('typing');
     } else {
@@ -1994,6 +2318,7 @@ function postBubble(node) {
   });
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
+    clearBubbleTimer(removed);
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
@@ -2034,6 +2359,7 @@ function syncChatToTimeline(state) {
   for (const child of [...streamEl.children]) {
     const id = child.dataset.nodeId;
     if (!targetIds.has(id)) {
+      clearBubbleTimer(child);
       child.remove();
       seen.delete(id);
     }
@@ -2042,12 +2368,14 @@ function syncChatToTimeline(state) {
   for (const n of state.nodes) {
     if (!targetIds.has(n.id)) continue;
     if (seen.has(n.id)) continue;
+    if (!isPhoneWorthy(n)) { seen.add(n.id); continue; }
     toAdd.push(n);
   }
   toAdd.sort((a, b) => a.ts - b.ts);
   for (const n of toAdd) postBubbleInstant(n);
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
+    clearBubbleTimer(removed);
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
@@ -2104,11 +2432,14 @@ function resetStory() {
   pendingQueue.length = 0;
   lastPostMs = 0;
   activeNodeId = null;
-  // Сбросить bornAt у всех нод — физика возьмётся рожать их заново как freshly-born
   if (window.__viz && window.__viz.state && Array.isArray(window.__viz.state.nodes)) {
     for (const n of window.__viz.state.nodes) n.bornAt = null;
   }
-  if (streamEl) streamEl.innerHTML = '';
+  if (streamEl) {
+    // Очистить все активные typewriter таймеры
+    for (const child of streamEl.children) clearBubbleTimer(child);
+    streamEl.innerHTML = '';
+  }
   if (phoneEl) phoneEl.classList.remove('active');
 }
 
@@ -2500,6 +2831,7 @@ function onClick(ev) {
 
 
 
+
 let getViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
@@ -2545,6 +2877,9 @@ function onKey(ev) {
   } else if (ev.key === 'f' || ev.key === 'F') {
     ev.preventDefault();
     toggleFreeze();
+  } else if (ev.key === 'o' || ev.key === 'O') {
+    ev.preventDefault();
+    toggleOrphans();
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }
@@ -2675,7 +3010,7 @@ function tickStats() {
 
 
 
-let btn;
+let btns = []; // {mode, el}
 let transition = null;
 let getViewport = () => ({
   width: window.innerWidth,
@@ -2685,29 +3020,45 @@ let getViewport = () => ({
 });
 function initLayoutToggle(getViewportFn) {
   if (getViewportFn) getViewport = getViewportFn;
-  btn = document.getElementById('btn-layout');
-  if (btn) btn.addEventListener('click', toggleLayout);
-  updateBtnLabel();
+  const host = document.getElementById('layout-switch');
+  if (!host) return;
+  host.innerHTML = '';
+  const modes = [
+    { id: 'force',  label: 'Force'     },
+    { id: 'radial', label: 'Radial'    },
+    { id: 'swim',   label: '🌊 Swim'   },
+  ];
+  btns = [];
+  for (const m of modes) {
+    const el = document.createElement('button');
+    el.className = 'btn btn-layout-chip';
+    el.dataset.mode = m.id;
+    el.textContent = m.label;
+    el.addEventListener('click', () => switchTo(m.id));
+    host.appendChild(el);
+    btns.push({ mode: m.id, el });
+  }
+  updateActive();
 }
 
-function toggleLayout() {
+function switchTo(toMode) {
   if (transition) return;
-  const toMode = state.layoutMode === 'radial' ? 'force' : 'radial';
+  if (toMode === state.layoutMode) return;
   const from = new Map();
   for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
   let to;
   if (toMode === 'radial') {
     to = computeRadialLayout(state.nodes, state.byId, getViewport());
+  } else if (toMode === 'swim') {
+    to = computeSwimLanes(state.nodes, getViewport());
   } else {
-    // В force — возвращаем в текущие (физика потом расставит органично),
-    // но лёгкий jitter чтобы оторваться от идеальных окружностей
     to = new Map();
     for (const n of state.nodes) {
       to.set(n.id, { x: n.x + (Math.random() - 0.5) * 20, y: n.y + (Math.random() - 0.5) * 20 });
     }
   }
   transition = { from, to, startTime: performance.now(), duration: CFG.layoutTransitionMs, toMode };
-  // Фитим камеру под новую раскладку
+  // Автофит камеры под новую раскладку после transition
   setTimeout(() => {
     if (state.nodes.length) {
       const cam = fitToView(state.nodes, getViewport());
@@ -2731,20 +3082,18 @@ function tickLayoutTransition() {
   }
   if (t >= 1) {
     state.layoutMode = transition.toMode;
-    // При возврате в force — reheat чтобы физика мягко раскидала идеальные кольца
     if (transition.toMode === 'force' && state.sim) reheat(state.sim, 0.5);
     transition = null;
-    updateBtnLabel();
+    updateActive();
   }
 }
 function isRadialActive() {
-  return state.layoutMode === 'radial' || (transition && transition.toMode === 'radial');
+  const m = (transition && transition.toMode) || state.layoutMode;
+  return m === 'radial' || m === 'swim';
 }
 
-function updateBtnLabel() {
-  if (!btn) return;
-  btn.textContent = state.layoutMode === 'radial' ? 'Force' : 'Radial';
-  btn.classList.toggle('accent', state.layoutMode === 'radial');
+function updateActive() {
+  for (const b of btns) b.el.classList.toggle('active', b.mode === state.layoutMode);
 }
 
 
@@ -3089,7 +3438,7 @@ let btn;
 function initFreezeToggle() {
   btn = document.getElementById('btn-freeze');
   if (btn) btn.addEventListener('click', toggle);
-  update();
+  updateFreezeBtn();
 }
 function toggleFreeze() { toggle(); }
 
@@ -3097,18 +3446,16 @@ function toggle() {
   if (!state.sim) return;
   if (state.sim.manualFrozen) unfreeze(state.sim);
   else freeze(state.sim);
-  update();
+  updateFreezeBtn();
 }
 
-function update() {
+/** Вызывается из interaction.js когда drag авто-размораживает, и при init. */
+function updateFreezeBtn() {
   if (!btn) return;
   const frozen = state.sim && state.sim.manualFrozen;
   btn.textContent = frozen ? '▶ Unfreeze' : '❄ Freeze';
   btn.classList.toggle('active-freeze', !!frozen);
 }
-
-// Периодически обновляем label (если auto-unfreeze через drag в interaction.js)
-setInterval(update, 400);
 
 
 // --- src/ui/speed-control.js ---
@@ -3140,7 +3487,33 @@ function setSpeed(mult) {
 }
 
 
+// --- src/ui/orphans-toggle.js ---
+
+
+
+let btn;
+function initOrphansToggle() {
+  btn = document.getElementById('btn-orphans');
+  if (btn) btn.addEventListener('click', toggle);
+  update();
+}
+function toggleOrphans() { toggle(); }
+
+function toggle() {
+  state.connectOrphans = !state.connectOrphans;
+  if (state.sim) reheat(state.sim, 0.5);
+  update();
+}
+
+function update() {
+  if (!btn) return;
+  btn.textContent = state.connectOrphans ? '🔗 Disconnect' : '🔗 Connect orphans';
+  btn.classList.toggle('active-orphans', state.connectOrphans);
+}
+
+
 // --- src/ui/interaction.js ---
+
 
 
 
@@ -3161,7 +3534,23 @@ function initInteraction(canvasEl, getViewport) {
   window.addEventListener('mouseup', onUp);
   interactionCanvas.addEventListener('wheel', onWheel, { passive: false });
   interactionCanvas.addEventListener('mouseleave', () => { state.hover = null; state.pathSet = new Set(); hideTooltip(); });
+  interactionCanvas.addEventListener('dblclick', onDblClick);
   window.addEventListener('keydown', onKey);
+}
+
+function onDblClick(ev) {
+  const hit = hitTest(ev.clientX, ev.clientY);
+  if (!hit) return;
+  if (hit.role !== 'assistant') return;
+  // Проверяем есть ли tool_use дети
+  let hasToolChildren = false;
+  for (const n of state.nodes) {
+    if (n.parentId === hit.id && n.role === 'tool_use') { hasToolChildren = true; break; }
+  }
+  if (!hasToolChildren) return;
+  if (state.collapsed.has(hit.id)) state.collapsed.delete(hit.id);
+  else state.collapsed.add(hit.id);
+  if (state.sim) reheat(state.sim, 0.3);
 }
 function isPanning() { return dragging && !draggedNode; }
 function isDraggingNode() { return !!draggedNode; }
@@ -3201,7 +3590,7 @@ function onDown(ev) {
   state.cameraTarget = null;
   if (draggedNode) {
     // Auto-unfreeze + re-heat на drag ноды
-    if (state.sim && state.sim.manualFrozen) unfreeze(state.sim);
+    if (state.sim && state.sim.manualFrozen) { unfreeze(state.sim); updateFreezeBtn(); }
     if (state.sim) { reheat(state.sim, 0.3); state.sim.alphaTarget = 0.3; }
     state.hover = draggedNode;
     state.pathSet = pathToRoot(draggedNode, state.byId);
@@ -3364,7 +3753,9 @@ function loadText(text) {
     const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
       : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
       : CFG.prewarmIterations;
-    state.sim = createSim();
+    // В minimal режиме — более быстрое охлаждение (physics быстрее дойдёт до settled)
+    const simOpts = state.perfMode === 'minimal' ? { alphaDecay: CFG.perfMinimalAlphaDecay } : {};
+    state.sim = createSim(simOpts);
     prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
     state.nodes = g.nodes;
     state.edges = g.edges;
@@ -3373,7 +3764,24 @@ function loadText(text) {
     state.hover = null;
     state.pathSet = new Set();
     state.cameraTarget = null;
+    state.searchMatches = new Set();
+    state.searchActive = null;
+    state.collapsed = new Set();
     state.stats = parsed.stats;
+    // Если активен не-force layout — применяем его сразу к новым нодам
+    if (state.layoutMode === 'swim') {
+      const pos = computeSwimLanes(state.nodes, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    } else if (state.layoutMode === 'radial') {
+      const pos = computeRadialLayout(state.nodes, state.byId, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    }
     const cam = fitToView(state.nodes, vp);
     state.camera.scale = cam.scale;
     state.camera.x = cam.x;
@@ -3555,6 +3963,7 @@ async function applyUrlParamsLate() {
 
 
 
+
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 
@@ -3601,6 +4010,7 @@ initAudio();
 initRecorder();
 initFreezeToggle();
 initSpeedControl();
+initOrphansToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -3620,16 +4030,23 @@ initKeyboard(getViewport);
 state.stars = generateStarfield(CFG.starfieldCount);
 
 let lastMs = performance.now();
+let frameIdx = 0;
 function frame(tms) {
   const tSec = tms / 1000;
   const dt = Math.min(0.1, (tms - lastMs) / 1000);
   lastMs = tms;
+  frameIdx++;
   const vp = getViewport();
 
   tickPlay();
   tickLayoutTransition();
   const physicsDisabled = isRadialActive() || (state.sim && state.sim.frozen && !isDraggingNode());
-  if (state.running && !physicsDisabled) stepPhysics(state.nodes, state.edges, vp, state.sim);
+  // На больших графах считаем физику раз в N кадров (render всегда)
+  const skip = state.perfMode === 'minimal' ? CFG.perfMinimalPhysicsSkip
+    : state.perfMode === 'degraded' ? CFG.perfDegradedPhysicsSkip
+    : 1;
+  const doPhysics = state.running && !physicsDisabled && (frameIdx % skip === 0);
+  if (doPhysics) stepPhysics(state.nodes, state.edges, vp, state.sim);
   tickParticles(state.edges, dt);
 
   // Camera auto-follow при play (если пользователь ничего не тащит)

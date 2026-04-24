@@ -115,22 +115,29 @@ export function stepPhysics(nodes, edges, viewport, sim) {
     }
   }
 
-  // spring (hub-safe: strength ~ 1/min(deg(a), deg(b)))
+  // spring (hub-safe: strength ~ 1/sqrt(min deg)); усиливаем для leaf-edges.
+  // Adopted-edges (orphan → ts-predecessor) участвуют в физике только когда
+  // включён connectOrphans. Иначе orphan forest лежит отдельно.
+  const connectOrphans = !!(edges.length && typeof window !== 'undefined' && window.__viz && window.__viz.state && window.__viz.state.connectOrphans);
   for (const e of edges) {
+    if (e.adopted && !connectOrphans) continue;
     const a = e.a, b = e.b;
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
     const disp = d - CFG.springLen;
     const degMin = Math.max(1, Math.min(a.degree || 1, b.degree || 1));
-    const kLink = (CFG.spring / Math.sqrt(degMin)) * alpha;
+    const leafBoost = (degMin === 1) ? CFG.leafSpringBoost : 1;
+    const adoptedMul = e.adopted ? 0.4 : 1; // adopted-edge слабее — хронология, не реальная связь
+    const kLink = (CFG.spring * leafBoost * adoptedMul / Math.sqrt(degMin)) * alpha;
     const f = kLink * disp;
     const fx = (dx / d) * f, fy = (dy / d) * f;
     a.fxAcc += fx; a.fyAcc += fy;
     b.fxAcc -= fx; b.fyAcc -= fy;
   }
 
-  // central pull
-  const kCenter = CFG.centerPull * alpha;
+  // central pull — растёт с N (sqrt-scaled), чтобы держать большой граф в окружности
+  const centerScale = Math.sqrt(Math.max(1, N / CFG.centerPullScaleN));
+  const kCenter = CFG.centerPull * centerScale * alpha;
   for (const n of nodes) {
     n.fxAcc += (cx - n.x) * kCenter;
     n.fyAcc += (cy - n.y) * kCenter;
@@ -214,7 +221,11 @@ export function computeRadialLayout(nodes, byId, viewport) {
   const assign = (id, depth, angleStart, angleEnd) => {
     const mid = (angleStart + angleEnd) / 2;
     const radius = depth * ring;
-    positions.set(id, { x: cx + Math.cos(mid) * radius, y: cy + Math.sin(mid) * radius });
+    const x = cx + Math.cos(mid) * radius;
+    const y = cy + Math.sin(mid) * radius;
+    positions.set(id, { x, y });
+    const n = byId.get(id);
+    if (n) { n._radialX = x; n._radialY = y; }
     const kids = children.get(id) || [];
     if (!kids.length) return;
     const total = leaves.get(id);
@@ -230,9 +241,13 @@ export function computeRadialLayout(nodes, byId, viewport) {
   if (roots.length === 1) {
     assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
   } else {
+    // Множественные roots — не сливать в точке. Ставим их на depth=1 (первое
+    // кольцо), оставляя центр свободным. Сортируем по ts для стабильного порядка.
+    roots.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
     const slice = (Math.PI * 2) / roots.length;
+    const startDepth = 1;
     for (let i = 0; i < roots.length; i++) {
-      assign(roots[i], 0, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+      assign(roots[i], startDepth, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
     }
   }
   return positions;
@@ -240,6 +255,56 @@ export function computeRadialLayout(nodes, byId, viewport) {
 
 export function easeInOutQuad(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+/**
+ * Time-as-river (swim-lanes) layout. X — по РАНГУ (индексу после сортировки
+ * по ts), не по сырому ts. Это распределяет ноды равномерно и разводит
+ * плотные кластеры. Y — по роли (три плавательные дорожки).
+ * Внутри lane локальный y-jitter + лёгкий x-offset чтобы ноды с близким
+ * рангом не накладывались.
+ */
+export function computeSwimLanes(nodes, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const W = viewport.safeW != null ? viewport.safeW : viewport.width;
+  const H = viewport.safeH != null ? viewport.safeH : viewport.height;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+
+  // Длина реки зависит от количества нод: ~40px на ноду, но не меньше 2×W
+  const perNode = 40;
+  const lineW = Math.max(W * 2.0, nodes.length * perNode);
+  const left = cx - lineW / 2;
+  const right = cx + lineW / 2;
+
+  // Рангируем по ts (stable: tool_use подноды идут после своего parent assistant)
+  const sorted = [...nodes].sort((a, b) => a.ts - b.ts);
+  const rankById = new Map();
+  sorted.forEach((n, i) => rankById.set(n.id, i));
+  const lastRank = Math.max(1, sorted.length - 1);
+
+  const laneSpacing = H * 0.32;
+  const laneY = {
+    user: cy - laneSpacing,
+    assistant: cy,
+    tool_use: cy + laneSpacing,
+  };
+
+  for (const n of nodes) {
+    const rank = rankById.get(n.id) || 0;
+    const t = rank / lastRank;
+    const lane = laneY[n.role] != null ? laneY[n.role] : cy;
+    const yJ = (n._seedDy != null ? n._seedDy : 0) * laneSpacing * 0.45;
+    const xJ = (n._seedDx != null ? n._seedDx : 0) * 16;
+    const x = left + t * (right - left) + xJ;
+    const y = lane + yJ;
+    positions.set(n.id, { x, y });
+    // Сохраняем target на ноде — чтобы birth-animation в swim-режиме не тянула к parent
+    n._swimX = x;
+    n._swimY = y;
+  }
+  return positions;
 }
 
 export function computeBBox(nodes) {

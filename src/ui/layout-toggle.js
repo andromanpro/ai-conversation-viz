@@ -1,8 +1,8 @@
 import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
-import { computeRadialLayout, easeInOutQuad, fitToView, reheat } from '../core/layout.js';
+import { computeRadialLayout, computeSwimLanes, easeInOutQuad, fitToView, reheat } from '../core/layout.js';
 
-let btn;
+let btns = []; // {mode, el}
 let transition = null;
 let getViewport = () => ({
   width: window.innerWidth,
@@ -13,29 +13,45 @@ let getViewport = () => ({
 
 export function initLayoutToggle(getViewportFn) {
   if (getViewportFn) getViewport = getViewportFn;
-  btn = document.getElementById('btn-layout');
-  if (btn) btn.addEventListener('click', toggleLayout);
-  updateBtnLabel();
+  const host = document.getElementById('layout-switch');
+  if (!host) return;
+  host.innerHTML = '';
+  const modes = [
+    { id: 'force',  label: 'Force'     },
+    { id: 'radial', label: 'Radial'    },
+    { id: 'swim',   label: '🌊 Swim'   },
+  ];
+  btns = [];
+  for (const m of modes) {
+    const el = document.createElement('button');
+    el.className = 'btn btn-layout-chip';
+    el.dataset.mode = m.id;
+    el.textContent = m.label;
+    el.addEventListener('click', () => switchTo(m.id));
+    host.appendChild(el);
+    btns.push({ mode: m.id, el });
+  }
+  updateActive();
 }
 
-function toggleLayout() {
+function switchTo(toMode) {
   if (transition) return;
-  const toMode = state.layoutMode === 'radial' ? 'force' : 'radial';
+  if (toMode === state.layoutMode) return;
   const from = new Map();
   for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
   let to;
   if (toMode === 'radial') {
     to = computeRadialLayout(state.nodes, state.byId, getViewport());
+  } else if (toMode === 'swim') {
+    to = computeSwimLanes(state.nodes, getViewport());
   } else {
-    // В force — возвращаем в текущие (физика потом расставит органично),
-    // но лёгкий jitter чтобы оторваться от идеальных окружностей
     to = new Map();
     for (const n of state.nodes) {
       to.set(n.id, { x: n.x + (Math.random() - 0.5) * 20, y: n.y + (Math.random() - 0.5) * 20 });
     }
   }
   transition = { from, to, startTime: performance.now(), duration: CFG.layoutTransitionMs, toMode };
-  // Фитим камеру под новую раскладку
+  // Автофит камеры под новую раскладку после transition
   setTimeout(() => {
     if (state.nodes.length) {
       const cam = fitToView(state.nodes, getViewport());
@@ -60,19 +76,17 @@ export function tickLayoutTransition() {
   }
   if (t >= 1) {
     state.layoutMode = transition.toMode;
-    // При возврате в force — reheat чтобы физика мягко раскидала идеальные кольца
     if (transition.toMode === 'force' && state.sim) reheat(state.sim, 0.5);
     transition = null;
-    updateBtnLabel();
+    updateActive();
   }
 }
 
 export function isRadialActive() {
-  return state.layoutMode === 'radial' || (transition && transition.toMode === 'radial');
+  const m = (transition && transition.toMode) || state.layoutMode;
+  return m === 'radial' || m === 'swim';
 }
 
-function updateBtnLabel() {
-  if (!btn) return;
-  btn.textContent = state.layoutMode === 'radial' ? 'Force' : 'Radial';
-  btn.classList.toggle('accent', state.layoutMode === 'radial');
+function updateActive() {
+  for (const b of btns) b.el.classList.toggle('active', b.mode === state.layoutMode);
 }

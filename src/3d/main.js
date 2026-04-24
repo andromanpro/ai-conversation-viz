@@ -21,7 +21,9 @@ const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0e1a);
-scene.fog = new THREE.Fog(0x0a0e1a, 400, 3000);
+// Лёгкий туман для глубины, но без «стены» близко — начинается далеко,
+// полностью растворяется только на огромных расстояниях.
+scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 5000);
 camera.position.set(0, -200, 900);
@@ -105,9 +107,9 @@ function buildScene(text) {
     const mat = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 0.45,
-      metalness: 0.3,
-      roughness: 0.35,
+      emissiveIntensity: 0.55,
+      metalness: 0.25,
+      roughness: 0.4,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(n.x, -n.y, n.z || 0);
@@ -135,8 +137,9 @@ function buildScene(text) {
     const tubeGeo = new THREE.TubeGeometry(curve, 40, 0.7, 6, false);
     const color = e.b.role === 'tool_use' ? 0xeca040 : 0x00d4ff;
     const tubeMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.45,
+      color, transparent: true, opacity: 0.55,
       blending: THREE.AdditiveBlending, depthWrite: false,
+      fog: false, // tube'ы не затуманиваются — видно связи
     });
     const tube = new THREE.Mesh(tubeGeo, tubeMat);
     edgesGroup.add(tube);

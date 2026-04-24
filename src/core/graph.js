@@ -107,6 +107,21 @@ export function buildGraph(parsed, viewport) {
 
   const byId = new Map(nodes.map(node => [node.id, node]));
 
+  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
+  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
+  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
+  // решает как их показывать: как отдельный forest (off, default) или
+  // пунктирно-связанными с основной цепью (on).
+  const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
+  for (let i = 0; i < sortedByTs.length; i++) {
+    const node = sortedByTs[i];
+    if (node.parentId && !byId.has(node.parentId)) {
+      node._isOrphanRoot = true;
+      const prev = i > 0 ? sortedByTs[i - 1] : null;
+      if (prev) node._adoptedParentId = prev.id;
+    }
+  }
+
   const edges = [];
   for (const node of nodes) {
     if (node.parentId && byId.has(node.parentId)) {
@@ -115,6 +130,16 @@ export function buildGraph(parsed, viewport) {
         target: node.id,
         a: byId.get(node.parentId),
         b: node,
+        adopted: false,
+      });
+    } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
+      const parent = byId.get(node._adoptedParentId);
+      edges.push({
+        source: parent.id,
+        target: node.id,
+        a: parent,
+        b: node,
+        adopted: true,
       });
     }
   }

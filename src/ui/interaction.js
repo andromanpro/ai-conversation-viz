@@ -3,6 +3,7 @@ import { state } from '../view/state.js';
 import { screenToWorld, applyZoom } from '../view/camera.js';
 import { pathToRoot } from '../view/path.js';
 import { reheat, unfreeze } from '../core/layout.js';
+import { updateFreezeBtn } from './freeze-toggle.js';
 import { showDetail, hideDetail } from './detail-panel.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 
@@ -19,7 +20,23 @@ export function initInteraction(canvasEl, getViewport) {
   window.addEventListener('mouseup', onUp);
   interactionCanvas.addEventListener('wheel', onWheel, { passive: false });
   interactionCanvas.addEventListener('mouseleave', () => { state.hover = null; state.pathSet = new Set(); hideTooltip(); });
+  interactionCanvas.addEventListener('dblclick', onDblClick);
   window.addEventListener('keydown', onKey);
+}
+
+function onDblClick(ev) {
+  const hit = hitTest(ev.clientX, ev.clientY);
+  if (!hit) return;
+  if (hit.role !== 'assistant') return;
+  // Проверяем есть ли tool_use дети
+  let hasToolChildren = false;
+  for (const n of state.nodes) {
+    if (n.parentId === hit.id && n.role === 'tool_use') { hasToolChildren = true; break; }
+  }
+  if (!hasToolChildren) return;
+  if (state.collapsed.has(hit.id)) state.collapsed.delete(hit.id);
+  else state.collapsed.add(hit.id);
+  if (state.sim) reheat(state.sim, 0.3);
 }
 
 export function isPanning() { return dragging && !draggedNode; }
@@ -60,7 +77,7 @@ function onDown(ev) {
   state.cameraTarget = null;
   if (draggedNode) {
     // Auto-unfreeze + re-heat на drag ноды
-    if (state.sim && state.sim.manualFrozen) unfreeze(state.sim);
+    if (state.sim && state.sim.manualFrozen) { unfreeze(state.sim); updateFreezeBtn(); }
     if (state.sim) { reheat(state.sim, 0.3); state.sim.alphaTarget = 0.3; }
     state.hover = draggedNode;
     state.pathSet = pathToRoot(draggedNode, state.byId);

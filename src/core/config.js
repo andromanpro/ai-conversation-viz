@@ -30,6 +30,9 @@ export const CFG = {
   perfMinimalStarCount: 80,
   perfMinimalPrewarm: 40,
   perfMinimalTypewriter: false,
+  perfMinimalPhysicsSkip: 2,   // в minimal — физика раз в 2 кадра
+  perfMinimalAlphaDecay: 0.06, // быстрее остывает, меньше work до settle
+  perfDegradedPhysicsSkip: 1,  // degraded — каждый кадр (как обычно)
 
   // v3 wow
   edgeCurveStrength: 0.18,
@@ -86,9 +89,11 @@ export const CFG = {
   velocityDecay: 0.4,     // "friction": vx *= (1 − velocityDecay)
   reheatAlpha: 0.3,
   maxVelocity: 40,
-  repulsionCutoff: 1500,
-  wallStiffness: 0.08,
-  wallPaddingMul: 4,
+  repulsionCutoff: 3500,       // выше — дальние кластеры всё ещё отталкиваются
+  wallStiffness: 0.02,         // мягче — стена не формирует прямоугольник
+  wallPaddingMul: 8,           // дальше — почти не виден bbox
+  centerPullScaleN: 200,       // centerPull растёт как sqrt(N/200)
+  leafSpringBoost: 2.5,        // spring для degree-1 edges в 2.5× сильнее (root/leaf не отрываются)
   playSpeedOptions: [0.5, 1, 2, 5],
   storyPostGapMs: 800,
   focusDimAlpha: 0.3,

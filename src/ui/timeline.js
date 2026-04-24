@@ -3,6 +3,33 @@ import { state } from '../view/state.js';
 import { resetStory, syncChatToTimeline, rebuildSeen } from './story-mode.js';
 import { reheat } from '../core/layout.js';
 
+function centerRootsInViewport() {
+  // Помещаем все "root"-ноды (без parent) в центр текущего viewport камеры,
+  // чтобы при рестарте play первая нода появлялась в поле зрения.
+  const cam = state.camera;
+  const vp = { w: window.innerWidth, h: window.innerHeight };
+  const cx = cam.x + (vp.w / 2) / cam.scale;
+  const cy = cam.y + (vp.h / 2) / cam.scale;
+  const roots = state.nodes.filter(n => !n.parentId || !state.byId.has(n.parentId));
+  if (!roots.length) return;
+  if (roots.length === 1) {
+    roots[0].x = cx;
+    roots[0].y = cy;
+    roots[0].vx = 0;
+    roots[0].vy = 0;
+  } else {
+    // Несколько корней — по небольшому кольцу вокруг центра
+    const R = 40;
+    for (let i = 0; i < roots.length; i++) {
+      const a = (i / roots.length) * Math.PI * 2;
+      roots[i].x = cx + Math.cos(a) * R;
+      roots[i].y = cy + Math.sin(a) * R;
+      roots[i].vx = 0;
+      roots[i].vy = 0;
+    }
+  }
+}
+
 let sliderEl, labelEl, playBtn;
 let playing = false;
 let lastStepMs = 0;
@@ -61,6 +88,9 @@ function startPlay() {
     resetStory();
     state.timelineMax = 0;
     stepIndex = 0;
+    // Ставим корни в центр viewport + полный reheat, чтобы первая нода появилась в поле зрения
+    centerRootsInViewport();
+    if (state.sim) reheat(state.sim, 0.8);
   } else {
     const { tsMin, tsMax } = computeTsBounds();
     const range = Math.max(1, tsMax - tsMin);

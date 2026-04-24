@@ -68,16 +68,30 @@ function typeOut(textEl, fullText) {
   tick();
 }
 
+function isPhoneWorthy(n) {
+  // Empty assistant-сообщения (только tool_use без текста) не показываем в phone —
+  // их tool_use подноды пойдут отдельно.
+  if (n.role === 'assistant' && (!n.text || !n.text.trim())) return false;
+  return true;
+}
+
 function collectNew(state) {
   const newly = [];
   for (const n of state.nodes) {
     if (n.bornAt == null) continue;
     if (seen.has(n.id)) continue;
+    seen.add(n.id); // помечаем даже если пропускаем — чтобы не перебирать снова
+    if (!isPhoneWorthy(n)) continue;
     newly.push(n);
-    seen.add(n.id);
   }
   newly.sort((a, b) => a.ts - b.ts);
   return newly;
+}
+
+function clearBubbleTimer(wrapOrText) {
+  if (!wrapOrText) return;
+  const t = wrapOrText.querySelector ? wrapOrText.querySelector('.chat-text') : wrapOrText;
+  if (t && t._typeTimer) { clearTimeout(t._typeTimer); t._typeTimer = null; }
 }
 
 function postBubble(node) {
@@ -91,7 +105,6 @@ function postBubble(node) {
     wrap.classList.add('show');
     streamEl.scrollTop = streamEl.scrollHeight;
     if (heavy || perfMinimal) {
-      // длинное сообщение или большой граф — показываем мгновенно без typewriter
       textEl.textContent = fullText;
       textEl.classList.remove('typing');
     } else {
@@ -100,6 +113,7 @@ function postBubble(node) {
   });
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
+    clearBubbleTimer(removed);
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
@@ -141,6 +155,7 @@ export function syncChatToTimeline(state) {
   for (const child of [...streamEl.children]) {
     const id = child.dataset.nodeId;
     if (!targetIds.has(id)) {
+      clearBubbleTimer(child);
       child.remove();
       seen.delete(id);
     }
@@ -149,12 +164,14 @@ export function syncChatToTimeline(state) {
   for (const n of state.nodes) {
     if (!targetIds.has(n.id)) continue;
     if (seen.has(n.id)) continue;
+    if (!isPhoneWorthy(n)) { seen.add(n.id); continue; }
     toAdd.push(n);
   }
   toAdd.sort((a, b) => a.ts - b.ts);
   for (const n of toAdd) postBubbleInstant(n);
   while (streamEl.children.length > CFG.storyMaxHistory) {
     const removed = streamEl.firstChild;
+    clearBubbleTimer(removed);
     seen.delete(removed?.dataset?.nodeId);
     streamEl.removeChild(removed);
   }
@@ -214,10 +231,13 @@ export function resetStory() {
   pendingQueue.length = 0;
   lastPostMs = 0;
   activeNodeId = null;
-  // Сбросить bornAt у всех нод — физика возьмётся рожать их заново как freshly-born
   if (window.__viz && window.__viz.state && Array.isArray(window.__viz.state.nodes)) {
     for (const n of window.__viz.state.nodes) n.bornAt = null;
   }
-  if (streamEl) streamEl.innerHTML = '';
+  if (streamEl) {
+    // Очистить все активные typewriter таймеры
+    for (const child of streamEl.children) clearBubbleTimer(child);
+    streamEl.innerHTML = '';
+  }
   if (phoneEl) phoneEl.classList.remove('active');
 }
