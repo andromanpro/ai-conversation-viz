@@ -291,7 +291,7 @@ const SAMPLE_JSONL = [
 
   entry({ type: 'user', uuid: 'u16', parentUuid: 'a13', timestamp: step(181),
     message: { role: 'user', content: [
-      { type: 'tool_result', tool_use_id: 'tu_a13_1', content: '[main abc1234] Barnes-Hut + electric sparks\n 6 files changed, 412 insertions(+), 28 deletions(-)\nTo http://192.168.1.130:3000/androman/ai-conversation-viz.git\n   360158d..abc1234  main -> main\nTo https://github.com/andromanpro/ai-conversation-viz.git\n   360158d..abc1234  main -> main' },
+      { type: 'tool_result', tool_use_id: 'tu_a13_1', content: '[main abc1234] Barnes-Hut + electric sparks\n 6 files changed, 412 insertions(+), 28 deletions(-)\nTo git@github.com:user/ai-conversation-viz.git\n   360158d..abc1234  main -> main' },
     ] } }),
 
   // Финальное служебное
