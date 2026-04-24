@@ -32,6 +32,8 @@ import { initAnnotations } from './ui/annotations.js';
 import { initBookmarks } from './ui/bookmarks.js';
 import { initRenderToggle } from './ui/render-toggle.js';
 import { drawWebgl } from './view/renderer-webgl.js';
+import { initI18n } from './core/i18n.js';
+import { initLangToggle } from './ui/lang-toggle.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -64,6 +66,10 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// i18n должен быть первым — он проходит по DOM и применяет переводы
+// до того как модули начнут читать/писать textContent кнопок.
+initI18n();
+initLangToggle();
 initDetail();
 initTooltip();
 initTimeline();

@@ -234,63 +234,64 @@
 <canvas id="graph-webgl" style="display:none;position:fixed;inset:0;"></canvas>
 
 <div class="hud" id="top-left">
-  <div class="title">AI Conversation Viz</div>
-  <div class="subtitle">v0.4 · force-directed</div>
+  <div class="title" data-i18n="header.title">AI Conversation Viz</div>
+  <div class="subtitle" data-i18n="header.subtitle_force">v0.4 · force-directed</div>
   <!-- Primary row — основные действия с текстом -->
   <div class="controls controls-primary">
-    <button class="btn primary" id="btn-sample">Load sample</button>
-    <button class="btn" id="btn-file">Open JSONL…</button>
-    <a class="btn btn-3d" href="./3d.html" title="Открыть 3D-визуализацию">🌐 3D →</a>
-    <button class="btn accent" id="btn-reset">Reset view</button>
-    <button class="btn" id="btn-share" title="Скопировать URL с текущим состоянием">🔗 Share</button>
+    <button class="btn primary" id="btn-sample" data-i18n="btn.sample">Load sample</button>
+    <button class="btn" id="btn-file" data-i18n="btn.file">Open JSONL…</button>
+    <a class="btn btn-3d" href="./3d.html" data-i18n-title="tip.3d" data-i18n="btn.3d">🌐 3D →</a>
+    <button class="btn accent" id="btn-reset" data-i18n="btn.reset">Reset view</button>
+    <button class="btn" id="btn-share" data-i18n-title="tip.share" data-i18n="btn.share">🔗 Share</button>
   </div>
   <!-- Secondary row — переключатели и настройки иконками -->
   <div class="controls controls-secondary">
-    <div id="layout-switch" title="Layout mode"></div>
+    <div id="layout-switch" data-i18n-title="tip.layout"></div>
     <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-audio" title="Ambient sound">♪</button>
-    <button class="btn btn-icon" id="btn-record" title="Record canvas to WebM">●</button>
-    <button class="btn btn-icon" id="btn-snapshot" title="PNG / SVG snapshot">📷</button>
+    <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio">♪</button>
+    <button class="btn btn-icon" id="btn-record" data-i18n-title="tip.record">●</button>
+    <button class="btn btn-icon" id="btn-snapshot" data-i18n-title="tip.snapshot">📷</button>
     <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-freeze" title="Freeze / unfreeze physics (F)">❄</button>
-    <button class="btn btn-icon" id="btn-orphans" title="Connect orphans (O)">🔗</button>
-    <button class="btn btn-icon" id="btn-topics" title="TF-IDF topic clusters">🧬</button>
+    <button class="btn btn-icon" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
+    <button class="btn btn-icon" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
+    <button class="btn btn-icon" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
     <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-diff" title="Diff с другой сессией">🔀</button>
-    <button class="btn btn-icon" id="btn-sessions" title="Список сессий">📚</button>
-    <button class="btn btn-icon" id="btn-bookmarks" title="Bookmarks (B)">⭐</button>
+    <button class="btn btn-icon" id="btn-diff" data-i18n-title="tip.diff_off">🔀</button>
+    <button class="btn btn-icon" id="btn-sessions" data-i18n-title="tip.sessions_empty">📚</button>
+    <button class="btn btn-icon" id="btn-bookmarks" data-i18n-title="tip.bookmarks_empty">⭐</button>
     <span class="toolbar-sep"></span>
-    <button class="btn btn-icon" id="btn-render" title="Canvas 2D / WebGL">🎨</button>
-    <button class="btn btn-icon" id="btn-settings" title="Settings (,)">⚙</button>
+    <button class="btn btn-icon" id="btn-render" data-i18n-title="tip.render_webgl">🎨</button>
+    <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
+    <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
     <input type="file" id="diff-file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="live-row">
-    <input type="text" id="live-url" placeholder="Live JSONL URL…">
-    <button class="btn" id="btn-live-start">Watch</button>
-    <button class="btn" id="btn-live-stop" style="display:none">Stop</button>
+    <input type="text" id="live-url" data-i18n-placeholder="placeholder.live_url">
+    <button class="btn" id="btn-live-start" data-i18n="btn.watch">Watch</button>
+    <button class="btn" id="btn-live-stop" style="display:none" data-i18n="btn.stop">Stop</button>
   </div>
-  <div id="live-status">—</div>
+  <div id="live-status" data-i18n="live.idle">idle</div>
 </div>
 
 <div class="hud" id="top-right">
   <div class="stats" id="stats">—</div>
   <div class="role-filter">
-    <button class="btn-role" data-role="user" title="Toggle user (click)"><span class="dot u"></span>user</button>
-    <button class="btn-role" data-role="assistant" title="Toggle assistant"><span class="dot a"></span>assistant</button>
-    <button class="btn-role" data-role="tool_use" title="Toggle tool_use"><span class="dot t"></span>tool_use</button>
+    <button class="btn-role" data-role="user" data-i18n-title="tip.role_user"><span class="dot u"></span>user</button>
+    <button class="btn-role" data-role="assistant" data-i18n-title="tip.role_assistant"><span class="dot a"></span>assistant</button>
+    <button class="btn-role" data-role="tool_use" data-i18n-title="tip.role_tool_use"><span class="dot t"></span>tool_use</button>
   </div>
   <div id="stats-panel">
-    <div class="row"><span class="label">tokens</span><span class="value" id="stat-tokens">—</span></div>
-    <div class="row"><span class="label">duration</span><span class="value" id="stat-duration">—</span></div>
-    <div class="row"><span class="label">top tools</span><span class="value" id="stat-top-tools">—</span></div>
-    <div class="row"><span class="label">hubs</span><span class="value" id="stat-hubs">—</span></div>
-    <div class="row"><span class="label">longest</span><span class="value" id="stat-longest">—</span></div>
+    <div class="row"><span class="label" data-i18n="stats.tokens">tokens</span><span class="value" id="stat-tokens">—</span></div>
+    <div class="row"><span class="label" data-i18n="stats.duration">duration</span><span class="value" id="stat-duration">—</span></div>
+    <div class="row"><span class="label" data-i18n="stats.top_tools">top tools</span><span class="value" id="stat-top-tools">—</span></div>
+    <div class="row"><span class="label" data-i18n="stats.hubs">hubs</span><span class="value" id="stat-hubs">—</span></div>
+    <div class="row"><span class="label" data-i18n="stats.longest">longest</span><span class="value" id="stat-longest">—</span></div>
   </div>
 </div>
 
-<div class="hud" id="bottom-left">
-  <kbd>wheel</kbd> zoom &nbsp; <kbd>drag</kbd> pan/node &nbsp; <kbd>dbl-click</kbd> collapse &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step &nbsp; <kbd>F</kbd> freeze &nbsp; <kbd>O</kbd> orphans &nbsp; <kbd>Ctrl+F</kbd> search &nbsp; <kbd>S</kbd> star &nbsp; <kbd>B</kbd> bookmarks &nbsp; <kbd>Esc</kbd> close
+<div class="hud" id="bottom-left" data-i18n-html="hint.kbd">
+  <kbd>wheel</kbd> zoom · <kbd>drag</kbd> pan/node · <kbd>dbl-click</kbd> collapse · <kbd>Space</kbd> play · <kbd>←/→</kbd> step · <kbd>F</kbd> freeze · <kbd>O</kbd> orphans · <kbd>Ctrl+F</kbd> search · <kbd>S</kbd> star · <kbd>B</kbd> bookmarks · <kbd>Esc</kbd> close
 </div>
 
 <div id="detail">
@@ -308,8 +309,8 @@
 </div>
 
 <div id="timeline-bar">
-  <button id="btn-play" aria-label="Play">▶</button>
-  <label>timeline</label>
+  <button id="btn-play" data-i18n-aria="timeline.play">▶</button>
+  <label data-i18n="stats.timeline">timeline</label>
   <input type="range" id="timeline" min="0" max="100" value="100">
   <div id="speed-control"></div>
   <div id="timeline-label">—</div>
@@ -324,43 +325,43 @@
 
 <div id="search-bar">
   <span style="color: var(--muted); font-size: 12px;">⌕</span>
-  <input type="text" id="search-input" placeholder="Поиск по сообщениям…">
+  <input type="text" id="search-input" data-i18n-placeholder="placeholder.search">
   <span id="search-count">—</span>
-  <button id="search-close" aria-label="Close">×</button>
+  <button id="search-close" data-i18n-aria="btn.cancel">×</button>
 </div>
 
 <canvas id="minimap" width="170" height="110"></canvas>
 <div id="toast">—</div>
-<div id="drop-hint"><div class="box">drop jsonl to visualize</div></div>
+<div id="drop-hint"><div class="box" data-i18n="hint.drop_jsonl">drop jsonl to visualize</div></div>
 <div id="error"></div>
 
 <div id="diff-drop">
   <div id="diff-drop-body">
-    <h3>🔀 Сравнить сессии</h3>
-    <p>Перетащите второй JSONL / ChatGPT-export / Anthropic messages</p>
-    <div id="diff-drop-hint">Drop file here</div>
-    <p>Одинаковые сообщения станут <span style="color:#c8c8d6">общими</span>, уникальные — <span style="color:#ff60af">A</span> / <span style="color:#5ad2ff">B</span>.</p>
+    <h3 data-i18n="diff.title">🔀 Compare sessions</h3>
+    <p data-i18n="diff.hint">Drop a second JSONL / ChatGPT export / Anthropic messages</p>
+    <div id="diff-drop-hint" data-i18n="diff.drop_here">Drop file here</div>
+    <p data-i18n="diff.explain">Matching messages become common, unique ones — A / B.</p>
     <div id="diff-drop-error"></div>
     <div id="diff-drop-actions">
-      <button class="btn" id="diff-browse">Открыть файл…</button>
-      <button class="btn" id="diff-cancel">Отмена</button>
+      <button class="btn" id="diff-browse" data-i18n="btn.open_file">Open file…</button>
+      <button class="btn" id="diff-cancel" data-i18n="btn.cancel">Cancel</button>
     </div>
   </div>
 </div>
 
 <aside id="sessions-panel">
   <div class="sessions-header">
-    <span>Sessions</span>
+    <span data-i18n="sessions.title">Sessions</span>
     <button class="sessions-close" onclick="document.getElementById('sessions-panel').classList.remove('open');">×</button>
   </div>
   <div class="sessions-list"></div>
-  <div class="sessions-hint">Перетащите несколько JSONL-файлов в окно — они появятся здесь. Или добавьте <code>?sessions=&lt;url&gt;</code> к ссылке для удалённого индекса.</div>
+  <div class="sessions-hint" data-i18n-html="hint.sessions_drop">Drop multiple JSONL files into the window.</div>
 </aside>
 
 <div class="diff-legend" id="diff-legend">
-  <div class="row"><span class="swatch sw-a"></span>только A</div>
-  <div class="row"><span class="swatch sw-b"></span>только B</div>
-  <div class="row"><span class="swatch sw-both"></span>общие</div>
+  <div class="row"><span class="swatch sw-a"></span><span data-i18n="diff.legend_a">only A</span></div>
+  <div class="row"><span class="swatch sw-b"></span><span data-i18n="diff.legend_b">only B</span></div>
+  <div class="row"><span class="swatch sw-both"></span><span data-i18n="diff.legend_both">common</span></div>
 </div>
 
 <script type="module" src="./src/main.js"></script>

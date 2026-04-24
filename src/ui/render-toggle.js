@@ -4,6 +4,7 @@
 
 import { state } from '../view/state.js';
 import { isWebglSupported, initWebglRenderer, resizeWebgl } from '../view/renderer-webgl.js';
+import { t } from '../core/i18n.js';
 
 const LS_KEY = 'viz:render-backend';
 let _btn = null;
@@ -77,14 +78,16 @@ function updateBtn() {
   if (!_btn) return;
   if (state.renderBackend === 'webgl') {
     _btn.textContent = '🎨';
-    _btn.title = 'WebGL рендерер — клик чтобы переключиться на Canvas 2D';
+    _btn.title = t('tip.render_webgl');
     _btn.classList.add('active-render');
   } else {
     _btn.textContent = '🖼';
-    _btn.title = 'Canvas 2D рендерер — клик чтобы переключиться на WebGL';
+    _btn.title = t('tip.render_canvas');
     _btn.classList.remove('active-render');
   }
 }
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBtn);
 
 function toast(msg) {
   const el = document.getElementById('toast');

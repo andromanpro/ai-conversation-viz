@@ -5,6 +5,7 @@
 import { state } from '../view/state.js';
 import { listStarred, getAnnotation } from './annotations.js';
 import { showDetail } from './detail-panel.js';
+import { t } from '../core/i18n.js';
 
 let _btn, _panel, _listEl;
 
@@ -31,11 +32,13 @@ export function updateBadge() {
   const starred = listStarred();
   _btn.textContent = '⭐';
   _btn.title = starred.length
-    ? `Bookmarks: ${starred.length} закладок. Клик — открыть список.`
-    : 'Bookmarks (B). Выдели ноду и нажми S чтобы отметить.';
+    ? t('tip.bookmarks_count', { n: starred.length })
+    : t('tip.bookmarks_empty');
   if (starred.length) _btn.dataset.badge = String(starred.length);
   else delete _btn.dataset.badge;
 }
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBadge);
 
 function ensurePanel() {
   let el = document.getElementById('bookmarks-panel');

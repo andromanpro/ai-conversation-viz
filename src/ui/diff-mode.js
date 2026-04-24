@@ -18,6 +18,7 @@ import { parseJSONL } from '../core/parser.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { CFG } from '../core/config.js';
 import { seedJitter, computeBBox, fitToView } from '../core/layout.js';
+import { t } from '../core/i18n.js';
 
 let _diffGetViewport;
 let _diffBtn;
@@ -238,15 +239,17 @@ function updateBtn() {
   _diffBtn.textContent = '🔀';
   if (state.diffMode && state.diffStats) {
     const s = state.diffStats;
-    _diffBtn.title = `Diff активен — A:${s.onlyA} / B:${s.onlyB} / общих:${s.both}. Клик — выключить.`;
-    _diffBtn.dataset.badge = String(s.onlyB); // бейдж с кол-вом уникальных в B
+    _diffBtn.title = t('tip.diff_on', { a: s.onlyA, b: s.onlyB, both: s.both });
+    _diffBtn.dataset.badge = String(s.onlyB);
     _diffBtn.classList.add('active-diff');
   } else {
-    _diffBtn.title = 'Сравнить с другой сессией (Diff)';
+    _diffBtn.title = t('tip.diff_off');
     delete _diffBtn.dataset.badge;
     _diffBtn.classList.remove('active-diff');
   }
 }
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBtn);
 
 // FNV-1a hash. Пусть две ноды считаются одинаковыми если совпадает
 // role + первые 300 символов текста (после trim и схлопывания whitespace).

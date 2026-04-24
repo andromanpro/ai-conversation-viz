@@ -16,6 +16,7 @@ import { state } from '../view/state.js';
 import { parseJSONL } from '../core/parser.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { safeFetch } from '../core/url-safety.js';
+import { t } from '../core/i18n.js';
 
 let _loadText = null;
 let _panel = null;
@@ -211,10 +212,12 @@ function updateBadge() {
   if (!_toggleBtn) return;
   const n = state.sessions.length;
   _toggleBtn.textContent = '📚';
-  _toggleBtn.title = n ? `Sessions: ${n} загружено` : 'Sessions — дропни несколько JSONL';
+  _toggleBtn.title = n ? t('tip.sessions_loaded', { n }) : t('tip.sessions_empty');
   if (n > 0) _toggleBtn.dataset.badge = String(n);
   else delete _toggleBtn.dataset.badge;
 }
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBadge);
 
 function formatBytes(b) {
   if (b < 1024) return b + ' B';

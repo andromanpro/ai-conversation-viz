@@ -101,39 +101,40 @@
 <div id="three-container"></div>
 
 <div class="hud" id="top-left">
-  <div class="title">AI Conversation Viz · 3D</div>
-  <div class="subtitle">Three.js · glowing tubes</div>
+  <div class="title" data-i18n="header.title">AI Conversation Viz · 3D</div>
+  <div class="subtitle" data-i18n="header.subtitle_3d">Three.js · glowing orbs</div>
   <div class="controls">
-    <button class="btn primary" id="btn-sample">Load sample</button>
-    <button class="btn" id="btn-file">Open JSONL…</button>
-    <button class="btn" id="btn-freeze" title="Freeze/unfreeze physics (F)">❄ Freeze</button>
-    <button class="btn" id="btn-orphans" title="Toggle orphan connectivity (O)">🔗 Connect orphans</button>
-    <button class="btn" id="btn-topics" title="TF-IDF topic clusters">🧬 Topics</button>
+    <button class="btn primary" id="btn-sample" data-i18n="btn.sample">Load sample</button>
+    <button class="btn" id="btn-file" data-i18n="btn.file">Open JSONL…</button>
+    <button class="btn" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
+    <button class="btn" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
+    <button class="btn" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
+    <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="stats" id="stats">—</div>
   <div class="role-filter" style="margin-top:8px;display:flex;gap:6px;">
-    <button class="btn-role" data-role="user" title="Toggle user"><span class="dot u"></span>user</button>
-    <button class="btn-role" data-role="assistant" title="Toggle assistant"><span class="dot a"></span>assistant</button>
-    <button class="btn-role" data-role="tool_use" title="Toggle tool_use"><span class="dot t"></span>tool_use</button>
+    <button class="btn-role" data-role="user" data-i18n-title="tip.role_user"><span class="dot u"></span>user</button>
+    <button class="btn-role" data-role="assistant" data-i18n-title="tip.role_assistant"><span class="dot a"></span>assistant</button>
+    <button class="btn-role" data-role="tool_use" data-i18n-title="tip.role_tool_use"><span class="dot t"></span>tool_use</button>
   </div>
 </div>
 
 <div class="hud" id="top-right">
-  <a href="./index.html" class="btn btn-back-2d" title="Вернуться к 2D-визуализации">← 2D режим</a>
+  <a href="./index.html" class="btn btn-back-2d" data-i18n-title="tip.back_2d" data-i18n="btn.back_2d">← 2D mode</a>
   <div id="stats-panel" style="margin-top:10px;font-size:10px;color:var(--muted);line-height:1.75;min-width:240px;max-width:320px;text-align:right;"></div>
 </div>
 
 <div id="search-bar" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:30;background:var(--panel);border:1px solid var(--border);padding:10px 14px;border-radius:4px;">
-  <input type="text" id="search-input" placeholder="Поиск по сообщениям…" style="background:transparent;border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;padding:4px 8px;min-width:320px;outline:none;">
+  <input type="text" id="search-input" data-i18n-placeholder="placeholder.search" style="background:transparent;border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;padding:4px 8px;min-width:320px;outline:none;">
   <span id="search-count" style="color:var(--muted);font-size:11px;margin-left:10px;">—</span>
-  <button id="search-close" aria-label="Close" style="background:transparent;border:0;color:var(--muted);font-size:18px;cursor:pointer;margin-left:6px;">×</button>
+  <button id="search-close" data-i18n-aria="btn.cancel" style="background:transparent;border:0;color:var(--muted);font-size:18px;cursor:pointer;margin-left:6px;">×</button>
 </div>
 
 <div class="hud" id="bottom-left">
-  <div id="info">Loading…</div>
-  <div>
-    <kbd>drag</kbd> orbit &nbsp; <kbd>wheel</kbd> zoom &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>click</kbd> node &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step
+  <div id="info">…</div>
+  <div data-i18n-html="hint.kbd_3d">
+    <kbd>drag</kbd> orbit
   </div>
 </div>
 
@@ -147,8 +148,8 @@
 
 <!-- Timeline -->
 <div id="timeline-bar">
-  <button id="btn-play" aria-label="Play">▶</button>
-  <label>timeline</label>
+  <button id="btn-play" data-i18n-aria="timeline.play">▶</button>
+  <label data-i18n="stats.timeline">timeline</label>
   <input type="range" id="timeline" min="0" max="100" value="100">
   <div id="speed-control"></div>
   <div id="timeline-label">—</div>

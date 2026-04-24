@@ -1,5 +1,6 @@
 import { state } from '../view/state.js';
 import { applyTopicsToNodes, hueToRgbaString } from '../view/topics.js';
+import { t } from '../core/i18n.js';
 
 let _topicBtn;
 let _legendEl;
@@ -137,8 +138,8 @@ function hashHueLocal(s) {
 function updateBtn() {
   if (!_topicBtn) return;
   _topicBtn.textContent = '🧬';
-  _topicBtn.title = state.topicsMode
-    ? 'Topics on — кластеризация по темам активна'
-    : 'Topics — кластеризация нод по TF-IDF темам';
+  _topicBtn.title = state.topicsMode ? t('tip.topics_on') : t('tip.topics_off');
   _topicBtn.classList.toggle('active-topics', !!state.topicsMode);
 }
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', () => { updateBtn(); });

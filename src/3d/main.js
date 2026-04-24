@@ -21,6 +21,8 @@ import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
 import { safeFetch } from '../core/url-safety.js';
+import { initI18n } from '../core/i18n.js';
+import { initLangToggle } from '../ui/lang-toggle.js';
 
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
 import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
@@ -639,6 +641,8 @@ window.addEventListener('keydown', (ev) => {
 
 // ---- Init UI modules ----
 window.__viz = { state, CFG };
+initI18n();
+initLangToggle();
 initTimeline();
 initStory();
 initSpeedControl();

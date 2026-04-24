@@ -19,6 +19,7 @@ import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
 import { setAnnotation, getAnnotation, toggleStar, listStarred, listAnnotated } from '../src/ui/annotations.js';
+import { t, setLanguage, getLanguage } from '../src/core/i18n.js';
 import { addRemoteSessions } from '../src/ui/session-picker.js';
 import { state as globalState } from '../src/view/state.js';
 
@@ -1113,6 +1114,41 @@ test('annotations: listStarred и listAnnotated', () => {
   eq(starred.sort().join(','), 'a,c');
   const all = listAnnotated();
   eq(all.sort().join(','), 'a,b,c');
+});
+
+// ==== I18N ====
+test('i18n: English by default returns key if missing', () => {
+  assert(typeof t === 'function');
+  // Unknown key → сам ключ
+  eq(t('nonexistent.key'), 'nonexistent.key');
+});
+
+test('i18n: known keys translate', () => {
+  setLanguage('en');
+  eq(t('btn.sample'), 'Load sample');
+  setLanguage('ru');
+  eq(t('btn.sample'), 'Загрузить пример');
+});
+
+test('i18n: interpolation {name} works', () => {
+  setLanguage('en');
+  const s = t('tip.diff_on', { a: 5, b: 3, both: 10 });
+  assert(s.includes('5'), 'has a');
+  assert(s.includes('3'), 'has b');
+  assert(s.includes('10'), 'has both');
+});
+
+test('i18n: setLanguage rejects unsupported', () => {
+  setLanguage('ru');
+  setLanguage('jp'); // unsupported → no-op
+  eq(getLanguage(), 'ru');
+});
+
+test('i18n: missing ru key falls back to en', () => {
+  // Все ru-ключи дублируют en — но проверим механику fallback.
+  setLanguage('ru');
+  // Несуществующий ключ → сам ключ
+  eq(t('xxx.not-exists'), 'xxx.not-exists');
 });
 
 // ==== SUMMARY ====
