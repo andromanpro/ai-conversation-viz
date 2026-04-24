@@ -39,6 +39,7 @@ const MODULES = [
   'src/ui/freeze-toggle.js',
   'src/ui/speed-control.js',
   'src/ui/orphans-toggle.js',
+  'src/ui/snapshot.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',
   'src/ui/share.js',

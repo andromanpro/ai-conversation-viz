@@ -23,6 +23,7 @@ import { initRecorder } from './ui/recorder.js';
 import { initFreezeToggle } from './ui/freeze-toggle.js';
 import { initSpeedControl } from './ui/speed-control.js';
 import { initOrphansToggle } from './ui/orphans-toggle.js';
+import { initSnapshot } from './ui/snapshot.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -71,6 +72,7 @@ initRecorder();
 initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
+initSnapshot();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

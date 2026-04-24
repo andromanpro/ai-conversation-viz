@@ -1,11 +1,24 @@
+// 3D-рендерер, переиспользующий 2D state/core/ui модули.
+// Three.js заменяет только визуальный слой — физика, timeline, story-mode,
+// speed, phone и пр. работают ровно как в 2D.
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+import { CFG } from '../core/config.js';
+import { state } from '../view/state.js';
 import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
-import { prewarm } from '../core/layout.js';
+import { prewarm, stepPhysics, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { computeDepths } from '../core/tree.js';
+import { toolIcon } from '../view/tool-icons.js';
+import { birthFactor, easeOutCubic } from '../view/renderer.js';
+
+import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
+import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
+import { initSpeedControl } from '../ui/speed-control.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
@@ -13,20 +26,20 @@ const ROLE_COLORS = {
   tool_use: 0xeca040,
 };
 
+// ---- Scene ----
 const container = document.getElementById('three-container');
 const infoEl = document.getElementById('info');
+const statsEl = document.getElementById('stats');
 const fileInput = document.getElementById('file-input');
 const btnFile = document.getElementById('btn-file');
 const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0e1a);
-// Лёгкий туман для глубины, но без «стены» близко — начинается далеко,
-// полностью растворяется только на огромных расстояниях.
 scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 5000);
-camera.position.set(0, -200, 900);
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
+camera.position.set(0, -300, 1200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -38,26 +51,27 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 
-scene.add(new THREE.AmbientLight(0x3a4a7a, 0.5));
-const keyLight = new THREE.PointLight(0x7baaf0, 1.6, 3000);
-keyLight.position.set(400, 400, 800);
+scene.add(new THREE.AmbientLight(0x3a4a7a, 0.6));
+const keyLight = new THREE.PointLight(0x7baaf0, 1.8, 4000);
+keyLight.position.set(600, 600, 1000);
 scene.add(keyLight);
-const rimLight = new THREE.PointLight(0x50d4b5, 0.8, 2000);
-rimLight.position.set(-400, -300, 400);
+const rimLight = new THREE.PointLight(0x50d4b5, 1.0, 3000);
+rimLight.position.set(-600, -400, 500);
 scene.add(rimLight);
 
-// Starfield через Points
-const starCount = 2000;
+// Starfield
+const STAR_COUNT = 2000;
 const starGeo = new THREE.BufferGeometry();
-const starPos = new Float32Array(starCount * 3);
-for (let i = 0; i < starCount; i++) {
-  starPos[3*i]   = (Math.random() - 0.5) * 4000;
-  starPos[3*i+1] = (Math.random() - 0.5) * 4000;
-  starPos[3*i+2] = (Math.random() - 0.5) * 4000;
+const starPos = new Float32Array(STAR_COUNT * 3);
+for (let i = 0; i < STAR_COUNT; i++) {
+  starPos[3*i]   = (Math.random() - 0.5) * 5000;
+  starPos[3*i+1] = (Math.random() - 0.5) * 5000;
+  starPos[3*i+2] = (Math.random() - 0.5) * 5000;
 }
 starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-const starMat = new THREE.PointsMaterial({ color: 0xc8dcff, size: 1.2, sizeAttenuation: true, transparent: true, opacity: 0.55 });
-scene.add(new THREE.Points(starGeo, starMat));
+scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+  color: 0xc8dcff, size: 1.2, sizeAttenuation: true, transparent: true, opacity: 0.5, fog: false,
+})));
 
 const nodesGroup = new THREE.Group();
 const edgesGroup = new THREE.Group();
@@ -66,15 +80,16 @@ scene.add(edgesGroup);
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-let hovered = null;
-let selected = null;
 
-let graph = null;
+// ---- Geometry pools (reuse) ----
+const sphereGeoLarge = new THREE.SphereGeometry(1, 20, 20);
 
+function colorFor(role) { return ROLE_COLORS[role] || 0x888888; }
+
+// ---- Build scene from state ----
 function clearGroups() {
   while (nodesGroup.children.length) {
     const m = nodesGroup.children.pop();
-    if (m.geometry) m.geometry.dispose();
     if (m.material) m.material.dispose();
   }
   while (edgesGroup.children.length) {
@@ -84,85 +99,126 @@ function clearGroups() {
   }
 }
 
-function buildScene(text) {
+function buildFromState() {
   clearGroups();
-  const norm = normalizeToClaudeJsonl(text);
-  const parsed = parseJSONL(norm.text);
-  if (!parsed.nodes.length) { setInfo('No messages'); return; }
+  if (!state.nodes.length) return;
 
-  const vp = { width: 1200, height: 900, cx: 0, cy: 0, safeW: 1200, safeH: 900 };
-  const g = buildGraph(parsed, vp);
-  prewarm(g.nodes, g.edges, vp);
-
-  const depths = computeDepths(g.nodes, g.byId);
-  const ringZ = 120;
-  for (const n of g.nodes) {
+  // Присваиваем z по глубине parent-tree
+  const depths = computeDepths(state.nodes, state.byId);
+  const ringZ = 140;
+  for (const n of state.nodes) {
     n.z = (depths.get(n.id) || 0) * ringZ;
   }
 
-  // Nodes
-  for (const n of g.nodes) {
-    const color = ROLE_COLORS[n.role] || 0x888888;
-    const geo = new THREE.SphereGeometry(n.r * 1.25, 20, 20);
+  // Nodes — sphere per node
+  for (const n of state.nodes) {
+    const color = colorFor(n.role);
     const mat = new THREE.MeshStandardMaterial({
-      color,
-      emissive: color,
+      color, emissive: color,
       emissiveIntensity: 0.55,
-      metalness: 0.25,
-      roughness: 0.4,
+      metalness: 0.25, roughness: 0.4,
+      transparent: true, opacity: 1,
     });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(sphereGeoLarge, mat);
     mesh.position.set(n.x, -n.y, n.z || 0);
+    const baseR = n.r * 1.25;
+    mesh.scale.set(baseR, baseR, baseR);
     mesh.userData.node = n;
-    mesh.userData.baseScale = 1;
-    mesh.userData.phase = n.phase || Math.random() * Math.PI * 2;
     nodesGroup.add(mesh);
     n._mesh = mesh;
   }
 
-  // Edges — glowing tubes
-  for (const e of g.edges) {
+  // Edges — tubes
+  for (const e of state.edges) {
+    if (!e.a || !e.b) continue;
     const a = e.a, b = e.b;
     const az = a.z || 0, bz = b.z || 0;
     const mid = new THREE.Vector3(
-      (a.x + b.x) / 2 + (Math.random() - 0.5) * 40,
-      -((a.y + b.y) / 2) + (Math.random() - 0.5) * 40,
-      (az + bz) / 2 + 50
+      (a.x + b.x) / 2 + (a._seedDx || 0) * 40,
+      -((a.y + b.y) / 2) + (a._seedDy || 0) * 40,
+      (az + bz) / 2 + 40
     );
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(a.x, -a.y, az),
       mid,
       new THREE.Vector3(b.x, -b.y, bz),
     ]);
-    const tubeGeo = new THREE.TubeGeometry(curve, 40, 0.7, 6, false);
-    const color = e.b.role === 'tool_use' ? 0xeca040 : 0x00d4ff;
+    const tubeGeo = new THREE.TubeGeometry(curve, 36, e.adopted ? 0.4 : 0.7, 6, false);
+    const color = e.adopted ? 0xc8b478 : (e.b.role === 'tool_use' ? 0xeca040 : 0x00d4ff);
     const tubeMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.55,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-      fog: false, // tube'ы не затуманиваются — видно связи
+      color, transparent: true,
+      opacity: e.adopted ? 0.25 : 0.55,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
     });
     const tube = new THREE.Mesh(tubeGeo, tubeMat);
+    tube.userData.edge = e;
     edgesGroup.add(tube);
+    e._mesh = tube;
   }
 
-  graph = g;
-  setInfo(`${g.nodes.length} nodes · ${g.edges.length} edges · ${norm.format}`);
-  // Центрируем камеру по bbox
+  // Fit camera
   let maxD = 0;
-  for (const n of g.nodes) {
+  for (const n of state.nodes) {
     const d = Math.hypot(n.x, n.y, n.z || 0);
     if (d > maxD) maxD = d;
   }
-  camera.position.set(0, -maxD * 0.4, maxD * 1.8 + 300);
+  camera.position.set(0, -maxD * 0.3, maxD * 1.6 + 400);
   controls.target.set(0, 0, 0);
   controls.update();
+  updateStats();
 }
 
-function setInfo(text) {
-  if (infoEl) infoEl.textContent = text;
+function updateStats() {
+  if (!statsEl || !state.stats) return;
+  const s = state.stats;
+  statsEl.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; ${s.parsed} lines`;
 }
 
-// Click selection
+// ---- Loader ----
+function loadText(text) {
+  const norm = normalizeToClaudeJsonl(text);
+  const parsed = parseJSONL(norm.text);
+  if (!parsed.nodes.length) return;
+  const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 };
+  const g = buildGraph(parsed, vp);
+  state.sim = createSim();
+  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations);
+  state.nodes = g.nodes;
+  state.edges = g.edges;
+  state.byId = g.byId;
+  state.stats = parsed.stats;
+  state.timelineMax = 1;
+  state.selected = null;
+  buildFromState();
+  resetStory();
+  // Сбросим slider и phone
+  const slider = document.getElementById('timeline');
+  if (slider) slider.value = 100;
+  if (infoEl) infoEl.textContent = `${state.nodes.length} nodes · ${state.edges.length} edges · ${norm.format}`;
+}
+
+// ---- UI ----
+btnSample.addEventListener('click', () => loadText(SAMPLE_JSONL));
+btnFile.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => loadText(String(reader.result));
+  reader.readAsText(f);
+  fileInput.value = '';
+});
+window.addEventListener('dragover', ev => ev.preventDefault());
+window.addEventListener('drop', ev => {
+  ev.preventDefault();
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => loadText(String(reader.result));
+  reader.readAsText(f);
+});
+
+// Click raycaster
 renderer.domElement.addEventListener('click', (ev) => {
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
@@ -171,38 +227,15 @@ renderer.domElement.addEventListener('click', (ev) => {
   const hits = raycaster.intersectObjects(nodesGroup.children, false);
   if (hits.length) {
     const n = hits[0].object.userData.node;
-    selected = n;
+    state.selected = n;
     const role = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
-    const preview = (n.text || '').slice(0, 160);
-    setInfo(`[${role}] ${preview}${n.text.length > 160 ? '…' : ''}`);
+    const preview = (n.text || '').slice(0, 200);
+    if (infoEl) infoEl.textContent = `[${role}] ${preview}${n.text && n.text.length > 200 ? '…' : ''}`;
   } else {
-    selected = null;
-    if (graph) setInfo(`${graph.nodes.length} nodes · ${graph.edges.length} edges`);
+    state.selected = null;
+    if (state.stats && infoEl) infoEl.textContent = `${state.nodes.length} nodes · ${state.edges.length} edges`;
   }
 });
-
-// Animation
-function tick() {
-  requestAnimationFrame(tick);
-  controls.update();
-  const t = performance.now() / 1000;
-  for (const mesh of nodesGroup.children) {
-    const phase = mesh.userData.phase || 0;
-    const s = 1 + 0.06 * Math.sin(t * 2 + phase);
-    mesh.scale.set(s, s, s);
-    if (mesh.material && mesh.material.emissiveIntensity != null) {
-      const node = mesh.userData.node;
-      const boost = node ? (0.3 + 0.7 * (node.recency || 0)) : 1;
-      mesh.material.emissiveIntensity = 0.35 + 0.25 * boost * (0.5 + 0.5 * Math.sin(t * 1.6 + phase));
-    }
-  }
-  if (selected && selected._mesh) {
-    // выделенной ноды — сильнее свечение
-    selected._mesh.material.emissiveIntensity = 1.2;
-  }
-  renderer.render(scene, camera);
-}
-tick();
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -210,36 +243,112 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Loaders
-btnSample.addEventListener('click', () => buildScene(SAMPLE_JSONL));
-btnFile.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (ev) => {
-  const f = ev.target.files && ev.target.files[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => buildScene(String(reader.result));
-  reader.readAsText(f);
-  fileInput.value = '';
+// Keyboard — минимальная поддержка (Space play, ←/→ step)
+window.addEventListener('keydown', (ev) => {
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  if (ev.key === ' ') {
+    ev.preventDefault();
+    const btn = document.getElementById('btn-play');
+    if (btn) btn.click();
+  }
 });
 
-// drag-drop
-window.addEventListener('dragover', ev => ev.preventDefault());
-window.addEventListener('drop', ev => {
-  ev.preventDefault();
-  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => buildScene(String(reader.result));
-  reader.readAsText(f);
-});
+// ---- Init UI modules ----
+window.__viz = { state, CFG };
+initTimeline();
+initStory();
+initSpeedControl();
 
-// URL param
+// ---- Animation loop ----
+function timelineCutoff() {
+  if (!state.nodes.length) return Infinity;
+  let tsMin = Infinity, tsMax = -Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+  }
+  return tsMin + (tsMax - tsMin) * state.timelineMax;
+}
+
+function updateBirths3D(nowMs) {
+  const cutoff = timelineCutoff();
+  for (const n of state.nodes) {
+    const alive = n.ts <= cutoff;
+    if (alive && n.bornAt == null) {
+      n.bornAt = nowMs;
+      const parent = n.parentId ? state.byId.get(n.parentId) : null;
+      if (parent && parent.bornAt != null) {
+        n.x = parent.x + (Math.random() - 0.5) * 30;
+        n.y = parent.y + (Math.random() - 0.5) * 30;
+      }
+      if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
+    } else if (!alive && n.bornAt != null) {
+      n.bornAt = null;
+    }
+  }
+}
+
+let prevMs = performance.now();
+function tick() {
+  requestAnimationFrame(tick);
+  const nowMs = performance.now();
+  const dt = Math.min(0.1, (nowMs - prevMs) / 1000);
+  prevMs = nowMs;
+  controls.update();
+
+  tickPlay();
+  updateBirths3D(nowMs);
+
+  // Physics
+  if (state.sim && !state.sim.frozen && state.nodes.length) {
+    const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0, safeW: 1600, safeH: 1000 };
+    stepPhysics(state.nodes, state.edges, vp, state.sim);
+  }
+
+  const t = nowMs / 1000;
+  // Update node meshes
+  for (const n of state.nodes) {
+    const mesh = n._mesh;
+    if (!mesh) continue;
+    // Visibility через birth + cutoff
+    const bf = birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
+    const visible = n.bornAt != null && (!state.hiddenRoles || !state.hiddenRoles.has(n.role));
+    mesh.visible = visible;
+    if (!visible) continue;
+    mesh.position.set(n.x, -n.y, n.z || 0);
+    const ag = easeOutCubic(bf);
+    const baseR = n.r * 1.25;
+    const hubPulse = n.isHub ? (1 + 0.3 * Math.sin(t * 1.8 + n.phase)) : 1;
+    const scale = baseR * (0.5 + 0.5 * ag) * hubPulse;
+    mesh.scale.set(scale, scale, scale);
+    if (mesh.material) {
+      mesh.material.opacity = 0.25 + 0.75 * ag;
+      const isSelected = state.selected === n;
+      mesh.material.emissiveIntensity = isSelected ? 1.4 : (0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t * 1.6 + n.phase)));
+    }
+  }
+  // Update edge visibility (пересборка геометрии слишком дорого — только вкл/выкл)
+  for (const e of state.edges) {
+    if (!e._mesh) continue;
+    const vis = e.a.bornAt != null && e.b.bornAt != null
+      && (!state.hiddenRoles || (!state.hiddenRoles.has(e.a.role) && !state.hiddenRoles.has(e.b.role)))
+      && (!e.adopted || state.connectOrphans);
+    e._mesh.visible = vis;
+  }
+
+  tickStory(nowMs, state);
+
+  renderer.render(scene, camera);
+}
+tick();
+
+// ---- Boot ----
 const qJsonl = new URLSearchParams(location.search).get('jsonl');
 if (qJsonl) {
   fetch(qJsonl, { cache: 'no-store' })
     .then(r => r.ok ? r.text() : Promise.reject())
-    .then(buildScene)
-    .catch(() => buildScene(SAMPLE_JSONL));
+    .then(loadText)
+    .catch(() => loadText(SAMPLE_JSONL));
 } else {
-  buildScene(SAMPLE_JSONL);
+  loadText(SAMPLE_JSONL);
 }

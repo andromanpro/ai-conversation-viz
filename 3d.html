@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Conversation Viz · 3D</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --user: #7BAAF0;
+    --assistant: #50D4B5;
+    --tool: #ECA040;
+    --edge: rgba(0, 212, 255, 0.35);
+    --accent: #ECA040;
+    --text: #cfe6ff;
+    --muted: #6a7c95;
+    --panel: rgba(10, 14, 26, 0.85);
+    --border: rgba(123, 170, 240, 0.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+  #three-container { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .hud { position: fixed; pointer-events: none; z-index: 10; }
+  .hud > * { pointer-events: auto; }
+  #top-left { top: 16px; left: 16px; }
+  #top-right { top: 16px; right: 16px; text-align: right; font-size: 11px; color: var(--muted); }
+  #top-right a { color: var(--assistant); text-decoration: none; }
+  #top-right a:hover { text-decoration: underline; }
+  #bottom-left { bottom: 72px; left: 16px; font-size: 11px; color: var(--muted); line-height: 1.6; max-width: 720px; }
+  .title { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); margin-bottom: 2px; }
+  .subtitle { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+  .controls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .btn { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; transition: all .15s; border-radius: 2px; }
+  .btn:hover { background: rgba(123, 170, 240, 0.08); border-color: var(--user); }
+  .btn.primary { border-color: var(--assistant); color: var(--assistant); }
+  .btn.primary:hover { background: rgba(80, 212, 181, 0.08); }
+  .btn.accent { border-color: var(--accent); color: var(--accent); }
+  input[type=file] { display: none; }
+  kbd { display: inline-block; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; background: rgba(255,255,255,0.02); color: var(--text); font-size: 10px; }
+  #info { max-width: min(600px, 80vw); padding: 10px 14px; background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; color: var(--text); white-space: pre-wrap; word-break: break-word; margin-bottom: 8px; }
+  .stats { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; margin-top: 6px; }
+  .stats b { color: var(--text); font-weight: normal; }
+
+  /* Timeline */
+  #timeline-bar { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 12px; background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--border); padding: 8px 14px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+  #btn-play { flex-shrink: 0; background: transparent; border: 1px solid var(--border); color: var(--text); width: 28px; height: 28px; cursor: pointer; font-family: inherit; font-size: 12px; padding: 0; display: flex; align-items: center; justify-content: center; }
+  #btn-play.playing { border-color: var(--accent); color: var(--accent); }
+  #timeline-bar label { flex-shrink: 0; letter-spacing: 0.08em; text-transform: uppercase; font-size: 10px; color: var(--muted); }
+  #timeline { flex: 1; accent-color: var(--user); height: 2px; }
+  #timeline-label { flex-shrink: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+  #timeline-label b { color: var(--user); font-weight: normal; }
+  #speed-control { display: flex; gap: 3px; margin-left: 6px; }
+  .btn-speed { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 3px 7px; font-family: inherit; font-size: 10px; cursor: pointer; border-radius: 2px; }
+  .btn-speed.active { color: var(--assistant); border-color: var(--assistant); }
+
+  /* Phone */
+  #phone { position: fixed; right: 24px; top: 130px; bottom: 90px; width: 320px; max-height: calc(100vh - 220px); min-height: 420px; z-index: 8; display: flex; flex-direction: column; background: linear-gradient(180deg, #12182a 0%, #0a0e1a 100%); border: 2px solid #23304c; border-radius: 36px; padding: 10px 10px 18px 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(123,170,240,0.08); opacity: 0.35; transition: opacity .25s ease; }
+  #phone.active { opacity: 1; }
+  #phone .phone-notch { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); width: 90px; height: 16px; background: #050810; border-radius: 10px; z-index: 2; }
+  #phone .phone-header { flex-shrink: 0; padding: 16px 12px 10px; text-align: center; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid rgba(123,170,240,0.08); }
+  #phone .phone-header b { color: var(--text); font-weight: normal; letter-spacing: 0.12em; }
+  #chat-stream { flex: 1; overflow-y: auto; padding: 12px 10px 8px; display: flex; flex-direction: column; gap: 6px; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: rgba(80, 212, 181, 0.4) transparent; }
+  #chat-stream::-webkit-scrollbar { width: 5px; }
+  #chat-stream::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgba(80, 212, 181, 0.55), rgba(123, 170, 240, 0.55)); border-radius: 6px; }
+  #phone .phone-home { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); width: 110px; height: 4px; background: rgba(123,170,240,0.3); border-radius: 2px; }
+  .chat-row { display: flex; width: 100%; opacity: 0; transform: translateY(6px); transition: opacity .25s ease, transform .25s ease; }
+  .chat-row.show { opacity: 1; transform: translateY(0); }
+  .chat-row.role-user { justify-content: flex-end; }
+  .chat-row.role-assistant, .chat-row.role-tool_use { justify-content: flex-start; }
+  .chat-msg { max-width: 82%; padding: 7px 11px; font-size: 12px; line-height: 1.45; color: var(--text); word-break: break-word; white-space: pre-wrap; }
+  .chat-msg.role-user { background: linear-gradient(140deg, #3a6fd1 0%, #284a9b 100%); border-radius: 16px 16px 4px 16px; }
+  .chat-msg.role-assistant { background: rgba(24, 34, 46, 0.95); border: 1px solid rgba(80,212,181,0.25); border-radius: 16px 16px 16px 4px; }
+  .chat-msg.role-tool_use { background: rgba(52, 36, 20, 0.9); border: 1px solid rgba(236,160,64,0.35); border-radius: 12px; font-size: 11px; max-width: 70%; }
+  .chat-role { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 3px; color: var(--muted); }
+  .chat-role.user { color: #cfe0ff; }
+  .chat-role.assistant { color: var(--assistant); }
+  .chat-role.tool_use { color: var(--tool); }
+  .chat-text.typing::after { content: '▍'; display: inline-block; animation: caret 0.7s steps(1) infinite; color: var(--accent); margin-left: 1px; }
+  @keyframes caret { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+  .chat-tool-icon { display: inline-block; width: 14px; height: 14px; line-height: 14px; text-align: center; background: var(--tool); color: #1a1204; border-radius: 3px; font-size: 10px; margin-right: 4px; vertical-align: -2px; font-weight: bold; }
+  @media (max-width: 720px) { #phone { display: none; } }
+
+  #toast { position: fixed; bottom: 82px; left: 50%; transform: translateX(-50%); background: var(--panel); backdrop-filter: blur(8px); border: 1px solid var(--assistant); padding: 8px 18px; border-radius: 20px; font-size: 12px; color: var(--text); z-index: 20; opacity: 0; transition: opacity .2s ease; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="three-container"></div>
+
+<div class="hud" id="top-left">
+  <div class="title">AI Conversation Viz · 3D</div>
+  <div class="subtitle">Three.js · glowing tubes</div>
+  <div class="controls">
+    <button class="btn primary" id="btn-sample">Load sample</button>
+    <button class="btn" id="btn-file">Open JSONL…</button>
+    <input type="file" id="file-input" accept=".jsonl,.json,.txt">
+  </div>
+  <div class="stats" id="stats">—</div>
+</div>
+
+<div class="hud" id="top-right">
+  <a href="./index.html" title="2D mode">← back to 2D</a>
+</div>
+
+<div class="hud" id="bottom-left">
+  <div id="info">Loading…</div>
+  <div>
+    <kbd>drag</kbd> orbit &nbsp; <kbd>wheel</kbd> zoom &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>click</kbd> node &nbsp; <kbd>Space</kbd> play &nbsp; <kbd>←/→</kbd> step
+  </div>
+</div>
+
+<!-- Phone -->
+<div id="phone">
+  <div class="phone-notch"></div>
+  <div class="phone-header">AI <b>Conversation</b></div>
+  <div id="chat-stream"></div>
+  <div class="phone-home"></div>
+</div>
+
+<!-- Timeline -->
+<div id="timeline-bar">
+  <button id="btn-play" aria-label="Play">▶</button>
+  <label>timeline</label>
+  <input type="range" id="timeline" min="0" max="100" value="100">
+  <div id="speed-control"></div>
+  <div id="timeline-label">—</div>
+</div>
+
+<div id="toast">—</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./src/3d/main.js"></script>
+</body>
+</html>
