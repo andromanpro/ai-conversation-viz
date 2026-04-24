@@ -29,6 +29,8 @@ import { initSettingsModal } from './ui/settings-modal.js';
 import { initTopicsToggle } from './ui/topics-toggle.js';
 import { initDiffMode } from './ui/diff-mode.js';
 import { initSessionPicker, loadSessionIndex } from './ui/session-picker.js';
+import { initAnnotations } from './ui/annotations.js';
+import { initBookmarks } from './ui/bookmarks.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -83,6 +85,8 @@ initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);
 initSessionPicker(loadText);
+initAnnotations();
+initBookmarks();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

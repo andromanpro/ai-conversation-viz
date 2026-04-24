@@ -2,13 +2,16 @@ import { state } from '../view/state.js';
 import { togglePlay } from './timeline.js';
 import { fitToView } from '../core/layout.js';
 import { syncChatToTimeline } from './story-mode.js';
-import { hideDetail } from './detail-panel.js';
+import { hideDetail, toggleStarOnCurrent } from './detail-panel.js';
 import { toggleFreeze } from './freeze-toggle.js';
 import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
 import { toggleTheme } from './theme-toggle.js';
 import { toggleSettings } from './settings-modal.js';
 import { toggleTopics, clearTopicFilter } from './topics-toggle.js';
+import { toggleBookmarks } from './bookmarks.js';
+import { toggleStar } from './annotations.js';
+import { updateBadge as updateBookmarksBadge } from './bookmarks.js';
 
 let _kbdGetViewport = () => ({
   width: window.innerWidth,
@@ -67,6 +70,20 @@ function onKey(ev) {
   } else if (ev.key === ',') {
     ev.preventDefault();
     toggleSettings();
+  } else if (ev.key === 'b' || ev.key === 'B') {
+    ev.preventDefault();
+    toggleBookmarks();
+  } else if (ev.key === 's' || ev.key === 'S') {
+    // Star на текущую selected-ноду. Если detail-panel открыт — он сам
+    // обновит UI. Если нет — переключим через state.selected.
+    if (toggleStarOnCurrent()) {
+      updateBookmarksBadge();
+      ev.preventDefault();
+    } else if (state.selected) {
+      toggleStar(state.selected.id);
+      updateBookmarksBadge();
+      ev.preventDefault();
+    }
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }

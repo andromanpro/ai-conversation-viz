@@ -10,6 +10,8 @@ import { hideTooltip } from './tooltip.js';
 import { resetTimeline } from './timeline.js';
 import { addSessionFiles } from './session-picker.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
+import { loadAnnotationsForSession } from './annotations.js';
+import { updateBadge as updateBookmarksBadge } from './bookmarks.js';
 
 let _getViewport;
 let _onReady = () => {};
@@ -138,6 +140,9 @@ export function loadText(text) {
     hideDetail();
     hideTooltip();
     updateStatsHUD();
+    // Восстановим сохранённые аннотации (звёзды и заметки) для этой сессии
+    loadAnnotationsForSession();
+    updateBookmarksBadge();
     _onReady();
     // Запомним текст для возможного перехода в 3D. Sample не сохраняем —
     // пусть 3D при первом открытии тоже покажет sample.

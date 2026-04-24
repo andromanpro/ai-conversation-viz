@@ -18,6 +18,7 @@ import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.
 import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
+import { setAnnotation, getAnnotation, toggleStar, listStarred, listAnnotated } from '../src/ui/annotations.js';
 import { addRemoteSessions } from '../src/ui/session-picker.js';
 import { state as globalState } from '../src/view/state.js';
 
@@ -1068,6 +1069,50 @@ test('url-safety: isLikelyIntranet ловит RFC1918 + loopback', () => {
   assert(isLikelyIntranet('http://mynas.local/'));
   assert(!isLikelyIntranet('https://example.com/'));
   assert(!isLikelyIntranet('https://github.com/foo'));
+});
+
+// ==== ANNOTATIONS ====
+// Используем глобальный state, но сбрасываем annotations перед каждым тестом,
+// чтобы они не просачивались. localStorage в Node недоступен — save/load
+// тихо игнорируются (console.warn), но in-memory поведение тестируется.
+test('annotations: setAnnotation сохраняет text и starred', () => {
+  globalState.annotations = new Map();
+  globalState.nodes = [{ id: 'n1', ts: 0 }, { id: 'n2', ts: 1 }];
+  setAnnotation('n1', { text: 'interesting' });
+  const a = getAnnotation('n1');
+  assert(a && a.text === 'interesting');
+  eq(a.starred, false);
+});
+
+test('annotations: toggleStar переключает bool', () => {
+  globalState.annotations = new Map();
+  globalState.nodes = [{ id: 'n1', ts: 0 }];
+  eq(toggleStar('n1'), true);
+  eq(getAnnotation('n1').starred, true);
+  eq(toggleStar('n1'), false);
+  // После toggle в false и без text — annotation удалена
+  eq(getAnnotation('n1'), null);
+});
+
+test('annotations: пустой text + starred=false → удаление', () => {
+  globalState.annotations = new Map();
+  globalState.nodes = [{ id: 'n1', ts: 0 }];
+  setAnnotation('n1', { text: 'note' });
+  assert(getAnnotation('n1'));
+  setAnnotation('n1', { text: '', starred: false });
+  eq(getAnnotation('n1'), null);
+});
+
+test('annotations: listStarred и listAnnotated', () => {
+  globalState.annotations = new Map();
+  globalState.nodes = [{ id: 'a', ts: 0 }, { id: 'b', ts: 1 }, { id: 'c', ts: 2 }];
+  setAnnotation('a', { starred: true });
+  setAnnotation('b', { text: 'just a note' });
+  setAnnotation('c', { starred: true, text: 'both' });
+  const starred = listStarred();
+  eq(starred.sort().join(','), 'a,c');
+  const all = listAnnotated();
+  eq(all.sort().join(','), 'a,b,c');
 });
 
 // ==== SUMMARY ====

@@ -72,6 +72,8 @@ const MODULES = [
   'src/ui/topics-toggle.js',
   'src/ui/diff-mode.js',
   'src/ui/session-picker.js',
+  'src/ui/annotations.js',
+  'src/ui/bookmarks.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',
   'src/ui/share.js',

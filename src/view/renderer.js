@@ -121,6 +121,21 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.stroke();
 }
 
+// Вспомогательная: 5-лучевая звезда для annotation star-marker
+function drawStar(ctx, cx, cy, outerR, innerR, points) {
+  ctx.beginPath();
+  const step = Math.PI / points;
+  let angle = -Math.PI / 2;
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    angle += step;
+  }
+  ctx.closePath();
+}
+
 export function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -358,6 +373,35 @@ export function draw(ctx, state, tSec, viewport, extras) {
       ctx.arc(s.x, s.y, r + 6, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
+    }
+
+    // User annotations: золотая ★ для starred, маленький ✍ для заметки.
+    // Рисуем поверх всего, но с учётом ag (fade-in при рождении).
+    const ann = state.annotations && state.annotations.get(n.id);
+    if (ann && perfMode !== 'minimal') {
+      if (ann.starred) {
+        const starSize = Math.max(8, r * 0.9);
+        const sx = s.x + r + 1, sy = s.y - r - 1;
+        ctx.save();
+        ctx.fillStyle = `rgba(255, 215, 120, ${0.95 * ag})`;
+        ctx.strokeStyle = `rgba(140, 90, 10, ${0.9 * ag})`;
+        ctx.lineWidth = 0.8;
+        drawStar(ctx, sx, sy, starSize * 0.55, starSize * 0.25, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (ann.text) {
+        // Маленький «✍» индикатор на противоположной стороне от звезды
+        const nx = s.x - r - 2, ny = s.y - r - 2;
+        ctx.save();
+        ctx.font = `${Math.max(9, Math.round(r * 0.75))}px ui-monospace, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(123, 170, 240, ${0.9 * ag})`;
+        ctx.fillText('✍', nx, ny);
+        ctx.restore();
+      }
     }
 
     // Collapsed-marker: assistant нода с свёрнутыми tool_use детьми — бейдж "×N"

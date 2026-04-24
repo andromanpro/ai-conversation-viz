@@ -27,6 +27,7 @@ export const state = {
   sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
   sessionsOpen: false, // панель session-picker открыта
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
+  annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
 };
 
 export function resetInteractionState() {

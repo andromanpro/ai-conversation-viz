@@ -1450,6 +1450,7 @@ const state = {
   sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
   sessionsOpen: false, // панель session-picker открыта
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
+  annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
 };
 
 function resetInteractionState() {
@@ -2055,6 +2056,21 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.stroke();
 }
 
+// Вспомогательная: 5-лучевая звезда для annotation star-marker
+function drawStar(ctx, cx, cy, outerR, innerR, points) {
+  ctx.beginPath();
+  const step = Math.PI / points;
+  let angle = -Math.PI / 2;
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    angle += step;
+  }
+  ctx.closePath();
+}
+
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -2294,6 +2310,35 @@ function draw(ctx, state, tSec, viewport, extras) {
       ctx.restore();
     }
 
+    // User annotations: золотая ★ для starred, маленький ✍ для заметки.
+    // Рисуем поверх всего, но с учётом ag (fade-in при рождении).
+    const ann = state.annotations && state.annotations.get(n.id);
+    if (ann && perfMode !== 'minimal') {
+      if (ann.starred) {
+        const starSize = Math.max(8, r * 0.9);
+        const sx = s.x + r + 1, sy = s.y - r - 1;
+        ctx.save();
+        ctx.fillStyle = `rgba(255, 215, 120, ${0.95 * ag})`;
+        ctx.strokeStyle = `rgba(140, 90, 10, ${0.9 * ag})`;
+        ctx.lineWidth = 0.8;
+        drawStar(ctx, sx, sy, starSize * 0.55, starSize * 0.25, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (ann.text) {
+        // Маленький «✍» индикатор на противоположной стороне от звезды
+        const nx = s.x - r - 2, ny = s.y - r - 2;
+        ctx.save();
+        ctx.font = `${Math.max(9, Math.round(r * 0.75))}px ui-monospace, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(123, 170, 240, ${0.9 * ag})`;
+        ctx.fillText('✍', nx, ny);
+        ctx.restore();
+      }
+    }
+
     // Collapsed-marker: assistant нода с свёрнутыми tool_use детьми — бейдж "×N"
     if (n.role === 'assistant' && state.collapsed && state.collapsed.has(n.id)) {
       let count = 0;
@@ -2371,12 +2416,145 @@ function draw(ctx, state, tSec, viewport, extras) {
     return { birthFactor, easeOutCubic, draw };
   })();
 
+  // --- src/ui/annotations.js ---
+  __M["src/ui/annotations.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+// Annotations — личные заметки и закладки пользователя к нодам. Хранятся
+// в localStorage по ключу, привязанному к id первой ноды сессии (стабильно
+// для одного JSONL, не зависит от имени файла).
+//
+// Схема в localStorage:
+//   'viz:annot:<sessionKey>' →
+//     { version: 1, annotations: { [nodeId]: { text, starred, ts } } }
+//
+// API:
+//   loadAnnotationsForSession() — вызывается после успешной loadText;
+//     восстанавливает state.annotations из localStorage.
+//   setAnnotation(nodeId, { text?, starred? }) — обновляет поля (merge),
+//     пустой text и starred=false → удаление.
+//   getAnnotation(nodeId) → { text, starred } | null
+//   toggleStar(nodeId) → bool (новое состояние)
+//   listStarred() → Array<nodeId>
+//   listAnnotated() → Array<nodeId> (все с text или starred)
+
+
+const LS_PREFIX = 'viz:annot:';
+const VERSION = 1;
+
+function initAnnotations() {
+  if (!state.annotations) state.annotations = new Map();
+}
+
+/** Ключ localStorage по первой (по ts) ноде — стабилен для данного JSONL. */
+function sessionKey() {
+  if (!state.nodes || !state.nodes.length) return null;
+  let firstId = null, firstTs = Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < firstTs) { firstTs = n.ts; firstId = n.id; }
+  }
+  return firstId ? LS_PREFIX + firstId : null;
+}
+
+/** Загрузить сохранённые аннотации для текущей сессии. Идемпотентно. */
+function loadAnnotationsForSession() {
+  state.annotations = new Map();
+  const key = sessionKey();
+  if (!key) return;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== VERSION || !data.annotations) return;
+    for (const [nodeId, ann] of Object.entries(data.annotations)) {
+      if (ann && (ann.text || ann.starred)) {
+        state.annotations.set(nodeId, ann);
+      }
+    }
+  } catch (e) {
+    console.warn('[annotations] load failed:', e.message);
+  }
+}
+
+function save() {
+  const key = sessionKey();
+  if (!key) return;
+  try {
+    if (!state.annotations || !state.annotations.size) {
+      localStorage.removeItem(key);
+      return;
+    }
+    const obj = { version: VERSION, annotations: {} };
+    for (const [id, ann] of state.annotations) obj.annotations[id] = ann;
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch (e) {
+    // quota exceeded или private mode — тихо игнорируем (данные в памяти остаются)
+    console.warn('[annotations] save failed:', e.message);
+  }
+}
+
+function setAnnotation(nodeId, patch) {
+  if (!nodeId) return;
+  if (!state.annotations) state.annotations = new Map();
+  const current = state.annotations.get(nodeId) || { text: '', starred: false, ts: Date.now() };
+  const next = {
+    text: patch.text != null ? String(patch.text) : current.text,
+    starred: patch.starred != null ? !!patch.starred : current.starred,
+    ts: Date.now(),
+  };
+  // Если после patch пусто — удаляем
+  if (!next.text && !next.starred) {
+    state.annotations.delete(nodeId);
+  } else {
+    state.annotations.set(nodeId, next);
+  }
+  save();
+}
+
+function getAnnotation(nodeId) {
+  if (!state.annotations) return null;
+  return state.annotations.get(nodeId) || null;
+}
+
+/** @returns {boolean} новое значение starred */
+function toggleStar(nodeId) {
+  const cur = getAnnotation(nodeId);
+  const next = !(cur && cur.starred);
+  setAnnotation(nodeId, { starred: next });
+  return next;
+}
+
+function listStarred() {
+  if (!state.annotations) return [];
+  return [...state.annotations.entries()]
+    .filter(([, a]) => a.starred)
+    .map(([id]) => id);
+}
+
+function listAnnotated() {
+  if (!state.annotations) return [];
+  return [...state.annotations.entries()]
+    .filter(([, a]) => a.starred || a.text)
+    .map(([id]) => id);
+}
+
+/** Есть ли хоть одна аннотация — для UI-индикаторов. */
+function hasAnnotations() {
+  return state.annotations && state.annotations.size > 0;
+}
+
+    return { initAnnotations, loadAnnotationsForSession, setAnnotation, getAnnotation, toggleStar, listStarred, listAnnotated, hasAnnotations };
+  })();
+
   // --- src/ui/detail-panel.js ---
   __M["src/ui/detail-panel.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
     const { state } = __M["src/view/state.js"];
+    const { getAnnotation, setAnnotation, toggleStar } = __M["src/ui/annotations.js"];
 
 let detailEl, detailRoleEl, detailTsEl, detailBodyEl;
+let starBtn, noteTextarea, noteHint;
+let _currentNode = null;
+let _saveTimer = null;
 
 function initDetail() {
   detailEl = document.getElementById('detail');
@@ -2384,25 +2562,130 @@ function initDetail() {
   detailTsEl = document.getElementById('detail-ts');
   detailBodyEl = document.getElementById('detail-body');
   document.getElementById('detail-close').addEventListener('click', () => {
+    flushNote();
     state.selected = null;
     hideDetail();
   });
+  ensureAnnotationUI();
+}
+
+function ensureAnnotationUI() {
+  if (!detailEl) return;
+  if (starBtn && noteTextarea) return;
+
+  // Secure: создаём DOM-ноды без innerHTML — user text сюда не попадает,
+  // но шаблон всё равно пишем программно для единообразия с остальным UI.
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-annot';
+
+  // Row: [⭐ Star] [✍ hint]
+  const row = document.createElement('div');
+  row.className = 'detail-annot-row';
+
+  starBtn = document.createElement('button');
+  starBtn.className = 'detail-star';
+  starBtn.type = 'button';
+  starBtn.textContent = '☆ Star';
+  starBtn.title = 'Отметить (S)';
+  starBtn.addEventListener('click', () => {
+    if (!_currentNode) return;
+    toggleStar(_currentNode.id);
+    updateAnnotUI();
+  });
+  row.appendChild(starBtn);
+
+  noteHint = document.createElement('span');
+  noteHint.className = 'detail-note-hint';
+  noteHint.textContent = 'Note (сохраняется в localStorage):';
+  row.appendChild(noteHint);
+
+  wrap.appendChild(row);
+
+  noteTextarea = document.createElement('textarea');
+  noteTextarea.className = 'detail-note';
+  noteTextarea.rows = 3;
+  noteTextarea.placeholder = 'Ваша заметка к этой ноде…';
+  noteTextarea.addEventListener('input', () => {
+    // Debounce — сохраняем через 400мс после остановки ввода
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => {
+      if (_currentNode) {
+        setAnnotation(_currentNode.id, { text: noteTextarea.value });
+      }
+    }, 400);
+  });
+  // Гарантируем сохранение при blur (переключение фокуса, закрытие панели)
+  noteTextarea.addEventListener('blur', flushNote);
+  wrap.appendChild(noteTextarea);
+
+  detailEl.appendChild(wrap);
+
+  // CSS — inline, чтобы не трогать HTML-файлы
+  const css = document.createElement('style');
+  css.textContent = `
+    .detail-annot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .detail-annot-row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; font-size: 10px; }
+    .detail-star { background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 3px 9px; cursor: pointer; font-family: inherit; font-size: 10px;
+      letter-spacing: 0.08em; border-radius: 2px; transition: all .15s; }
+    .detail-star:hover { color: var(--text); border-color: var(--user); }
+    .detail-star.starred { color: #ffd778; border-color: #ffd778; background: rgba(255,215,120,0.08); }
+    .detail-note-hint { color: var(--muted); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .detail-note { width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      color: var(--text); font-family: inherit; font-size: 11px; padding: 6px 8px;
+      border-radius: 2px; resize: vertical; outline: none; }
+    .detail-note:focus { border-color: var(--assistant); }
+    .detail-note::placeholder { color: var(--muted); }
+  `;
+  document.head.appendChild(css);
+}
+
+function flushNote() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  if (_currentNode && noteTextarea) {
+    setAnnotation(_currentNode.id, { text: noteTextarea.value });
+  }
+}
+
+function updateAnnotUI() {
+  if (!_currentNode || !starBtn || !noteTextarea) return;
+  const ann = getAnnotation(_currentNode.id);
+  const starred = !!(ann && ann.starred);
+  starBtn.classList.toggle('starred', starred);
+  starBtn.textContent = starred ? '★ Starred' : '☆ Star';
+  noteTextarea.value = (ann && ann.text) || '';
 }
 
 function showDetail(n) {
+  // Если переключаемся между нодами — сохраним заметку предыдущей
+  if (_currentNode && _currentNode.id !== n.id) flushNote();
+  _currentNode = n;
   detailRoleEl.textContent = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
   detailRoleEl.className = 'role ' + n.role;
   detailTsEl.textContent = new Date(n.ts).toISOString().replace('T', ' ').slice(0, 19);
   const txt = n.text || '(empty)';
   detailBodyEl.textContent = txt.length > CFG.excerptChars ? txt.slice(0, CFG.excerptChars) + '…' : txt;
+  updateAnnotUI();
   detailEl.classList.add('show');
 }
 
 function hideDetail() {
+  flushNote();
+  _currentNode = null;
   if (detailEl) detailEl.classList.remove('show');
 }
 
-    return { initDetail, showDetail, hideDetail };
+/** Вызывается из keyboard.js для hotkey S */
+function toggleStarOnCurrent() {
+  if (_currentNode) {
+    toggleStar(_currentNode.id);
+    updateAnnotUI();
+    return true;
+  }
+  return false;
+}
+
+    return { initDetail, showDetail, hideDetail, toggleStarOnCurrent };
   })();
 
   // --- src/ui/tooltip.js ---
@@ -3735,19 +4018,185 @@ function updateBtn() {
     return { initTopicsToggle, toggleTopics, setTopicFilter, clearTopicFilter };
   })();
 
+  // --- src/ui/bookmarks.js ---
+  __M["src/ui/bookmarks.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { listStarred, getAnnotation } = __M["src/ui/annotations.js"];
+    const { showDetail } = __M["src/ui/detail-panel.js"];
+// Bookmarks panel — показывает все starred-ноды в текущей сессии,
+// клик фокусирует камеру и открывает detail-panel. Кнопка ⭐ в HUD
+// открывает панель.
+
+
+let _btn, _panel, _listEl;
+
+function initBookmarks() {
+  _btn = document.getElementById('btn-bookmarks');
+  if (_btn) _btn.addEventListener('click', toggle);
+  _panel = ensurePanel();
+  updateBadge();
+}
+
+function toggleBookmarks() { toggle(); }
+
+function toggle() {
+  if (!_panel) return;
+  const open = !_panel.classList.contains('open');
+  _panel.classList.toggle('open', open);
+  if (open) render();
+  if (_btn) _btn.classList.toggle('active-bookmarks', open);
+}
+
+/** Вызывается после loadAnnotations — обновляет счётчик на кнопке. */
+function updateBadge() {
+  if (!_btn) return;
+  const starred = listStarred();
+  if (starred.length) {
+    _btn.textContent = `⭐ Bookmarks (${starred.length})`;
+  } else {
+    _btn.textContent = '⭐ Bookmarks';
+  }
+}
+
+function ensurePanel() {
+  let el = document.getElementById('bookmarks-panel');
+  if (el) return el;
+  el = document.createElement('aside');
+  el.id = 'bookmarks-panel';
+  el.className = 'bookmarks-panel';
+
+  const header = document.createElement('div');
+  header.className = 'bookmarks-header';
+  const title = document.createElement('span');
+  title.textContent = '⭐ Bookmarks';
+  header.appendChild(title);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'bookmarks-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', toggle);
+  header.appendChild(closeBtn);
+  el.appendChild(header);
+
+  _listEl = document.createElement('div');
+  _listEl.className = 'bookmarks-list';
+  el.appendChild(_listEl);
+
+  const hint = document.createElement('div');
+  hint.className = 'bookmarks-hint';
+  hint.textContent = 'Выдели ноду и нажми S или ☆ Star в панели детали. Клик здесь — фокус на ноде.';
+  el.appendChild(hint);
+
+  // CSS — inline, не трогаем HTML
+  const css = document.createElement('style');
+  css.textContent = `
+    .bookmarks-panel { position: fixed; top: 80px; right: 16px; width: 300px;
+      max-height: calc(100vh - 180px); z-index: 22; display: none; flex-direction: column;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4); overflow: hidden; }
+    .bookmarks-panel.open { display: flex; }
+    .bookmarks-header { display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); }
+    .bookmarks-close { background: transparent; border: 0; color: var(--muted);
+      font-size: 18px; cursor: pointer; line-height: 1; padding: 0 4px; }
+    .bookmarks-close:hover { color: var(--accent); }
+    .bookmarks-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .bookmarks-empty { padding: 16px; color: var(--muted); font-size: 11px; font-style: italic; }
+    .bookmark-item { padding: 8px 14px; cursor: pointer; border-bottom: 1px solid rgba(123,170,240,0.06);
+      transition: background .12s; }
+    .bookmark-item:hover { background: rgba(255,215,120,0.08); }
+    .bookmark-role { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 3px; }
+    .bookmark-role.user { color: var(--user); }
+    .bookmark-role.assistant { color: var(--assistant); }
+    .bookmark-role.tool_use { color: var(--tool); }
+    .bookmark-preview { font-size: 11px; color: var(--text); line-height: 1.3;
+      max-height: 3em; overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .bookmark-note { font-size: 10px; color: var(--accent); margin-top: 3px;
+      font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bookmarks-hint { padding: 10px 14px; font-size: 10px; color: var(--muted);
+      border-top: 1px solid var(--border); line-height: 1.5; }
+    .btn.active-bookmarks { border-color: #ffd778; color: #ffd778; }
+  `;
+  document.head.appendChild(css);
+  document.body.appendChild(el);
+  return el;
+}
+
+function render() {
+  if (!_listEl) return;
+  _listEl.innerHTML = '';
+  const starred = listStarred();
+  if (!starred.length) {
+    const empty = document.createElement('div');
+    empty.className = 'bookmarks-empty';
+    empty.textContent = 'Нет закладок в этой сессии.';
+    _listEl.appendChild(empty);
+    updateBadge();
+    return;
+  }
+  // Сортировка: по времени ноды
+  const items = starred
+    .map(id => state.byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts);
+  for (const n of items) {
+    const item = document.createElement('div');
+    item.className = 'bookmark-item';
+    const role = document.createElement('div');
+    role.className = 'bookmark-role ' + n.role;
+    role.textContent = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
+    item.appendChild(role);
+    const preview = document.createElement('div');
+    preview.className = 'bookmark-preview';
+    preview.textContent = (n.text || '(empty)').slice(0, 140);
+    item.appendChild(preview);
+    const ann = getAnnotation(n.id);
+    if (ann && ann.text) {
+      const note = document.createElement('div');
+      note.className = 'bookmark-note';
+      note.textContent = '✍ ' + ann.text.slice(0, 80);
+      item.appendChild(note);
+    }
+    item.addEventListener('click', () => focusOnNode(n));
+    _listEl.appendChild(item);
+  }
+  updateBadge();
+}
+
+function focusOnNode(n) {
+  state.selected = n;
+  // Camera zoom — повторяем логику из interaction.js
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const scale = 1.5;
+  state.cameraTarget = {
+    x: n.x - (w / 2) / scale,
+    y: n.y - (h / 2) / scale,
+    scale,
+  };
+  showDetail(n);
+}
+
+    return { initBookmarks, toggleBookmarks, updateBadge };
+  })();
+
   // --- src/ui/keyboard.js ---
   __M["src/ui/keyboard.js"] = (function () {
     const { state } = __M["src/view/state.js"];
     const { togglePlay } = __M["src/ui/timeline.js"];
     const { fitToView } = __M["src/core/layout.js"];
     const { syncChatToTimeline } = __M["src/ui/story-mode.js"];
-    const { hideDetail } = __M["src/ui/detail-panel.js"];
+    const { hideDetail, toggleStarOnCurrent } = __M["src/ui/detail-panel.js"];
     const { toggleFreeze } = __M["src/ui/freeze-toggle.js"];
     const { setSpeed } = __M["src/ui/speed-control.js"];
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
     const { toggleTheme } = __M["src/ui/theme-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
     const { toggleTopics, clearTopicFilter } = __M["src/ui/topics-toggle.js"];
+    const { toggleBookmarks, updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
+    const { toggleStar } = __M["src/ui/annotations.js"];
 
 let _kbdGetViewport = () => ({
   width: window.innerWidth,
@@ -3806,6 +4255,20 @@ function onKey(ev) {
   } else if (ev.key === ',') {
     ev.preventDefault();
     toggleSettings();
+  } else if (ev.key === 'b' || ev.key === 'B') {
+    ev.preventDefault();
+    toggleBookmarks();
+  } else if (ev.key === 's' || ev.key === 'S') {
+    // Star на текущую selected-ноду. Если detail-panel открыт — он сам
+    // обновит UI. Если нет — переключим через state.selected.
+    if (toggleStarOnCurrent()) {
+      updateBookmarksBadge();
+      ev.preventDefault();
+    } else if (state.selected) {
+      toggleStar(state.selected.id);
+      updateBookmarksBadge();
+      ev.preventDefault();
+    }
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }
@@ -5226,6 +5689,8 @@ function onKey(ev) {
     const { resetTimeline } = __M["src/ui/timeline.js"];
     const { addSessionFiles } = __M["src/ui/session-picker.js"];
     const { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } = __M["src/core/session-bridge.js"];
+    const { loadAnnotationsForSession } = __M["src/ui/annotations.js"];
+    const { updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
 
 let _getViewport;
 let _onReady = () => {};
@@ -5354,6 +5819,9 @@ function loadText(text) {
     hideDetail();
     hideTooltip();
     updateStatsHUD();
+    // Восстановим сохранённые аннотации (звёзды и заметки) для этой сессии
+    loadAnnotationsForSession();
+    updateBookmarksBadge();
     _onReady();
     // Запомним текст для возможного перехода в 3D. Sample не сохраняем —
     // пусть 3D при первом открытии тоже покажет sample.
@@ -5554,6 +6022,8 @@ async function applyUrlParamsLate() {
     const { initTopicsToggle } = __M["src/ui/topics-toggle.js"];
     const { initDiffMode } = __M["src/ui/diff-mode.js"];
     const { initSessionPicker, loadSessionIndex } = __M["src/ui/session-picker.js"];
+    const { initAnnotations } = __M["src/ui/annotations.js"];
+    const { initBookmarks } = __M["src/ui/bookmarks.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -5608,6 +6078,8 @@ initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);
 initSessionPicker(loadText);
+initAnnotations();
+initBookmarks();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
