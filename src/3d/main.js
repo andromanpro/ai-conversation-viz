@@ -4,6 +4,10 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
@@ -90,23 +94,31 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 
-// Освещение: ambient → hemi → key + rim. Hemi даёт мягкую градацию сверху-снизу
-// (синий небесный / тёплый пол), что добавляет объём без резких бликов.
-scene.add(new THREE.AmbientLight(0x4a5a8a, 0.5));
-const hemiLight = new THREE.HemisphereLight(0x9ab8ff, 0x2a1a10, 0.55);
-scene.add(hemiLight);
-const keyLight = new THREE.PointLight(0x9ac0ff, 2.2, 5000);
-keyLight.position.set(600, 600, 1000);
-scene.add(keyLight);
-const rimLight = new THREE.PointLight(0x50d4b5, 1.2, 3500);
-rimLight.position.set(-600, -400, 500);
-scene.add(rimLight);
+// Post-processing — EffectComposer с RenderPass + UnrealBloomPass.
+// Bloom даёт естественное свечение вокруг ярких объектов (орбов + колец),
+// что и создаёт «живой» объём вместо плоских кружков.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.85,   // strength — насыщенность bloom
+  0.55,   // radius — размер ореола
+  0.15    // threshold — всё ярче чем 0.15 bloom'ится
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// Освещение — минимальное. Орбы сами светятся через custom shader
+// (fresnel + пульсирующее ядро), поэтому Lambert/PBR лайтинг не нужен
+// и даже мешает — он заливает всё ровным цветом, убивая объём.
+scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
 // Starfield
 const STAR_COUNT = 2000;
@@ -139,12 +151,88 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
 // ---- Geometry pools (reuse) ----
-const sphereGeoLarge = new THREE.SphereGeometry(1, 20, 20);
+const sphereGeoLarge = new THREE.SphereGeometry(1, 28, 28);
 // Более тонкий halo — большая прозрачная sphere с additive blending
 const sphereGeoHalo = new THREE.SphereGeometry(1, 16, 16);
 const hubRingGeoA = new THREE.TorusGeometry(1.5, 0.08, 8, 40);
 const hubRingGeoB = new THREE.TorusGeometry(1.5, 0.08, 8, 40);
 const orphanRingGeo = new THREE.TorusGeometry(2.0, 0.06, 6, 28);
+
+// ---- Custom orb shader ----
+// Фрагментный шейдер делает волюметричный «орб»:
+//   • Fresnel rim — край сферы светится ярче, чем центр (силуэт
+//     вокруг сферы). Это главный трюк, дающий 3D-объём без
+//     реального PBR-освещения.
+//   • Hot core — центр сферы смещён к белому, имитируя раскалённое
+//     ядро, которое просвечивает наружу.
+//   • Breath pulse — ядро слегка пульсирует по sin(time + phase),
+//     каждый орб живёт в своём ритме.
+// Вместе с UnrealBloomPass это даёт настоящее 3D-свечение.
+const ORB_VS = `
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 pos = modelViewMatrix * vec4(position, 1.0);
+    vView = -normalize(pos.xyz);
+    gl_Position = projectionMatrix * pos;
+  }
+`;
+const ORB_FS = `
+  uniform vec3 uColor;
+  uniform float uTime;
+  uniform float uPhase;
+  uniform float uAlpha;
+  uniform float uSelected;
+  varying vec3 vNormal;
+  varying vec3 vView;
+
+  void main() {
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(vView);
+    float ndv = abs(dot(N, V));
+
+    // Fresnel: 1 на силуэте, 0 в центре
+    float fresnel = pow(1.0 - ndv, 2.0);
+    // «Lambert-центр»: ярко там где surface смотрит в камеру
+    float center = pow(ndv, 1.3);
+
+    // Пульс
+    float pulse = 0.5 + 0.5 * sin(uTime * 1.8 + uPhase);
+    float breath = 0.7 + 0.3 * pulse;
+
+    // Цветовые слои
+    vec3 coreCol = mix(uColor, vec3(1.0), 0.55 + 0.3 * pulse);
+    vec3 rimCol = uColor * 2.0;
+
+    vec3 finalCol = coreCol * center * breath + rimCol * fresnel * 1.1;
+
+    // Selected — повышенная яркость + добавка золотого
+    if (uSelected > 0.5) {
+      finalCol *= 1.5 + 0.5 * pulse;
+      finalCol += vec3(1.0, 0.85, 0.4) * fresnel * 0.6;
+    }
+
+    gl_FragColor = vec4(finalCol, uAlpha);
+  }
+`;
+
+function makeOrbMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uTime: { value: 0 },
+      uPhase: { value: Math.random() * Math.PI * 2 },
+      uAlpha: { value: 1.0 },
+      uSelected: { value: 0 },
+    },
+    vertexShader: ORB_VS,
+    fragmentShader: ORB_FS,
+    transparent: true,
+    blending: THREE.NormalBlending,
+    depthWrite: true, // у ядра — честный z-buffer, чтобы ближние орбы перекрывали дальние
+  });
+}
 
 // Сегментов на curve ребра — делим ребро на N чтобы получить плавную дугу
 const EDGE_SEGMENTS = 10;
@@ -189,13 +277,9 @@ function buildFromState() {
 
   // Nodes — sphere + halo + (hub/orphan rings)
   for (const n of state.nodes) {
-    const { color, emissive } = colorForNode(n);
-    const mat = new THREE.MeshStandardMaterial({
-      color, emissive,
-      emissiveIntensity: 0.65,
-      metalness: 0.2, roughness: 0.35,
-      transparent: true, opacity: 1,
-    });
+    const { color } = colorForNode(n);
+    const mat = makeOrbMaterial(color);
+    mat.uniforms.uPhase.value = n.phase || 0;
     const mesh = new THREE.Mesh(sphereGeoLarge, mat);
     mesh.position.set(n.x, -n.y, n.z || 0);
     const baseR = n.r * 1.25;
@@ -446,20 +530,96 @@ window.addEventListener('drop', ev => {
   reader.readAsText(f);
 });
 
-// Click raycaster
-renderer.domElement.addEventListener('click', (ev) => {
+// ==== Mouse pick + drag ====
+//
+// Клик без движения → select ноды; drag с mousedown на ноде → тянем её
+// в плоскости, параллельной камере (constant depth) и применяя reheat
+// к физике (как в 2D). OrbitControls получает pointerdown только когда
+// не попали в ноду — чтобы не конфликтовало с dragging.
+
+let _draggedNode = null;
+let _dragStart = null;
+let _dragMoved = false;
+let _dragPlane = new THREE.Plane();
+const _dragPoint = new THREE.Vector3();
+
+function pickNodeMesh(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(nodesGroup.children, false);
-  if (hits.length) {
-    const n = hits[0].object.userData.node;
-    state.selected = n;
-    const role = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
-    const preview = (n.text || '').slice(0, 200);
-    if (infoEl) infoEl.textContent = `[${role}] ${preview}${n.text && n.text.length > 200 ? '…' : ''}`;
-  } else {
+  // Пересечение только с нодами (userData.node), не с halo/hub/orphan
+  const candidates = nodesGroup.children.filter(c => c.userData && c.userData.node);
+  const hits = raycaster.intersectObjects(candidates, false);
+  return hits.length ? hits[0] : null;
+}
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0) return;
+  const hit = pickNodeMesh(ev);
+  if (!hit) return;
+  _draggedNode = hit.object.userData.node;
+  _dragStart = { x: ev.clientX, y: ev.clientY };
+  _dragMoved = false;
+  // Плоскость drag — параллельна viewing plane, проходит через hit-точку
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  _dragPlane.setFromNormalAndCoplanarPoint(camDir, hit.point.clone());
+  // Пока тащим — OrbitControls не должен вращать камеру
+  controls.enabled = false;
+  try { renderer.domElement.setPointerCapture(ev.pointerId); } catch {}
+  ev.preventDefault();
+});
+
+window.addEventListener('pointermove', (ev) => {
+  if (!_draggedNode) return;
+  const dx = ev.clientX - _dragStart.x;
+  const dy = ev.clientY - _dragStart.y;
+  if (!_dragMoved && Math.hypot(dx, dy) > 3) _dragMoved = true;
+  if (!_dragMoved) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  if (raycaster.ray.intersectPlane(_dragPlane, _dragPoint)) {
+    _draggedNode.x = _dragPoint.x;
+    _draggedNode.y = -_dragPoint.y; // y в world flip'нут
+    _draggedNode.z = _dragPoint.z;
+    _draggedNode.vx = 0; _draggedNode.vy = 0;
+    if (_draggedNode._mesh) _draggedNode._mesh.position.set(_draggedNode.x, -_draggedNode.y, _draggedNode.z || 0);
+    if (state.sim) {
+      // reheat + unfreeze + alphaTarget как в 2D, чтобы сеть подстроилась
+      if (state.sim.manualFrozen) state.sim.manualFrozen = false;
+      state.sim.alpha = Math.max(state.sim.alpha, 0.3);
+      state.sim.frozen = false;
+      state.sim.alphaTarget = 0.3;
+    }
+  }
+});
+
+window.addEventListener('pointerup', (ev) => {
+  if (!_draggedNode) return;
+  const node = _draggedNode;
+  const wasMove = _dragMoved;
+  try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {}
+  _draggedNode = null;
+  _dragStart = null;
+  controls.enabled = true;
+  if (state.sim) state.sim.alphaTarget = 0;
+  // Если не было движения — это click → select + info
+  if (!wasMove) {
+    state.selected = node;
+    const role = node.role === 'tool_use' ? (node.toolName || 'tool') : node.role;
+    const preview = (node.text || '').slice(0, 200);
+    if (infoEl) infoEl.textContent = `[${role}] ${preview}${node.text && node.text.length > 200 ? '…' : ''}`;
+  }
+});
+
+// Пустой click — снятие выделения
+renderer.domElement.addEventListener('click', (ev) => {
+  if (_dragMoved) return; // уже обработано pointerup
+  const hit = pickNodeMesh(ev);
+  if (!hit) {
     state.selected = null;
     if (state.stats && infoEl) infoEl.textContent = `${state.nodes.length} nodes · ${state.edges.length} edges`;
   }
@@ -469,6 +629,8 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.setSize(window.innerWidth, window.innerHeight);
 });
 
 // Keyboard shortcuts — делегируем на HUD-кнопки (Space/F/O/T/1..5 etc.)
@@ -579,25 +741,14 @@ function tick() {
     if (hasSearch) dimMul = state.searchMatches.has(n.id) ? 1 : 0.22;
     else if (topicFilter) dimMul = n._topicWord === topicFilter ? 1 : 0.22;
     else if (hasPath) dimMul = state.pathSet.has(n.id) ? 1 : 0.3;
-    if (mesh.material) {
-      mesh.material.opacity = (0.25 + 0.75 * ag) * dimMul;
-      // Динамический цвет (topics/diff переключаются на лету)
-      if (topicsMode || diffMode) {
-        const { color, emissive } = colorForNode(n);
-        mesh.material.color.setHex(color);
-        mesh.material.emissive.setHex(emissive);
-      } else if (mesh.material.color.getHex() !== (ROLE_COLORS[n.role] || 0x888888)) {
-        // возврат к role-color когда оба режима выключены
-        const c = ROLE_COLORS[n.role] || 0x888888;
-        mesh.material.color.setHex(c);
-        mesh.material.emissive.setHex(c);
-      }
-      const isSelected = state.selected === n;
-      const isMatch = hasSearch && state.searchMatches.has(n.id);
-      const pulseMul = 0.5 + 0.5 * Math.sin(t * 1.6 + n.phase);
-      mesh.material.emissiveIntensity = isSelected ? 1.6
-        : isMatch ? (1.2 + 0.4 * Math.sin(t * 3.5 + n.phase))
-        : (0.4 + 0.25 * pulseMul);
+    if (mesh.material && mesh.material.uniforms) {
+      const u = mesh.material.uniforms;
+      u.uTime.value = t;
+      u.uAlpha.value = (0.3 + 0.7 * ag) * dimMul;
+      // Динамический цвет (topics/diff/role переключаются на лету)
+      const { color } = colorForNode(n);
+      u.uColor.value.setHex(color);
+      u.uSelected.value = (state.selected === n) ? 1 : 0;
     }
     // Halo — пульсирующая «атмосфера» вокруг ноды
     if (n._halo) {
@@ -639,7 +790,7 @@ function tick() {
   tickStory(nowMs, state);
   tickStats();
 
-  renderer.render(scene, camera);
+  composer.render();
 }
 tick();
 

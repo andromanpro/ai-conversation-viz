@@ -64,6 +64,8 @@
   .btn.active-orphans { border-color: var(--tool); color: var(--tool); }
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
   .btn.active-theme { border-color: var(--accent); color: var(--accent); }
+  .btn.btn-back-2d { border-color: #7b69ff; color: #a59bff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; padding: 8px 16px; background: rgba(123,105,255,0.12); font-size: 12px; letter-spacing: 0.06em; }
+  .btn.btn-back-2d:hover { background: rgba(123,105,255,0.25); border-color: #a59bff; color: #ffffff; box-shadow: 0 0 18px rgba(123,105,255,0.5); }
 
   /* Timeline */
   #timeline-bar { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 12px; background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--border); padding: 8px 14px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
@@ -132,7 +134,7 @@
 </div>
 
 <div class="hud" id="top-right">
-  <a href="./index.html" title="2D mode">← back to 2D</a>
+  <a href="./index.html" class="btn btn-back-2d" title="Вернуться к 2D-визуализации">← 2D режим</a>
   <div id="stats-panel" style="margin-top:10px;font-size:10px;color:var(--muted);line-height:1.75;min-width:240px;max-width:320px;text-align:right;"></div>
 </div>
 

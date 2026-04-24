@@ -68,6 +68,8 @@
   .btn.active-diff { border-color: #5ad2ff; color: #5ad2ff; }
   .btn.active-sessions { border-color: #a5d8a1; color: #a5d8a1; }
   .btn.active-render { border-color: #ff8ed4; color: #ff8ed4; }
+  .btn.btn-3d { border-color: #7b69ff; color: #a59bff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; padding: 7px 14px; background: rgba(123,105,255,0.08); }
+  .btn.btn-3d:hover { background: rgba(123,105,255,0.2); border-color: #a59bff; color: #ffffff; box-shadow: 0 0 16px rgba(123,105,255,0.4); }
   #sessions-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 320px; z-index: 40; background: var(--panel); border-left: 1px solid var(--border); box-shadow: -10px 0 30px rgba(0,0,0,0.35); transform: translateX(100%); transition: transform .22s ease; display: flex; flex-direction: column; }
   #sessions-panel.open { transform: translateX(0); }
   #sessions-panel .sessions-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); }
@@ -226,7 +228,7 @@
 
 <div class="hud" id="top-left">
   <div class="title">AI Conversation Viz</div>
-  <div class="subtitle">v0.4 · force-directed · canvas 2d · <a href="./3d.html" style="color:var(--assistant);text-decoration:none;">3D →</a></div>
+  <div class="subtitle">v0.4 · force-directed</div>
   <div class="controls">
     <button class="btn primary" id="btn-sample">Load sample</button>
     <button class="btn" id="btn-file">Open JSONL…</button>
@@ -244,6 +246,7 @@
     <button class="btn" id="btn-sessions" title="Список загруженных сессий">📚 Sessions</button>
     <button class="btn" id="btn-bookmarks" title="Закладки (B). Отметить ноду — S">⭐ Bookmarks</button>
     <button class="btn" id="btn-render" title="Переключить рендерер (Canvas 2D / WebGL для больших графов)">🖼 Canvas 2D</button>
+    <a class="btn btn-3d" href="./3d.html" title="Открыть 3D-визуализацию">🌐 3D →</a>
     <button class="btn" id="btn-settings" title="Settings (,)">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
     <input type="file" id="diff-file-input" accept=".jsonl,.json,.txt">
