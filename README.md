@@ -1,69 +1,146 @@
 # ai-conversation-viz
 
-Force-directed визуализация разговоров человека с ИИ. Загружает JSONL-файл сессии (формат Claude Code: `~/.claude/projects/*/*.jsonl`) и рисует граф сообщений — ноды и связи по `parentUuid`.
+Force-directed visualization of human↔AI conversation sessions.
 
-Canvas 2D, без зависимостей.
+[🌐 Live demo](https://andromanpro.github.io/ai-conversation-viz/) · [🌐 3D](https://andromanpro.github.io/ai-conversation-viz/3d.html)
 
-## Что видно
+Parses Claude Code JSONL, ChatGPT exports (`conversations.json`) and Anthropic API `messages[]`. Zero dependencies. Canvas 2D primary + Three.js 3D alternative.
 
-- **Синие ноды** — реплики пользователя
-- **Бирюзовые** — ответы ассистента
-- **Оранжевые** — вызовы инструментов (`tool_use`)
-- Размер — длина сообщения (лог-шкала)
-- Пульс — свежесть (чем позже, тем ярче)
-- Рёбра — связь parent → child
+## Features
 
-## Как открыть
+- **Force-directed layout** with D3-style alpha cooling, Velocity Verlet, adaptive centerPull, leaf-spring boost, soft-wall bounds, Barnes-Hut O(n log n)
+- **3 layout modes** — force, radial sunburst, swim-lanes (time-as-river)
+- **Timeline playback** — step-by-node with 0.5×/1×/2×/5× speed
+- **Phone mockup** — chat renders in iPhone-style bubble with typewriter
+- **Interactive** — drag nodes, pan/zoom, click details, Ctrl+F search, hover preview, keyboard shortcuts
+- **Hub highlight** (auto-detection of high-degree nodes)
+- **Orphans** — forest mode by default, optional re-connect via ts predecessor
+- **Branch collapse** — dbl-click assistant to hide its tool_use children
+- **Stats** — tokens, duration, top tools, longest
+- **Live watch** — polling URL for growing JSONL files
+- **Export** — PNG / SVG snapshot, WebM MediaRecorder
+- **Ambient audio** — generative pad + chirp on node birth
+- **Auto performance degrade** at 400+ / 1500+ nodes
+- **Share URL** — `?jsonl=<url>&t=<0..100>&n=<nodeId>&hide=<roles>`
 
-**Без сервера (двойной клик):** `standalone.html` — подключает собранный бандл `dist/ai-conversation-viz.js`, работает через `file://`.
+## Install
 
-**С dev-сервером:**
 ```bash
-python -m http.server 8881 --directory .
-# http://localhost:8881/
+npm install @andromanpro/ai-conversation-viz
 ```
-`index.html` в этом режиме грузит исходники из `src/` как ES modules — правишь файл, F5, видишь изменения.
 
-## Управление
+## Usage (embed)
 
-| Действие | Результат |
+```js
+import { mount, SAMPLE_JSONL } from '@andromanpro/ai-conversation-viz';
+
+const viewer = mount(document.getElementById('viz'), {
+  jsonl: SAMPLE_JSONL,     // либо своя строка JSONL / ChatGPT json / Anthropic messages
+  width: 800,               // опционально (иначе clientWidth)
+  height: 600,
+  starfield: true,
+  autoFit: true,
+});
+
+// API
+viewer.loadJsonl(newJsonl);   // заменить данные
+viewer.setTimeline(0.5);      // позиция [0..1]
+viewer.play();                // от начала
+viewer.pause();
+viewer.fitView();
+viewer.destroy();
+viewer.getState();            // низкоуровневый доступ
+```
+
+## Usage (full UI standalone)
+
+Двойной клик на `standalone.html` — готовый self-contained offline viewer с полным UI (phone, timeline, search, stats, share, record). Данные подгружаются через «Open JSONL…» или drag-drop.
+
+Или через HTTP:
+```bash
+npx serve .
+# http://localhost:3000/         — 2D
+# http://localhost:3000/3d.html  — 3D
+```
+
+## Data formats
+
+Распознаются автоматически:
+- **Claude Code JSONL** — `{"type":"user|assistant", "uuid", "parentUuid", "message":{"content":[{"type":"text|thinking|tool_use|tool_result|image"}]}}`
+- **ChatGPT export** (`conversations.json`) — массив с `mapping: {id: {message, parent, children}}`
+- **Anthropic API** — массив `[{role, content}]`
+
+Parser извлекает из каждого message: text, thinking (`💭`), tool_use (имя + key param), tool_result (`↩` или `⚠` при `is_error`), image (`[image]`). Для assistant без текста генерируется summary `🔧 Grep "pattern" · Bash "cmd" · …`.
+
+## Keyboard shortcuts
+
+| Key | Action |
 |---|---|
-| `wheel` | zoom вокруг курсора |
-| `drag` по ноде | перетаскивание ноды (физика остальных продолжается) |
-| `drag` по фону | pan камеры |
-| `click` по ноде | панель с ролью, временем и первыми 400 символами |
-| `hover` | всплывающая подсказка с первыми 80 символами |
-| `drop` файла | загрузить JSONL |
-| ползунок timeline | показать только сообщения до момента t |
-| кнопка ▶ | воспроизведение по таймлайну (20 сек на весь диалог) |
-| Reset view | автомасштаб под текущее состояние графа |
+| `Space` | Play / Pause |
+| `←` / `→` | Step back / forward |
+| `Home` / `R` | Fit view |
+| `Ctrl+F` | Search |
+| `F` | Freeze physics |
+| `O` | Toggle orphan connect |
+| `1/2/3/5` | Speed 0.5× / 1× / 2× / 5× |
+| `Esc` | Close detail / search |
+| Dbl-click node | Collapse / expand tool_use children |
 
-## Откуда брать данные
+## Build
 
-Claude Code пишет JSONL-сессии в `~/.claude/projects/<project>/*.jsonl`. Каждая строка — JSON-объект с `uuid`, `parentUuid`, `timestamp`, `type` (`user`/`assistant`/`queue-operation`/...), `message.content`. Парсер оставляет только `user` и `assistant`, разбивает `content`-блоки ассистента на текстовую и `tool_use`-подноды.
+```bash
+npm run build    # → dist/ai-conversation-viz.js (IIFE, ~140 KB)
+npm run test     # 91 unit tests
+```
 
-## Структура
+## Architecture
 
 ```
 src/
-  core/     — config, sample, parser, graph, layout (чистые модули, без DOM)
-  view/     — state, camera, renderer
-  ui/       — detail-panel, tooltip, timeline, interaction, loader
-  main.js   — bootstrap + render loop
-tests/
-  run.js    — unit-тесты (node, без зависимостей)
-build.cjs   — собирает всё в dist/ai-conversation-viz.js как IIFE
+├─ core/
+│  ├─ config.js        — все настройки (CFG + COLORS)
+│  ├─ parser.js        — parseJSONL, parseLine, classifyContent
+│  ├─ adapters.js      — detect + ChatGPT/Anthropic → Claude JSONL
+│  ├─ graph.js         — buildGraph, appendRawNodes, degree/hub
+│  ├─ layout.js        — stepPhysics (sim), radial, swim, fitToView
+│  ├─ quadtree.js      — Barnes-Hut O(n log n) repulsion
+│  ├─ tree.js          — computeDepths (BFS)
+│  └─ sample.js        — demo JSONL
+├─ view/
+│  ├─ state.js         — общий mutable state
+│  ├─ camera.js        — world↔screen
+│  ├─ renderer.js      — canvas 2D draw + birth-animation
+│  ├─ particles.js     — electric sparks по рёбрам
+│  ├─ starfield.js     — parallax звёзды
+│  ├─ path.js          — pathToRoot (hover highlight)
+│  └─ tool-icons.js    — юникод-иконки по имени тула
+├─ ui/
+│  ├─ loader.js        — load/drop/URL → normalize → buildGraph
+│  ├─ interaction.js   — mouse/wheel events
+│  ├─ timeline.js      — step-by-node play + speed
+│  ├─ story-mode.js    — phone + typewriter + queue
+│  ├─ search.js        — Ctrl+F
+│  ├─ live.js          — polling growing JSONL URL
+│  ├─ detail-panel.js  — click-info
+│  ├─ tooltip.js       — hover preview
+│  ├─ filter.js        — role toggle
+│  ├─ minimap.js       — corner map + click-teleport
+│  ├─ stats-hud.js     — tokens/duration/tools/hubs
+│  ├─ share.js         — Share URL
+│  ├─ layout-toggle.js — force/radial/swim chips
+│  ├─ freeze-toggle.js — ❄ Freeze button
+│  ├─ speed-control.js — play speed chips
+│  ├─ audio.js         — generative ambient + chirp
+│  ├─ recorder.js      — MediaRecorder WebM
+│  ├─ snapshot.js      — PNG / SVG
+│  ├─ orphans-toggle.js— 🔗 Connect orphans
+│  └─ keyboard.js      — global shortcuts
+├─ 3d/
+│  └─ main.js          — Three.js сцена, raycaster, phone
+├─ main.js             — 2D entrypoint
+└─ embed.js            — npm entry (programmatic mount)
 ```
 
-## Разработка
+## License
 
-```bash
-node tests/run.js   # 23 теста: parser, camera, graph, layout, timeline
-node build.cjs      # пересобрать dist/ для standalone.html
-```
-
-Тесты покрывают чистую логику (парсинг JSONL, трансформации камеры, подсчёт bbox, шаг физики, прогресс таймлайна). UI не тестируется автоматически.
-
-## Вдохновение
-
-Первоначальная идея — маленькая панель `NETWORK` на mission-control дашборде: случайные ноды, связи по близости, лёгкий пульс. Здесь тот же визуальный язык, но поверх реальной структуры диалога.
+MIT

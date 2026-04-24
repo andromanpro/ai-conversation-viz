@@ -1,14 +1,56 @@
 {
   "name": "@andromanpro/ai-conversation-viz",
-  "version": "0.2.0",
-  "description": "Force-directed visualization of human↔AI conversation sessions (JSONL).",
+  "version": "0.7.0",
+  "description": "Force-directed visualization of human↔AI conversation sessions. Parses Claude Code JSONL, ChatGPT exports, Anthropic API messages. Zero deps, Canvas 2D (WebGL 3D option).",
   "type": "module",
   "main": "./dist/ai-conversation-viz.js",
-  "module": "./src/main.js",
+  "module": "./src/embed.js",
+  "exports": {
+    ".": {
+      "import": "./src/embed.js",
+      "default": "./dist/ai-conversation-viz.js"
+    },
+    "./dist/*": "./dist/*",
+    "./src/*": "./src/*",
+    "./standalone.html": "./standalone.html",
+    "./3d.html": "./3d.html"
+  },
+  "files": [
+    "dist",
+    "src",
+    "standalone.html",
+    "index.html",
+    "3d.html",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node build.cjs",
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "prepublishOnly": "npm run test && npm run build"
   },
+  "keywords": [
+    "visualization",
+    "force-directed",
+    "graph",
+    "ai",
+    "llm",
+    "claude",
+    "chatgpt",
+    "jsonl",
+    "canvas",
+    "threejs",
+    "conversation",
+    "d3-force"
+  ],
   "author": "andromanpro",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andromanpro/ai-conversation-viz.git"
+  },
+  "homepage": "https://andromanpro.github.io/ai-conversation-viz/",
+  "bugs": {
+    "url": "https://github.com/andromanpro/ai-conversation-viz/issues"
+  }
 }
