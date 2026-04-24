@@ -19,12 +19,43 @@ import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
 import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
 import { initSpeedControl } from '../ui/speed-control.js';
+import { initFreezeToggle } from '../ui/freeze-toggle.js';
+import { initFilter } from '../ui/filter.js';
+import { initStats, tickStats, recomputeStats } from '../ui/stats-hud.js';
+import { initSearch, matchNodes } from '../ui/search.js';
+import { initTopicsToggle } from '../ui/topics-toggle.js';
+import { initThemeToggle } from '../ui/theme-toggle.js';
+import { initOrphansToggle } from '../ui/orphans-toggle.js';
+import { hueToRgbaString } from '../view/topics.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
   assistant: 0x50d4b5,
   tool_use: 0xeca040,
 };
+
+// Diff-режим: те же цвета, что и в 2D renderer (A=pink, B=cyan, both=gray)
+const DIFF_COLORS = {
+  A: 0xff60af,
+  B: 0x5ad2ff,
+  both: 0xc8c8d6,
+};
+
+// Возвращает {color, emissive} для ноды с учётом topics/diff-режима.
+const _tmpColor = new THREE.Color();
+function colorForNode(n) {
+  if (state.diffMode && n._diffOrigin) {
+    const c = DIFF_COLORS[n._diffOrigin] || 0x888888;
+    return { color: c, emissive: c };
+  }
+  if (state.topicsMode && n._topicHue != null) {
+    _tmpColor.setHSL(n._topicHue, 0.7, 0.55);
+    const hex = _tmpColor.getHex();
+    return { color: hex, emissive: hex };
+  }
+  const c = ROLE_COLORS[n.role] || 0x888888;
+  return { color: c, emissive: c };
+}
 
 // ---- Scene ----
 const container = document.getElementById('three-container');
@@ -35,8 +66,20 @@ const btnFile = document.getElementById('btn-file');
 const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0e1a);
-scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
+const DARK_BG = 0x0a0e1a;
+const LIGHT_BG = 0xeef2f7;
+scene.background = new THREE.Color(DARK_BG);
+scene.fog = new THREE.Fog(DARK_BG, 1800, 8000);
+
+function applyThemeToScene() {
+  const theme = document.documentElement.dataset.theme || 'dark';
+  const bg = theme === 'light' ? LIGHT_BG : DARK_BG;
+  scene.background.setHex(bg);
+  scene.fog.color.setHex(bg);
+}
+// Наблюдаем за изменениями атрибута (theme-toggle пишет data-theme)
+const _themeObserver = new MutationObserver(applyThemeToScene);
+_themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
 camera.position.set(0, -300, 1200);
@@ -83,8 +126,8 @@ const mouse = new THREE.Vector2();
 
 // ---- Geometry pools (reuse) ----
 const sphereGeoLarge = new THREE.SphereGeometry(1, 20, 20);
-
-function colorFor(role) { return ROLE_COLORS[role] || 0x888888; }
+const hubRingGeo = new THREE.TorusGeometry(1.5, 0.09, 8, 32);
+const orphanRingGeo = new THREE.TorusGeometry(2.0, 0.06, 6, 28);
 
 // ---- Build scene from state ----
 function clearGroups() {
@@ -110,11 +153,11 @@ function buildFromState() {
     n.z = (depths.get(n.id) || 0) * ringZ;
   }
 
-  // Nodes — sphere per node
+  // Nodes — sphere per node (+ hub ring / orphan ring при необходимости)
   for (const n of state.nodes) {
-    const color = colorFor(n.role);
+    const { color, emissive } = colorForNode(n);
     const mat = new THREE.MeshStandardMaterial({
-      color, emissive: color,
+      color, emissive,
       emissiveIntensity: 0.55,
       metalness: 0.25, roughness: 0.4,
       transparent: true, opacity: 1,
@@ -126,6 +169,34 @@ function buildFromState() {
     mesh.userData.node = n;
     nodesGroup.add(mesh);
     n._mesh = mesh;
+
+    // Hub ring — золотое торическое кольцо вокруг hub-нод
+    if (n.isHub) {
+      const hubMat = new THREE.MeshBasicMaterial({
+        color: 0xffd778, transparent: true, opacity: 0.8,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      });
+      const hubRing = new THREE.Mesh(hubRingGeo, hubMat);
+      hubRing.position.copy(mesh.position);
+      hubRing.scale.set(baseR, baseR, baseR);
+      hubRing.userData.hubOwner = n;
+      nodesGroup.add(hubRing);
+      n._hubRing = hubRing;
+    }
+
+    // Orphan marker — оранжевое «сигнальное» кольцо
+    if (n._isOrphanRoot) {
+      const orphMat = new THREE.MeshBasicMaterial({
+        color: 0xeca040, transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      });
+      const orphRing = new THREE.Mesh(orphanRingGeo, orphMat);
+      orphRing.position.copy(mesh.position);
+      orphRing.scale.set(baseR, baseR, baseR);
+      orphRing.userData.orphOwner = n;
+      nodesGroup.add(orphRing);
+      n._orphRing = orphRing;
+    }
   }
 
   // Edges — tubes
@@ -189,8 +260,13 @@ function loadText(text) {
   state.stats = parsed.stats;
   state.timelineMax = 1;
   state.selected = null;
+  // Сбрасываем тесно связанное состояние
+  state.hiddenRoles = new Set();
+  state.searchMatches = new Set();
+  state.searchActive = null;
   buildFromState();
   resetStory();
+  recomputeStats();
   // Сбросим slider и phone
   const slider = document.getElementById('timeline');
   if (slider) slider.value = 100;
@@ -243,13 +319,23 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Keyboard — минимальная поддержка (Space play, ←/→ step)
+// Keyboard shortcuts — делегируем на HUD-кнопки (Space/F/O/T/1..5 etc.)
 window.addEventListener('keydown', (ev) => {
-  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-  if (ev.key === ' ') {
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+  const k = ev.key;
+  if (k === ' ') {
     ev.preventDefault();
-    const btn = document.getElementById('btn-play');
-    if (btn) btn.click();
+    document.getElementById('btn-play')?.click();
+  } else if (k === 'f' || k === 'F') {
+    ev.preventDefault();
+    document.getElementById('btn-freeze')?.click();
+  } else if (k === 'o' || k === 'O') {
+    ev.preventDefault();
+    document.getElementById('btn-orphans')?.click();
+  } else if (k === 't' || k === 'T') {
+    ev.preventDefault();
+    document.getElementById('btn-theme')?.click();
   }
 });
 
@@ -258,6 +344,13 @@ window.__viz = { state, CFG };
 initTimeline();
 initStory();
 initSpeedControl();
+initFreezeToggle();
+initFilter();
+initStats();
+initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 }));
+initTopicsToggle();
+initThemeToggle();
+initOrphansToggle();
 
 // ---- Animation loop ----
 function timelineCutoff() {
@@ -306,6 +399,10 @@ function tick() {
   }
 
   const t = nowMs / 1000;
+  const hasSearch = state.searchMatches && state.searchMatches.size > 0;
+  const hasPath = state.pathSet && state.pathSet.size > 0;
+  const topicsMode = !!state.topicsMode;
+  const diffMode = !!state.diffMode;
   // Update node meshes
   for (const n of state.nodes) {
     const mesh = n._mesh;
@@ -314,6 +411,8 @@ function tick() {
     const bf = birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
     const visible = n.bornAt != null && (!state.hiddenRoles || !state.hiddenRoles.has(n.role));
     mesh.visible = visible;
+    if (n._hubRing) n._hubRing.visible = visible;
+    if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
     mesh.position.set(n.x, -n.y, n.z || 0);
     const ag = easeOutCubic(bf);
@@ -321,10 +420,45 @@ function tick() {
     const hubPulse = n.isHub ? (1 + 0.3 * Math.sin(t * 1.8 + n.phase)) : 1;
     const scale = baseR * (0.5 + 0.5 * ag) * hubPulse;
     mesh.scale.set(scale, scale, scale);
+    // Dim при активном search/path если не матч
+    let dimMul = 1;
+    if (hasSearch) dimMul = state.searchMatches.has(n.id) ? 1 : 0.22;
+    else if (hasPath) dimMul = state.pathSet.has(n.id) ? 1 : 0.3;
     if (mesh.material) {
-      mesh.material.opacity = 0.25 + 0.75 * ag;
+      mesh.material.opacity = (0.25 + 0.75 * ag) * dimMul;
+      // Динамический цвет (topics/diff переключаются на лету)
+      if (topicsMode || diffMode) {
+        const { color, emissive } = colorForNode(n);
+        mesh.material.color.setHex(color);
+        mesh.material.emissive.setHex(emissive);
+      } else if (mesh.material.color.getHex() !== (ROLE_COLORS[n.role] || 0x888888)) {
+        // возврат к role-color когда оба режима выключены
+        const c = ROLE_COLORS[n.role] || 0x888888;
+        mesh.material.color.setHex(c);
+        mesh.material.emissive.setHex(c);
+      }
       const isSelected = state.selected === n;
-      mesh.material.emissiveIntensity = isSelected ? 1.4 : (0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t * 1.6 + n.phase)));
+      const isMatch = hasSearch && state.searchMatches.has(n.id);
+      const pulseMul = 0.5 + 0.5 * Math.sin(t * 1.6 + n.phase);
+      mesh.material.emissiveIntensity = isSelected ? 1.6
+        : isMatch ? (1.2 + 0.4 * Math.sin(t * 3.5 + n.phase))
+        : (0.4 + 0.25 * pulseMul);
+    }
+    // Hub ring pulse
+    if (n._hubRing) {
+      n._hubRing.position.copy(mesh.position);
+      const hr = baseR * (1.8 + 0.3 * Math.sin(t * 1.4 + n.phase));
+      n._hubRing.scale.set(hr, hr, hr);
+      n._hubRing.rotation.y = t * 0.35;
+      if (n._hubRing.material) n._hubRing.material.opacity = 0.45 + 0.35 * pulseFor(n, t);
+    }
+    // Orphan ring
+    if (n._orphRing) {
+      n._orphRing.position.copy(mesh.position);
+      const or = baseR * 2.3;
+      n._orphRing.scale.set(or, or, or);
+      n._orphRing.rotation.x = t * 0.5;
+      n._orphRing.rotation.z = t * 0.3;
     }
   }
   // Update edge visibility (пересборка геометрии слишком дорого — только вкл/выкл)
@@ -337,10 +471,15 @@ function tick() {
   }
 
   tickStory(nowMs, state);
+  tickStats();
 
   renderer.render(scene, camera);
 }
 tick();
+
+function pulseFor(n, t) {
+  return 0.5 + 0.5 * Math.sin(t * 1.8 + n.phase);
+}
 
 // ---- Boot ----
 const qJsonl = new URLSearchParams(location.search).get('jsonl');
