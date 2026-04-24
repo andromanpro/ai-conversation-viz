@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Conversation Viz · v0.2</title>
 <style>
-  :root {
+  :root, [data-theme="dark"] {
     --bg: #0a0e1a;
     --user: #7BAAF0;
     --assistant: #50D4B5;
@@ -16,6 +16,18 @@
     --muted: #6a7c95;
     --panel: rgba(10, 14, 26, 0.85);
     --border: rgba(123, 170, 240, 0.25);
+  }
+  [data-theme="light"] {
+    --bg: #eef2f7;
+    --user: #3a6fd1;
+    --assistant: #1f9b7e;
+    --tool: #cc7a18;
+    --edge: rgba(30, 100, 170, 0.35);
+    --accent: #cc7a18;
+    --text: #1a2332;
+    --muted: #6a7a90;
+    --panel: rgba(255, 255, 255, 0.88);
+    --border: rgba(30, 60, 120, 0.18);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
@@ -51,6 +63,19 @@
   .snapshot-menu { position: fixed; z-index: 25; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 180px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; }
   .snapshot-menu-item { background: transparent; border: 0; color: var(--text); padding: 8px 12px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; }
   .snapshot-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
+  .btn.active-theme { border-color: var(--accent); color: var(--accent); }
+  .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
+  .settings-modal { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.5); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
+  .settings-body { max-width: 540px; width: 90vw; max-height: 85vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 14px; letter-spacing: 0.08em; color: var(--text); }
+  .settings-close { background: transparent; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
+  .settings-close:hover { color: var(--accent); }
+  .settings-group-title { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); margin-top: 14px; margin-bottom: 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .settings-row { display: grid; grid-template-columns: 180px 1fr 70px; gap: 10px; align-items: center; padding: 4px 0; font-size: 11px; }
+  .settings-row label { color: var(--text); }
+  .settings-row input[type=range] { accent-color: var(--assistant); width: 100%; }
+  .settings-val { font-variant-numeric: tabular-nums; color: var(--assistant); text-align: right; font-size: 11px; }
+  .settings-footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); text-align: right; }
   #layout-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
   .btn-layout-chip { background: transparent; border: 0; border-right: 1px solid var(--border); color: var(--muted); padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; transition: all .15s; }
   .btn-layout-chip:last-child { border-right: 0; }
@@ -179,6 +204,9 @@
     <button class="btn" id="btn-snapshot" title="Save snapshot as PNG/SVG">📷 Snapshot</button>
     <button class="btn" id="btn-freeze" title="Freeze/unfreeze physics (F)">❄ Freeze</button>
     <button class="btn" id="btn-orphans" title="Toggle orphan connectivity (O)">🔗 Connect orphans</button>
+    <button class="btn" id="btn-theme" title="Toggle light/dark theme (T)">☀</button>
+    <button class="btn" id="btn-topics" title="TF-IDF topic clusters">🧬 Topics</button>
+    <button class="btn" id="btn-settings" title="Settings (,)">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="live-row">

@@ -6,6 +6,9 @@ import { hideDetail } from './detail-panel.js';
 import { toggleFreeze } from './freeze-toggle.js';
 import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
+import { toggleTheme } from './theme-toggle.js';
+import { toggleSettings } from './settings-modal.js';
+import { toggleTopics } from './topics-toggle.js';
 
 let getViewport = () => ({
   width: window.innerWidth,
@@ -56,6 +59,12 @@ function onKey(ev) {
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
+  } else if (ev.key === 't' || ev.key === 'T') {
+    ev.preventDefault();
+    toggleTheme();
+  } else if (ev.key === ',') {
+    ev.preventDefault();
+    toggleSettings();
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }

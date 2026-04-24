@@ -24,6 +24,9 @@ import { initFreezeToggle } from './ui/freeze-toggle.js';
 import { initSpeedControl } from './ui/speed-control.js';
 import { initOrphansToggle } from './ui/orphans-toggle.js';
 import { initSnapshot } from './ui/snapshot.js';
+import { initThemeToggle } from './ui/theme-toggle.js';
+import { initSettingsModal } from './ui/settings-modal.js';
+import { initTopicsToggle } from './ui/topics-toggle.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -73,6 +76,9 @@ initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
 initSnapshot();
+initThemeToggle();
+initSettingsModal();
+initTopicsToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

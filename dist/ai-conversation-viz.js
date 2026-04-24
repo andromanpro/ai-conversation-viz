@@ -1263,6 +1263,7 @@ const state = {
   playSpeed: 1,        // 0.5 | 1 | 2 | 5
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
+  topicsMode: false, // TF-IDF topic coloring
 };
 function resetInteractionState() {
   state.selected = null;
@@ -1576,7 +1577,127 @@ function toolIcon(toolName) {
 }
 
 
+// --- src/view/topics.js ---
+
+// TF-IDF topic clustering. Для каждой ноды считаем top-слово по TF-IDF,
+// хешируем его в hue → ноды с похожей темой окрашены в похожий оттенок.
+// Без LLM, без внешних зависимостей. Stopwords — минимальный набор RU/EN.
+
+const STOPWORDS = new Set([
+  // English
+  'the','a','an','and','or','but','if','then','else','of','to','in','on','at','for','with','by','as','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','should','could','can','may','might','must','shall','this','that','these','those','i','you','he','she','it','we','they','me','him','her','us','them','my','your','his','its','our','their','what','which','who','whom','where','when','why','how','no','not','so','all','any','each','few','more','most','other','some','such','only','own','same','than','too','very','just','now','also','one','two','three',
+  // Russian
+  'и','а','но','или','если','то','что','как','так','да','нет','он','она','оно','они','я','ты','мы','вы','это','этот','эта','эти','тот','та','те','же','ли','бы','был','была','были','есть','будет','был','не','ни','для','про','с','к','по','у','во','на','о','об','от','до','из','за','над','под','между','через','при','перед','после','без','при','может','можно','нужно','надо','очень','ещё','еще','уже','только','также','когда','где','кто','чей','какой','который','всё','все','весь','сам','себя','свой','мой','твой','наш','ваш','их','ему','его','её','нас','вас',
+  // Code-noise
+  'function','const','let','var','return','if','else','for','while','true','false','null','undefined','this','new','class','import','export','from','default','async','await',
+]);
+
+function tokenize(text) {
+  if (!text) return [];
+  // Убираем URL, пунктуацию; оставляем буквы, цифры, дефис
+  const cleaned = String(text).replace(/https?:\/\/\S+/g, ' ').toLowerCase();
+  return cleaned.split(/[^\p{L}\p{N}-]+/u)
+    .filter(w => w.length >= 3 && w.length <= 24 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+}
+
+/**
+ * Анализирует ноды, для каждой возвращает top-1 TF-IDF слово.
+ * @param {Array} nodes — state.nodes
+ * @returns {Map<nodeId, { topWord: string, score: number }>}
+ */
+function computeTopics(nodes) {
+  const result = new Map();
+  if (!nodes || !nodes.length) return result;
+  const N = nodes.length;
+  // DF — в скольких документах встречается слово
+  const df = new Map();
+  const nodeTokens = new Map();
+  for (const n of nodes) {
+    const toks = tokenize(n.text || '');
+    nodeTokens.set(n.id, toks);
+    const seen = new Set(toks);
+    for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
+  }
+  // IDF
+  const idf = new Map();
+  for (const [w, d] of df) idf.set(w, Math.log((N + 1) / (d + 1)) + 1);
+
+  for (const n of nodes) {
+    const toks = nodeTokens.get(n.id) || [];
+    if (!toks.length) { result.set(n.id, null); continue; }
+    // TF
+    const tf = new Map();
+    for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+    let best = null, bestScore = 0;
+    for (const [w, c] of tf) {
+      const s = (c / toks.length) * (idf.get(w) || 1);
+      // приоритет более частым в документе, но с редкостью
+      if (s > bestScore) { bestScore = s; best = w; }
+    }
+    result.set(n.id, best ? { topWord: best, score: bestScore } : null);
+  }
+  return result;
+}
+
+// FNV-1a hash → 0..1 для hue
+function hashHue(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) / 4294967296);
+}
+
+/**
+ * Применяет topic colors к нодам — сохраняет на n._topicHue (0..1).
+ * Если у ноды нет topic — _topicHue = null.
+ */
+function applyTopicsToNodes(nodes) {
+  const topics = computeTopics(nodes);
+  for (const n of nodes) {
+    const t = topics.get(n.id);
+    if (t && t.topWord) {
+      n._topicWord = t.topWord;
+      n._topicHue = hashHue(t.topWord);
+    } else {
+      n._topicWord = null;
+      n._topicHue = null;
+    }
+  }
+  // Top-5 тем в корпусе
+  const wordScores = new Map();
+  for (const n of nodes) {
+    if (!n._topicWord) continue;
+    wordScores.set(n._topicWord, (wordScores.get(n._topicWord) || 0) + 1);
+  }
+  return [...wordScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+}
+
+/** HSL → hex helper. */
+function hueToRgbaString(hue, saturation = 0.65, lightness = 0.6, alpha = 1) {
+  const h = hue * 360;
+  const s = saturation;
+  const l = lightness;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const R = Math.round((r + m) * 255);
+  const G = Math.round((g + m) * 255);
+  const B = Math.round((b + m) * 255);
+  return `rgba(${R}, ${G}, ${B}, ${alpha})`;
+}
+
+
 // --- src/view/renderer.js ---
+
 
 
 
@@ -1592,19 +1713,28 @@ function timelineCutoff(state) {
   return tsMin + (tsMax - tsMin) * state.timelineMax;
 }
 
-function glowRgba(role, alpha) {
+function glowRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
+  }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreRgba(role, alpha) {
+function coreRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
+  }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreDarkRgba(role, alpha) {
+function coreDarkRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
+  }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
@@ -1666,14 +1796,21 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмное свечение от центра к углам
+  // Radial vignette — фон canvas зависит от темы
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  const theme = document.documentElement.dataset.theme || 'dark';
+  if (theme === 'light') {
+    grad.addColorStop(0, 'rgba(248, 250, 252, 1)');
+    grad.addColorStop(0.6, 'rgba(234, 240, 247, 1)');
+    grad.addColorStop(1, 'rgba(216, 224, 234, 1)');
+  } else {
+    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  }
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -1838,15 +1975,16 @@ function draw(ctx, state, tSec, viewport, extras) {
     if (r <= 0) continue;
 
     // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
+    const topicsMode = !!state.topicsMode;
     if (perfMode !== 'minimal') {
       const glowR = r * CFG.nodeGlowRadiusMul;
       const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
       if (perfMode === 'degraded') {
-        ctx.fillStyle = glowRgba(n.role, innerA * 0.7);
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode);
       } else {
         const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-        glowGrad.addColorStop(0, glowRgba(n.role, innerA));
-        glowGrad.addColorStop(1, glowRgba(n.role, 0));
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode));
         ctx.fillStyle = glowGrad;
       }
       ctx.beginPath();
@@ -1856,11 +1994,11 @@ function draw(ctx, state, tSec, viewport, extras) {
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      grad.addColorStop(0, coreRgba(n.role, ag));
-      grad.addColorStop(1, coreDarkRgba(n.role, ag));
+      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode));
+      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode));
       ctx.fillStyle = grad;
     } else {
-      ctx.fillStyle = coreRgba(n.role, ag);
+      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode);
     }
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -2832,6 +2970,9 @@ function onClick(ev) {
 
 
 
+
+
+
 let getViewport = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
@@ -2880,6 +3021,12 @@ function onKey(ev) {
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
+  } else if (ev.key === 't' || ev.key === 'T') {
+    ev.preventDefault();
+    toggleTheme();
+  } else if (ev.key === ',') {
+    ev.preventDefault();
+    toggleSettings();
   } else if (ev.key === '1') { ev.preventDefault(); setSpeed(0.5); }
   else if (ev.key === '2') { ev.preventDefault(); setSpeed(1); }
   else if (ev.key === '3') { ev.preventDefault(); setSpeed(2); }
@@ -3662,6 +3809,231 @@ function showToast(msg) {
 }
 
 
+// --- src/ui/theme-toggle.js ---
+
+// Dark/light toggle. Переключает CSS-переменные через [data-theme] на <html>.
+// Сохраняется в localStorage.
+
+let btn;
+const KEY = 'viz-theme';
+function initThemeToggle() {
+  btn = document.getElementById('btn-theme');
+  // Применяем сохранённое значение при старте
+  const saved = localStorage.getItem(KEY);
+  if (saved === 'light') applyTheme('light');
+  else applyTheme('dark');
+  if (btn) btn.addEventListener('click', toggle);
+  updateBtn();
+}
+function toggleTheme() { toggle(); }
+
+function toggle() {
+  const cur = document.documentElement.dataset.theme || 'dark';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+  updateBtn();
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(KEY, theme);
+}
+
+function updateBtn() {
+  if (!btn) return;
+  const theme = document.documentElement.dataset.theme || 'dark';
+  btn.textContent = theme === 'dark' ? '☀' : '🌙';
+  btn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+  btn.classList.toggle('active-theme', theme === 'light');
+}
+function getTheme() {
+  return document.documentElement.dataset.theme || 'dark';
+}
+
+
+// --- src/ui/settings-modal.js ---
+
+// Settings modal — live-update для основных CFG параметров.
+// Сохранение в localStorage.
+
+
+
+const KEY = 'viz-settings';
+
+// Описание регулируемых параметров (group, key, min, max, step, label)
+const PARAMS = [
+  // Physics
+  ['Physics', 'repulsion',       500,  30000, 100,  'Repulsion strength'],
+  ['Physics', 'spring',          0.01, 0.3,   0.01, 'Spring strength'],
+  ['Physics', 'springLen',       30,   300,   5,    'Spring rest length'],
+  ['Physics', 'centerPull',      0.0,  0.02,  0.0005, 'Center pull'],
+  ['Physics', 'velocityDecay',   0.1,  0.9,   0.02, 'Velocity decay (friction)'],
+  ['Physics', 'maxVelocity',     5,    200,   1,    'Max velocity clamp'],
+  ['Physics', 'alphaDecay',      0.005, 0.2,  0.002, 'Alpha decay rate'],
+  ['Physics', 'repulsionCutoff', 500,  6000,  100,  'Repulsion cutoff (px)'],
+  // Visual
+  ['Visual',  'particlesPerEdge', 0,    3,    1,   'Particles per edge (0 = off)'],
+  ['Visual',  'particleSpeed',   0.1,  2,     0.05, 'Particle speed'],
+  ['Visual',  'particleJitterPx',0,    6,     0.1, 'Particle jitter'],
+  ['Visual',  'starfieldCount',  0,    1000,  50,  'Starfield density'],
+  ['Visual',  'nodeGlowRadiusMul', 1,  4,     0.1, 'Node glow radius'],
+  ['Visual',  'nodeGlowAlphaBase', 0,  0.3,   0.01, 'Node glow alpha'],
+  // Playback
+  ['Playback','storyDwellMs',    400,  5000,  100, 'Play step interval (ms)'],
+  ['Playback','storyCharMs',     5,    80,    1,   'Typewriter speed (ms/char)'],
+  ['Playback','storyMaxChars',   80,   1200,  20,  'Max chars per bubble'],
+  ['Playback','storyPostGapMs',  200,  3000,  50,  'Min gap between bubbles'],
+  // Birth
+  ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
+];
+
+let modalEl, btn;
+function initSettingsModal() {
+  btn = document.getElementById('btn-settings');
+  if (btn) btn.addEventListener('click', toggle);
+  // Применяем saved settings
+  loadSaved();
+}
+function toggleSettings() { toggle(); }
+
+function toggle() {
+  if (modalEl) { close(); return; }
+  open();
+}
+
+function open() {
+  modalEl = document.createElement('div');
+  modalEl.id = 'settings-modal';
+  modalEl.className = 'settings-modal';
+
+  const inner = document.createElement('div');
+  inner.className = 'settings-body';
+  modalEl.appendChild(inner);
+
+  const header = document.createElement('div');
+  header.className = 'settings-header';
+  header.innerHTML = `<span>⚙ Settings</span>`;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'settings-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', close);
+  header.appendChild(closeBtn);
+  inner.appendChild(header);
+
+  const groups = new Map();
+  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, []);
+  for (const p of PARAMS) groups.get(p[0]).push(p);
+
+  for (const [groupName, items] of groups) {
+    const gTitle = document.createElement('div');
+    gTitle.className = 'settings-group-title';
+    gTitle.textContent = groupName.toUpperCase();
+    inner.appendChild(gTitle);
+    for (const [, key, min, max, step, label] of items) {
+      const row = document.createElement('div');
+      row.className = 'settings-row';
+      const lbl = document.createElement('label');
+      lbl.textContent = label;
+      const val = document.createElement('span');
+      val.className = 'settings-val';
+      val.textContent = formatValue(CFG[key]);
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(CFG[key]);
+      input.dataset.key = key;
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        CFG[key] = v;
+        val.textContent = formatValue(v);
+        save();
+        if (state.sim) reheat(state.sim, 0.3);
+      });
+      row.appendChild(lbl);
+      row.appendChild(input);
+      row.appendChild(val);
+      inner.appendChild(row);
+    }
+  }
+
+  const footer = document.createElement('div');
+  footer.className = 'settings-footer';
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'btn';
+  resetBtn.textContent = 'Reset to defaults';
+  resetBtn.addEventListener('click', () => {
+    localStorage.removeItem(KEY);
+    location.reload();
+  });
+  footer.appendChild(resetBtn);
+  inner.appendChild(footer);
+
+  document.body.appendChild(modalEl);
+  // Click outside to close
+  modalEl.addEventListener('click', (ev) => { if (ev.target === modalEl) close(); });
+}
+
+function close() {
+  if (modalEl) { modalEl.remove(); modalEl = null; }
+}
+
+function formatValue(v) {
+  if (typeof v !== 'number') return String(v);
+  if (Number.isInteger(v)) return String(v);
+  const abs = Math.abs(v);
+  if (abs < 0.001) return v.toFixed(5);
+  if (abs < 0.1) return v.toFixed(3);
+  if (abs < 10) return v.toFixed(2);
+  return v.toFixed(0);
+}
+
+function save() {
+  const obj = {};
+  for (const [, key] of PARAMS) obj[key] = CFG[key];
+  try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    for (const [, key] of PARAMS) {
+      if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
+    }
+  } catch {}
+}
+
+
+// --- src/ui/topics-toggle.js ---
+
+
+
+let btn;
+function initTopicsToggle() {
+  btn = document.getElementById('btn-topics');
+  if (btn) btn.addEventListener('click', toggle);
+  updateBtn();
+}
+function toggleTopics() { toggle(); }
+
+function toggle() {
+  state.topicsMode = !state.topicsMode;
+  if (state.topicsMode && state.nodes.length) {
+    const top = applyTopicsToNodes(state.nodes);
+    console.log('[topics] top words:', top);
+  }
+  updateBtn();
+}
+
+function updateBtn() {
+  if (!btn) return;
+  btn.textContent = state.topicsMode ? '🧬 Topics: on' : '🧬 Topics';
+  btn.classList.toggle('active-topics', !!state.topicsMode);
+}
+
+
 // --- src/ui/interaction.js ---
 
 
@@ -4115,6 +4487,9 @@ async function applyUrlParamsLate() {
 
 
 
+
+
+
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 
@@ -4163,6 +4538,9 @@ initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
 initSnapshot();
+initThemeToggle();
+initSettingsModal();
+initTopicsToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

@@ -20,6 +20,7 @@ export const state = {
   playSpeed: 1,        // 0.5 | 1 | 2 | 5
   connectOrphans: false, // B+D по умолчанию: orphan forest + маркеры
   collapsed: new Set(), // nodeId → tool_use-дети скрыты
+  topicsMode: false, // TF-IDF topic coloring
 };
 
 export function resetInteractionState() {

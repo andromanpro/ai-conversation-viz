@@ -2,6 +2,7 @@ import { CFG, COLORS } from '../core/config.js';
 import { worldToScreen } from './camera.js';
 import { controlPoint, bezierPoint } from './particles.js';
 import { toolIcon } from './tool-icons.js';
+import { hueToRgbaString } from './topics.js';
 
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
@@ -13,19 +14,28 @@ function timelineCutoff(state) {
   return tsMin + (tsMax - tsMin) * state.timelineMax;
 }
 
-function glowRgba(role, alpha) {
+function glowRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
+  }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreRgba(role, alpha) {
+function coreRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
+  }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
-function coreDarkRgba(role, alpha) {
+function coreDarkRgba(role, alpha, node, topicsMode) {
+  if (topicsMode && node && node._topicHue != null) {
+    return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
+  }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
@@ -90,14 +100,21 @@ function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
 export function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмное свечение от центра к углам
+  // Radial vignette — фон canvas зависит от темы
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  const theme = document.documentElement.dataset.theme || 'dark';
+  if (theme === 'light') {
+    grad.addColorStop(0, 'rgba(248, 250, 252, 1)');
+    grad.addColorStop(0.6, 'rgba(234, 240, 247, 1)');
+    grad.addColorStop(1, 'rgba(216, 224, 234, 1)');
+  } else {
+    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  }
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -262,15 +279,16 @@ export function draw(ctx, state, tSec, viewport, extras) {
     if (r <= 0) continue;
 
     // Glow дорогой (radialGradient + extra arc) — пропускаем на больших графах
+    const topicsMode = !!state.topicsMode;
     if (perfMode !== 'minimal') {
       const glowR = r * CFG.nodeGlowRadiusMul;
       const innerA = (CFG.nodeGlowAlphaBase + CFG.nodeGlowAlphaPulse * pulse * boost) * ag;
       if (perfMode === 'degraded') {
-        ctx.fillStyle = glowRgba(n.role, innerA * 0.7);
+        ctx.fillStyle = glowRgba(n.role, innerA * 0.7, n, topicsMode);
       } else {
         const glowGrad = ctx.createRadialGradient(s.x, s.y, r * CFG.nodeGlowInnerStop, s.x, s.y, glowR);
-        glowGrad.addColorStop(0, glowRgba(n.role, innerA));
-        glowGrad.addColorStop(1, glowRgba(n.role, 0));
+        glowGrad.addColorStop(0, glowRgba(n.role, innerA, n, topicsMode));
+        glowGrad.addColorStop(1, glowRgba(n.role, 0, n, topicsMode));
         ctx.fillStyle = glowGrad;
       }
       ctx.beginPath();
@@ -280,11 +298,11 @@ export function draw(ctx, state, tSec, viewport, extras) {
 
     if (useGradient) {
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      grad.addColorStop(0, coreRgba(n.role, ag));
-      grad.addColorStop(1, coreDarkRgba(n.role, ag));
+      grad.addColorStop(0, coreRgba(n.role, ag, n, topicsMode));
+      grad.addColorStop(1, coreDarkRgba(n.role, ag, n, topicsMode));
       ctx.fillStyle = grad;
     } else {
-      ctx.fillStyle = coreRgba(n.role, ag);
+      ctx.fillStyle = coreRgba(n.role, ag, n, topicsMode);
     }
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);

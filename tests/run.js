@@ -6,6 +6,7 @@ import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad
 import { buildQuadtree, computeRepulsion } from '../src/core/quadtree.js';
 import { computeSwimLanes } from '../src/core/layout.js';
 import { computeDepths } from '../src/core/tree.js';
+import { computeTopics, hashHue, applyTopicsToNodes } from '../src/view/topics.js';
 import { advanceTimeline } from '../src/ui/timeline.js';
 import { birthFactor, easeOutCubic } from '../src/view/renderer.js';
 import { pathToRoot } from '../src/view/path.js';
@@ -692,6 +693,52 @@ test('tree: computeDepths BFS from roots', () => {
   eq(depths.get('c1'), 1);
   eq(depths.get('c2'), 1);
   eq(depths.get('gc'), 2);
+});
+
+// ==== TOPICS (TF-IDF) ====
+test('topics: computeTopics assigns top-1 word per node', () => {
+  const nodes = [
+    { id: 'a', text: 'force directed graph layout algorithm' },
+    { id: 'b', text: 'canvas rendering performance optimization' },
+    { id: 'c', text: 'force force force simulation' },
+  ];
+  const t = computeTopics(nodes);
+  eq(t.size, 3);
+  // В c слово "force" встречается чаще, топ-1 = force
+  eq(t.get('c').topWord, 'force');
+});
+
+test('topics: empty text → null', () => {
+  const t = computeTopics([{ id: 'a', text: '' }, { id: 'b', text: '   ' }]);
+  eq(t.get('a'), null);
+  eq(t.get('b'), null);
+});
+
+test('topics: hashHue stable и в [0,1)', () => {
+  const h1 = hashHue('apple');
+  const h2 = hashHue('apple');
+  eq(h1, h2);
+  assert(h1 >= 0 && h1 < 1);
+  const h3 = hashHue('banana');
+  assert(h3 !== h1, 'разные слова → разный hue');
+});
+
+test('topics: applyTopicsToNodes заполняет _topicHue для содержательных', () => {
+  const nodes = [
+    { id: 'a', text: 'performance optimization canvas' },
+    { id: 'b', text: '' },
+  ];
+  const top = applyTopicsToNodes(nodes);
+  assert(nodes[0]._topicHue != null);
+  eq(nodes[1]._topicHue, null);
+  assert(Array.isArray(top));
+});
+
+test('topics: stopwords отфильтрованы (и, the, если)', () => {
+  const t = computeTopics([{ id: 'a', text: 'если это то что мы искали' }]);
+  const r = t.get('a');
+  // всё — стопвордс → null
+  assert(r === null || (r && !['если','это','то','что','мы'].includes(r.topWord)));
 });
 
 test('tree: orphan gets depth 0', () => {
