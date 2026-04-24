@@ -93,7 +93,7 @@ function download() {
 
 function updateBtn(recording) {
   if (!_recBtnEl) return;
-  _recBtnEl.textContent = recording ? '● REC 0s' : 'Record';
+  _recBtnEl.textContent = recording ? '● REC 0s' : '●';
   _recBtnEl.classList.toggle('recording', recording);
 }
 

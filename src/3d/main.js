@@ -30,7 +30,6 @@ import { initFilter } from '../ui/filter.js';
 import { initStats, tickStats, recomputeStats } from '../ui/stats-hud.js';
 import { initSearch, matchNodes } from '../ui/search.js';
 import { initTopicsToggle } from '../ui/topics-toggle.js';
-import { initThemeToggle } from '../ui/theme-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
 
@@ -72,20 +71,8 @@ const btnFile = document.getElementById('btn-file');
 const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
-const DARK_BG = 0x0a0e1a;
-const LIGHT_BG = 0xeef2f7;
-scene.background = new THREE.Color(DARK_BG);
-scene.fog = new THREE.Fog(DARK_BG, 1800, 8000);
-
-function applyThemeToScene() {
-  const theme = document.documentElement.dataset.theme || 'dark';
-  const bg = theme === 'light' ? LIGHT_BG : DARK_BG;
-  scene.background.setHex(bg);
-  scene.fog.color.setHex(bg);
-}
-// Наблюдаем за изменениями атрибута (theme-toggle пишет data-theme)
-const _themeObserver = new MutationObserver(applyThemeToScene);
-_themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+scene.background = new THREE.Color(0x0a0e1a);
+scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
 camera.position.set(0, -300, 1200);
@@ -647,9 +634,6 @@ window.addEventListener('keydown', (ev) => {
   } else if (k === 'o' || k === 'O') {
     ev.preventDefault();
     document.getElementById('btn-orphans')?.click();
-  } else if (k === 't' || k === 'T') {
-    ev.preventDefault();
-    document.getElementById('btn-theme')?.click();
   }
 });
 
@@ -663,7 +647,6 @@ initFilter();
 initStats();
 initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 }));
 initTopicsToggle();
-initThemeToggle();
 initOrphansToggle();
 
 // ---- Animation loop ----

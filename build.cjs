@@ -68,7 +68,6 @@ const MODULES = [
   'src/ui/speed-control.js',
   'src/ui/orphans-toggle.js',
   'src/ui/snapshot.js',
-  'src/ui/theme-toggle.js',
   'src/ui/settings-modal.js',
   'src/ui/topics-toggle.js',
   'src/ui/diff-mode.js',

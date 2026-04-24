@@ -2086,21 +2086,14 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — фон canvas зависит от темы
+  // Radial vignette — тёмный cyberpunk-фон
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  const theme = document.documentElement.dataset.theme || 'dark';
-  if (theme === 'light') {
-    grad.addColorStop(0, 'rgba(248, 250, 252, 1)');
-    grad.addColorStop(0.6, 'rgba(234, 240, 247, 1)');
-    grad.addColorStop(1, 'rgba(216, 224, 234, 1)');
-  } else {
-    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
-  }
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -4514,52 +4507,6 @@ function update() {
     return { initOrphansToggle, toggleOrphans };
   })();
 
-  // --- src/ui/theme-toggle.js ---
-  __M["src/ui/theme-toggle.js"] = (function () {
-// Dark/light toggle. Переключает CSS-переменные через [data-theme] на <html>.
-// Сохраняется в localStorage.
-
-let _themeBtn;
-const KEY = 'viz-theme';
-
-function initThemeToggle() {
-  _themeBtn = document.getElementById('btn-theme');
-  // Применяем сохранённое значение при старте
-  const saved = localStorage.getItem(KEY);
-  if (saved === 'light') applyTheme('light');
-  else applyTheme('dark');
-  if (_themeBtn) _themeBtn.addEventListener('click', toggle);
-  updateBtn();
-}
-
-function toggleTheme() { toggle(); }
-
-function toggle() {
-  const cur = document.documentElement.dataset.theme || 'dark';
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
-  updateBtn();
-}
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem(KEY, theme);
-}
-
-function updateBtn() {
-  if (!_themeBtn) return;
-  const theme = document.documentElement.dataset.theme || 'dark';
-  _themeBtn.textContent = theme === 'dark' ? '☀' : '🌙';
-  _themeBtn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
-  _themeBtn.classList.toggle('active-theme', theme === 'light');
-}
-
-function getTheme() {
-  return document.documentElement.dataset.theme || 'dark';
-}
-
-    return { initThemeToggle, toggleTheme, getTheme };
-  })();
-
   // --- src/ui/settings-modal.js ---
   __M["src/ui/settings-modal.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
@@ -5043,7 +4990,6 @@ function focusOnNode(n) {
     const { toggleFreeze } = __M["src/ui/freeze-toggle.js"];
     const { setSpeed } = __M["src/ui/speed-control.js"];
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
-    const { toggleTheme } = __M["src/ui/theme-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
     const { toggleTopics, clearTopicFilter } = __M["src/ui/topics-toggle.js"];
     const { toggleBookmarks, updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
@@ -5100,9 +5046,6 @@ function onKey(ev) {
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
-  } else if (ev.key === 't' || ev.key === 'T') {
-    ev.preventDefault();
-    toggleTheme();
   } else if (ev.key === ',') {
     ev.preventDefault();
     toggleSettings();
@@ -5672,7 +5615,7 @@ function download() {
 
 function updateBtn(recording) {
   if (!_recBtnEl) return;
-  _recBtnEl.textContent = recording ? '● REC 0s' : 'Record';
+  _recBtnEl.textContent = recording ? '● REC 0s' : '●';
   _recBtnEl.classList.toggle('recording', recording);
 }
 
@@ -6975,7 +6918,6 @@ async function applyUrlParamsLate() {
     const { initSpeedControl } = __M["src/ui/speed-control.js"];
     const { initOrphansToggle } = __M["src/ui/orphans-toggle.js"];
     const { initSnapshot } = __M["src/ui/snapshot.js"];
-    const { initThemeToggle } = __M["src/ui/theme-toggle.js"];
     const { initSettingsModal } = __M["src/ui/settings-modal.js"];
     const { initTopicsToggle } = __M["src/ui/topics-toggle.js"];
     const { initDiffMode } = __M["src/ui/diff-mode.js"];
@@ -7033,7 +6975,6 @@ initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
 initSnapshot();
-initThemeToggle();
 initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);

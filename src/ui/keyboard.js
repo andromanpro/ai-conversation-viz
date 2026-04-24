@@ -6,7 +6,6 @@ import { hideDetail, toggleStarOnCurrent } from './detail-panel.js';
 import { toggleFreeze } from './freeze-toggle.js';
 import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
-import { toggleTheme } from './theme-toggle.js';
 import { toggleSettings } from './settings-modal.js';
 import { toggleTopics, clearTopicFilter } from './topics-toggle.js';
 import { toggleBookmarks } from './bookmarks.js';
@@ -64,9 +63,6 @@ function onKey(ev) {
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
-  } else if (ev.key === 't' || ev.key === 'T') {
-    ev.preventDefault();
-    toggleTheme();
   } else if (ev.key === ',') {
     ev.preventDefault();
     toggleSettings();
