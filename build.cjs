@@ -40,6 +40,7 @@ const MODULES = [
   'src/core/graph.js',
   'src/core/quadtree.js',
   'src/core/layout.js',
+  'src/core/session-bridge.js',
   'src/view/state.js',
   'src/view/camera.js',
   'src/view/path.js',

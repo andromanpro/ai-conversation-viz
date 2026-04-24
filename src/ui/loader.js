@@ -9,6 +9,7 @@ import { hideDetail } from './detail-panel.js';
 import { hideTooltip } from './tooltip.js';
 import { resetTimeline } from './timeline.js';
 import { addSessionFiles } from './session-picker.js';
+import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
 
 let _getViewport;
 let _onReady = () => {};
@@ -27,11 +28,21 @@ export function initLoader(getViewportFn, onReady) {
     fileInput.value = '';
   });
 
-  document.getElementById('btn-sample').addEventListener('click', () => loadText(SAMPLE_JSONL));
+  document.getElementById('btn-sample').addEventListener('click', () => {
+    clearSessionForHandoff(); // юзер явно выбрал sample — не сохраняем его как «последнюю сессию»
+    loadText(SAMPLE_JSONL);
+  });
   document.getElementById('btn-reset').addEventListener('click', resetView);
 
   initDragDrop();
-  loadText(SAMPLE_JSONL);
+
+  // Если пришли из 3D режима с уже загруженным файлом — восстановим его
+  const handoff = loadSessionForHandoff();
+  if (handoff && handoff.text) {
+    loadText(handoff.text);
+  } else {
+    loadText(SAMPLE_JSONL);
+  }
 }
 
 function initDragDrop() {
@@ -128,6 +139,9 @@ export function loadText(text) {
     hideTooltip();
     updateStatsHUD();
     _onReady();
+    // Запомним текст для возможного перехода в 3D. Sample не сохраняем —
+    // пусть 3D при первом открытии тоже покажет sample.
+    if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
   } catch (e) {
     showError('Parse error: ' + e.message);
     console.error(e);

@@ -1279,6 +1279,70 @@ function buildGraph(parsed, viewport) {
     return { appendRawNodes, buildGraph };
   })();
 
+  // --- src/core/session-bridge.js ---
+  __M["src/core/session-bridge.js"] = (function () {
+// Передаёт последний загруженный JSONL между 2D ↔ 3D режимами через
+// sessionStorage. sessionStorage живёт в рамках одной вкладки, поэтому
+// клик «3D →» (без target="_blank") сохраняет данные, а «← back to 2D»
+// восстанавливает. Не засоряет localStorage навсегда.
+//
+// Limit: sessionStorage в большинстве браузеров ~5MB на origin. Сессии
+// обычно помещаются, но для 30+ MB файлов сохраняем не контент, а
+// просто маркер «файл был большой — загрузи снова». Пользователь
+// увидит sample и должен дропнуть файл повторно.
+
+const KEY = 'viz:last-jsonl';
+const KEY_NAME = 'viz:last-jsonl-name';
+// ~4 MB — с запасом до quota ~5MB
+const MAX_BYTES = 4 * 1024 * 1024;
+
+/** Сохранить JSONL для следующего режима. Возвращает true если получилось. */
+function saveSessionForHandoff(text, name) {
+  try {
+    if (typeof sessionStorage === 'undefined') return false;
+    if (!text || typeof text !== 'string') return false;
+    // Быстрая проверка по длине (UTF-16 в JS → 2 байта на символ в worst case,
+    // но sessionStorage обычно считает в UTF-16-codeunit-длине, что равно .length).
+    if (text.length * 2 > MAX_BYTES) {
+      // Не сохраняем контент, но запоминаем имя, чтобы можно было сообщить
+      sessionStorage.setItem(KEY_NAME, name || 'large-session');
+      sessionStorage.removeItem(KEY);
+      return false;
+    }
+    sessionStorage.setItem(KEY, text);
+    if (name) sessionStorage.setItem(KEY_NAME, name);
+    return true;
+  } catch {
+    // QuotaExceededError или private-mode
+    try { sessionStorage.removeItem(KEY); } catch {}
+    return false;
+  }
+}
+
+/** Получить JSONL, сохранённый предыдущим режимом. */
+function loadSessionForHandoff() {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const text = sessionStorage.getItem(KEY);
+    const name = sessionStorage.getItem(KEY_NAME);
+    return text ? { text, name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Если пользователь сам выбрал sample — мы не хотим перезаписывать handoff */
+function clearSessionForHandoff() {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(KEY);
+    sessionStorage.removeItem(KEY_NAME);
+  } catch {}
+}
+
+    return { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff };
+  })();
+
   // --- src/view/state.js ---
   __M["src/view/state.js"] = (function () {
 const state = {
@@ -5083,6 +5147,7 @@ function onKey(ev) {
     const { hideTooltip } = __M["src/ui/tooltip.js"];
     const { resetTimeline } = __M["src/ui/timeline.js"];
     const { addSessionFiles } = __M["src/ui/session-picker.js"];
+    const { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } = __M["src/core/session-bridge.js"];
 
 let _getViewport;
 let _onReady = () => {};
@@ -5101,11 +5166,21 @@ function initLoader(getViewportFn, onReady) {
     fileInput.value = '';
   });
 
-  document.getElementById('btn-sample').addEventListener('click', () => loadText(SAMPLE_JSONL));
+  document.getElementById('btn-sample').addEventListener('click', () => {
+    clearSessionForHandoff(); // юзер явно выбрал sample — не сохраняем его как «последнюю сессию»
+    loadText(SAMPLE_JSONL);
+  });
   document.getElementById('btn-reset').addEventListener('click', resetView);
 
   initDragDrop();
-  loadText(SAMPLE_JSONL);
+
+  // Если пришли из 3D режима с уже загруженным файлом — восстановим его
+  const handoff = loadSessionForHandoff();
+  if (handoff && handoff.text) {
+    loadText(handoff.text);
+  } else {
+    loadText(SAMPLE_JSONL);
+  }
 }
 
 function initDragDrop() {
@@ -5202,6 +5277,9 @@ function loadText(text) {
     hideTooltip();
     updateStatsHUD();
     _onReady();
+    // Запомним текст для возможного перехода в 3D. Sample не сохраняем —
+    // пусть 3D при первом открытии тоже покажет sample.
+    if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
   } catch (e) {
     showError('Parse error: ' + e.message);
     console.error(e);

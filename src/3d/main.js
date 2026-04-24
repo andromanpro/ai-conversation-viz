@@ -15,6 +15,7 @@ import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { computeDepths } from '../core/tree.js';
 import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
+import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
 
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
 import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
@@ -203,7 +204,8 @@ function buildFromState() {
     n._mesh = mesh;
 
     // Halo — большая полупрозрачная sphere с additive blending: даёт
-    // «свечение» вокруг каждой ноды (имитация bloom без post-processing)
+    // «свечение» вокруг каждой ноды (имитация bloom без post-processing).
+    // Стартует СКРЫТЫМ — включится в tick() когда нода родится (bornAt != null).
     const haloMat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.12,
       blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
@@ -211,9 +213,15 @@ function buildFromState() {
     const halo = new THREE.Mesh(sphereGeoHalo, haloMat);
     halo.position.copy(mesh.position);
     halo.scale.set(baseR * 2.4, baseR * 2.4, baseR * 2.4);
+    halo.visible = false;
     halo.userData.haloOwner = n;
     nodesGroup.add(halo);
     n._halo = halo;
+
+    // Ноды тоже стартуют скрытыми, чтобы не было «вспышки всех сразу» при
+    // открытии файла до первого tick()-а. Первый tick включит те, что
+    // прошли через timeline-cutoff.
+    mesh.visible = false;
 
     // Hub ring — два скрещенных торических кольца («атомная модель»)
     if (n.isHub) {
@@ -229,6 +237,7 @@ function buildFromState() {
       hubGroup.add(ringB);
       hubGroup.position.copy(mesh.position);
       hubGroup.scale.set(baseR, baseR, baseR);
+      hubGroup.visible = false;
       hubGroup.userData.hubOwner = n;
       nodesGroup.add(hubGroup);
       n._hubRing = hubGroup;
@@ -243,6 +252,7 @@ function buildFromState() {
       const orphRing = new THREE.Mesh(orphanRingGeo, orphMat);
       orphRing.position.copy(mesh.position);
       orphRing.scale.set(baseR, baseR, baseR);
+      orphRing.visible = false;
       orphRing.userData.orphOwner = n;
       nodesGroup.add(orphRing);
       n._orphRing = orphRing;
@@ -406,10 +416,16 @@ function loadText(text) {
   const slider = document.getElementById('timeline');
   if (slider) slider.value = 100;
   if (infoEl) infoEl.textContent = `${state.nodes.length} nodes · ${state.edges.length} edges · ${norm.format}`;
+  // Сохраним для возможного возврата в 2D. Sample не передаём —
+  // при первом открытии 2D пусть показывает свой sample.
+  if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
 }
 
 // ---- UI ----
-btnSample.addEventListener('click', () => loadText(SAMPLE_JSONL));
+btnSample.addEventListener('click', () => {
+  clearSessionForHandoff();
+  loadText(SAMPLE_JSONL);
+});
 btnFile.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (ev) => {
   const f = ev.target.files && ev.target.files[0];
@@ -547,6 +563,7 @@ function tick() {
     const bf = birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
     const visible = n.bornAt != null && (!state.hiddenRoles || !state.hiddenRoles.has(n.role));
     mesh.visible = visible;
+    if (n._halo) n._halo.visible = visible;
     if (n._hubRing) n._hubRing.visible = visible;
     if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
@@ -637,5 +654,11 @@ if (qJsonl) {
     .then(loadText)
     .catch(() => loadText(SAMPLE_JSONL));
 } else {
-  loadText(SAMPLE_JSONL);
+  // Если пришли из 2D с уже загруженным файлом — восстановим его
+  const handoff = loadSessionForHandoff();
+  if (handoff && handoff.text) {
+    loadText(handoff.text);
+  } else {
+    loadText(SAMPLE_JSONL);
+  }
 }
