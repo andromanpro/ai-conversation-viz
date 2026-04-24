@@ -4,6 +4,7 @@ import { parseLine } from '../core/parser.js';
 import { appendRawNodes } from '../core/graph.js';
 import { reheat } from '../core/layout.js';
 import { ensureParticles } from '../view/particles.js';
+import { safeFetch } from '../core/url-safety.js';
 
 let urlInput, btnStart, btnStop, statusEl;
 let pollingId = null;
@@ -56,7 +57,7 @@ async function pullOnce() {
   if (!lastUrl) return;
   try {
     const sep = lastUrl.includes('?') ? '&' : '?';
-    const resp = await fetch(lastUrl + sep + '_t=' + Date.now(), { cache: 'no-store' });
+    const resp = await safeFetch(lastUrl + sep + '_t=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) { setStatus('http ' + resp.status); return; }
     const text = await resp.text();
     const byteLen = text.length;

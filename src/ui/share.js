@@ -1,5 +1,6 @@
 import { state } from '../view/state.js';
 import { loadText } from './loader.js';
+import { safeFetch, isSafeHttpUrl } from '../core/url-safety.js';
 
 let toastEl, btnShare;
 
@@ -56,7 +57,11 @@ export async function applyUrlParamsLate() {
 
   if (params.jsonl) {
     try {
-      const resp = await fetch(params.jsonl, { cache: 'no-store' });
+      if (!isSafeHttpUrl(params.jsonl)) {
+        console.warn('[share] отклонён небезопасный URL:', params.jsonl);
+        return;
+      }
+      const resp = await safeFetch(params.jsonl, { cache: 'no-store' });
       if (resp.ok) {
         const text = await resp.text();
         loadText(text);
@@ -75,8 +80,11 @@ export async function applyUrlParamsLate() {
     }
   }
 
+  // Whitelist ролей — не принимаем произвольный текст из ?hide=
+  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use']);
   if (Array.isArray(params.hide)) {
     for (const r of params.hide) {
+      if (!KNOWN_ROLES.has(r)) continue;
       state.hiddenRoles.add(r);
       const btn = document.querySelector(`.btn-role[data-role="${r}"]`);
       if (btn) btn.classList.remove('active');

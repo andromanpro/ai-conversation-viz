@@ -16,6 +16,7 @@ import { computeDepths } from '../core/tree.js';
 import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
+import { safeFetch } from '../core/url-safety.js';
 
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
 import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
@@ -649,7 +650,7 @@ function pulseFor(n, t) {
 // ---- Boot ----
 const qJsonl = new URLSearchParams(location.search).get('jsonl');
 if (qJsonl) {
-  fetch(qJsonl, { cache: 'no-store' })
+  safeFetch(qJsonl, { cache: 'no-store' })
     .then(r => r.ok ? r.text() : Promise.reject())
     .then(loadText)
     .catch(() => loadText(SAMPLE_JSONL));

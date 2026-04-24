@@ -17,6 +17,7 @@ import { matchNodes } from '../src/ui/search.js';
 import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.js';
 import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
+import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
 import { addRemoteSessions } from '../src/ui/session-picker.js';
 import { state as globalState } from '../src/view/state.js';
 
@@ -1029,6 +1030,44 @@ test('diff: mergeDiff edges for B-only ноды цепляются через ma
   const edges = state.edges.filter(e => e.source === 'a1' && e.target === 'B:bNew');
   eq(edges.length, 1);
   eq(edges[0].diffSide, 'B');
+});
+
+// ==== URL SAFETY ====
+test('url-safety: http/https URLs пропускаются', () => {
+  assert(isSafeHttpUrl('https://example.com/x.jsonl'));
+  assert(isSafeHttpUrl('http://localhost:3000/stream'));
+});
+
+test('url-safety: относительные URL пропускаются', () => {
+  assert(isSafeHttpUrl('/sessions/a.jsonl'));
+  assert(isSafeHttpUrl('./data.jsonl'));
+  assert(isSafeHttpUrl('../other.jsonl'));
+});
+
+test('url-safety: опасные схемы отклоняются', () => {
+  assert(!isSafeHttpUrl('javascript:alert(1)'));
+  assert(!isSafeHttpUrl('data:text/html,<script>alert(1)</script>'));
+  assert(!isSafeHttpUrl('file:///etc/passwd'));
+  assert(!isSafeHttpUrl('ftp://some/file'));
+  assert(!isSafeHttpUrl('ws://socket'));
+});
+
+test('url-safety: некорректный URL отклоняется', () => {
+  assert(!isSafeHttpUrl(''));
+  assert(!isSafeHttpUrl(null));
+  assert(!isSafeHttpUrl(undefined));
+  assert(!isSafeHttpUrl(42));
+});
+
+test('url-safety: isLikelyIntranet ловит RFC1918 + loopback', () => {
+  assert(isLikelyIntranet('http://localhost:3000/'));
+  assert(isLikelyIntranet('http://127.0.0.1/'));
+  assert(isLikelyIntranet('http://192.168.1.1/'));
+  assert(isLikelyIntranet('http://10.0.0.5/'));
+  assert(isLikelyIntranet('http://172.16.0.1/'));
+  assert(isLikelyIntranet('http://mynas.local/'));
+  assert(!isLikelyIntranet('https://example.com/'));
+  assert(!isLikelyIntranet('https://github.com/foo'));
 });
 
 // ==== SUMMARY ====

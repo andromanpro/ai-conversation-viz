@@ -15,6 +15,7 @@
 import { state } from '../view/state.js';
 import { parseJSONL } from '../core/parser.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
+import { safeFetch } from '../core/url-safety.js';
 
 let _loadText = null;
 let _panel = null;
@@ -105,7 +106,7 @@ export function addRemoteSessions(items) {
  */
 export async function loadSessionIndex(url) {
   try {
-    const res = await fetch(url, { credentials: 'same-origin' });
+    const res = await safeFetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const items = Array.isArray(data) ? data : (data.sessions || []);
@@ -144,7 +145,7 @@ async function selectSession(id) {
   // Ленивая загрузка удалённых сессий
   if (!s.content && s.remoteUrl) {
     try {
-      const res = await fetch(s.remoteUrl, { credentials: 'same-origin' });
+      const res = await safeFetch(s.remoteUrl, { credentials: 'same-origin' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       s.content = await res.text();
       s.meta = computeMeta(s.content);
