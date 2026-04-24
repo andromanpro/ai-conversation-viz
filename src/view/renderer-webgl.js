@@ -1,79 +1,144 @@
-// WebGL-рендерер — альтернатива Canvas 2D для больших графов (10k+ нод).
-// Работает на отдельном canvas-элементе (#graph-webgl). Переключение
-// между canvas2d / webgl через state.renderBackend — без пересоздания
-// данных, только другое отображение.
+// WebGL-рендерер v2 — красивая альтернатива Canvas 2D.
 //
-// Stack:
-//   • gl.POINTS для нод — один draw call на все точки. Форма (круг) и
-//     мягкое свечение через fragment shader на основе gl_PointCoord.
-//   • gl.LINES для рёбер — каждое ребро разбито на EDGE_SEGMENTS
-//     сегментов по quadratic Bezier, получается единый buffer LINES.
-//   • Additive blending — чтобы свечение складывалось красиво.
-//   • Camera (x, y, scale) передаётся как uniform, трансформация
-//     world→clip делается в vertex shader (CPU ничего не считает для
-//     позиций).
+// 4 passes на кадр (все — один draw call каждый, GPU-heavy):
+//   1. Starfield (статичные точки на фоне)
+//   2. Edge bezier segments (gl.LINES, градиент к середине)
+//   3. Edge particles (gl.POINTS, бегут вдоль рёбер, питаются от u_time)
+//   4. Nodes (gl.POINTS, multi-layer glow + pulse + white core)
+//   5. Hub rings (gl.POINTS, вложенный fragment shader рисует annulus)
 //
-// Features v1:
-//   ✓ Role / topic / diff / search / hub / orphan цвета (через
-//     подготовленный a_color в VBO — перекрашивается per-frame, но
-//     для 10k это ок)
-//   ✓ Birth-animation (scale + alpha как в 2D)
-//   ✓ Hidden roles через hiddenRoles (просто не добавляем в VBO)
-//   ✓ Theme (фон берётся из CSS переменной --bg)
-//   ✗ Tool-icons (Unicode-символы) — убраны в WebGL-режиме, можно
-//     добавить в v2 через sprite-sheet.
-//   ✗ Particles вдоль рёбер — упрощение v1.
-//   ✗ Heartbeat-scale и vignette — v1 не рисует.
-//
-// API:
-//   initWebglRenderer(canvas) → { gl, ... } или throws если WebGL нет
-//   drawWebgl(state, tSec, viewport) — рисует кадр. API симметричен
-//     Canvas 2D draw() — чтобы main.js мог просто выбрать роут.
-//   resizeWebgl(canvas) — при resize окна / изменении dpr.
+// Все цвета/размеры пересчитываются CPU'ом каждый кадр (buffer upload)
+// — для 10k нод это ~500KB/frame, тянет 60 fps. Вершинные трансформации
+// и все shading-эффекты — на GPU через uniforms.
 
 import { CFG } from '../core/config.js';
-import { hueToRgbaString } from './topics.js';
 
-// ==== GLSL ====
+// ==== GLSL shaders ====
 
+// --- Points (nodes) ---
 const POINT_VS = `
   attribute vec2 a_position;
   attribute vec4 a_color;
   attribute float a_size;
-  uniform vec2 u_camera;     // cam.x, cam.y (world-space offset)
-  uniform float u_scale;     // cam.scale
-  uniform vec2 u_viewport;   // width, height (CSS px)
-  uniform float u_dpr;       // devicePixelRatio
+  attribute float a_phase;    // для пульса (0..2π)
+  attribute float a_flags;    // bit0 = search match, bit1 = selected
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  uniform float u_dpr;
+  uniform float u_time;
   varying vec4 v_color;
+  varying float v_pulse;
+  varying float v_highlight;
+
   void main() {
     vec2 screen = (a_position - u_camera) * u_scale;
-    // screen (CSS px) → clip (-1..1)
     vec2 clip = screen / (u_viewport * 0.5) - 1.0;
-    clip.y = -clip.y; // браузерная ось Y направлена вниз
+    clip.y = -clip.y;
     gl_Position = vec4(clip, 0.0, 1.0);
-    gl_PointSize = max(1.0, a_size * u_dpr);
+
+    // Пульс ноды — ядро «дышит»
+    float pulse = 0.5 + 0.5 * sin(u_time * 1.8 + a_phase);
+    v_pulse = pulse;
+
+    // Флаги: 1.0 = search match (ярче + больше), 2.0 = selected
+    v_highlight = a_flags;
+
+    float sizeMul = 1.0 + 0.08 * pulse;
+    if (mod(a_flags, 2.0) >= 1.0) {
+      // match — заметное «биение»
+      sizeMul *= 1.15 + 0.1 * sin(u_time * 4.2 + a_phase);
+    }
+    gl_PointSize = max(1.0, a_size * u_dpr * sizeMul);
     v_color = a_color;
   }
 `;
 
-// Fragment shader рисует круг в квадратном gl_PointCoord (-0.5..0.5
-// после центрирования). Внутренняя «ядерная» часть — полная прозрачность,
-// внешняя — мягкий falloff к 0 → даёт glow.
+// Multi-layer glow: плотное белое ядро → насыщенный цветной middle →
+// мягкий halo. Даёт бёрн-эффект как у реальных светящихся орбов.
 const POINT_FS = `
   precision mediump float;
   varying vec4 v_color;
+  varying float v_pulse;
+  varying float v_highlight;
+
   void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) discard;
-    // Плотный центр + мягкий edge
-    float core = smoothstep(0.5, 0.35, dist);
-    float halo = smoothstep(0.5, 0.0, dist) * 0.35;
-    float a = (core + halo) * v_color.a;
-    gl_FragColor = vec4(v_color.rgb * (core + halo), a);
+
+    // Три слоя:
+    //   core   — плотная яркая сердцевина (белая, нормализованная цветом)
+    //   mid    — основной тон ноды
+    //   halo   — мягкое свечение до края
+    float core = smoothstep(0.25, 0.0, dist);
+    float mid  = smoothstep(0.5, 0.15, dist);
+    float halo = smoothstep(0.5, 0.0, dist) * 0.45;
+
+    // Белая сердцевина: цвет стремится к белому в центре.
+    vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
+
+    // Композиция (additive-friendly)
+    vec3 rgb = whiteCore * (mid + halo * 0.35);
+    float alpha = (mid + halo) * v_color.a;
+
+    // Search-match — подсветка белым поверх
+    if (mod(v_highlight, 2.0) >= 1.0) {
+      float flash = smoothstep(0.5, 0.2, dist) * (0.5 + 0.5 * v_pulse);
+      rgb += vec3(1.0, 1.0, 0.85) * flash * 0.6;
+    }
+
+    gl_FragColor = vec4(rgb, alpha);
   }
 `;
 
+// --- Hub rings ---
+// Отдельный fragment shader рисует annulus (кольцо) в gl_PointCoord.
+const HUB_VS = `
+  attribute vec2 a_position;
+  attribute vec4 a_color;
+  attribute float a_size;
+  attribute float a_phase;
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  uniform float u_dpr;
+  uniform float u_time;
+  varying vec4 v_color;
+  varying float v_rotation;
+
+  void main() {
+    vec2 screen = (a_position - u_camera) * u_scale;
+    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
+    clip.y = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    float sizeMul = 1.0 + 0.1 * sin(u_time * 1.2 + a_phase);
+    gl_PointSize = max(2.0, a_size * u_dpr * sizeMul);
+    v_color = a_color;
+    v_rotation = u_time * 0.8 + a_phase;
+  }
+`;
+const HUB_FS = `
+  precision mediump float;
+  varying vec4 v_color;
+  varying float v_rotation;
+
+  void main() {
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+    // Annulus: кольцо между 0.38 и 0.47 радиуса (от центра point-size)
+    float ring = smoothstep(0.38, 0.42, dist) * smoothstep(0.49, 0.44, dist);
+    // Разрывы по углу — даёт эффект «3 дуги, вращающихся»
+    float angle = atan(coord.y, coord.x) + v_rotation;
+    float arcs = 0.5 + 0.5 * sin(angle * 3.0);
+    arcs = smoothstep(0.35, 0.65, arcs);
+    float alpha = ring * (0.55 + 0.45 * arcs) * v_color.a;
+    gl_FragColor = vec4(v_color.rgb * 1.2, alpha);
+  }
+`;
+
+// --- Edges (bezier lines) ---
 const LINE_VS = `
   attribute vec2 a_position;
   attribute vec4 a_color;
@@ -81,6 +146,7 @@ const LINE_VS = `
   uniform float u_scale;
   uniform vec2 u_viewport;
   varying vec4 v_color;
+
   void main() {
     vec2 screen = (a_position - u_camera) * u_scale;
     vec2 clip = screen / (u_viewport * 0.5) - 1.0;
@@ -89,7 +155,6 @@ const LINE_VS = `
     v_color = a_color;
   }
 `;
-
 const LINE_FS = `
   precision mediump float;
   varying vec4 v_color;
@@ -98,7 +163,87 @@ const LINE_FS = `
   }
 `;
 
-// ==== Shader compile helpers ====
+// --- Edge particles ---
+// Position вычисляется per-vertex как bezier(u_time*speed + offset).
+const PARTICLE_VS = `
+  attribute vec2 a_start;       // A
+  attribute vec2 a_end;         // B
+  attribute vec2 a_ctrl;        // control point
+  attribute vec4 a_color;
+  attribute float a_offset;     // фаза вдоль ребра (0..1)
+  attribute float a_speed;      // коэф скорости
+  uniform float u_time;
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  uniform float u_dpr;
+  varying vec4 v_color;
+
+  void main() {
+    // t перемещается по кривой, петляет 0→1→0→1…
+    float t = fract(u_time * a_speed * 0.35 + a_offset);
+    // Quadratic Bezier
+    float u = 1.0 - t;
+    vec2 world = u*u*a_start + 2.0*u*t*a_ctrl + t*t*a_end;
+    vec2 screen = (world - u_camera) * u_scale;
+    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
+    clip.y = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    // Размер пульсирует вдоль пути
+    float head = smoothstep(0.0, 0.3, t) * smoothstep(1.0, 0.3, t);
+    gl_PointSize = (2.5 + 2.5 * head) * u_dpr;
+    v_color = vec4(a_color.rgb, a_color.a * (0.6 + 0.4 * head));
+  }
+`;
+const PARTICLE_FS = `
+  precision mediump float;
+  varying vec4 v_color;
+  void main() {
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+    float core = smoothstep(0.5, 0.0, dist);
+    gl_FragColor = vec4(v_color.rgb, v_color.a * core);
+  }
+`;
+
+// --- Starfield ---
+const STAR_VS = `
+  attribute vec2 a_position;
+  attribute float a_size;
+  attribute float a_depth;
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  uniform float u_dpr;
+  varying float v_alpha;
+
+  void main() {
+    // Parallax: глубина влияет на сдвиг от камеры — дальние звёзды
+    // двигаются медленнее, создают объём.
+    vec2 world = a_position - u_camera * a_depth;
+    vec2 screen = world * (0.6 + 0.4 * a_depth);
+    // Оборачиваем внутри viewport (бесконечное поле)
+    screen = mod(screen, u_viewport) - u_viewport * 0.5;
+    vec2 clip = screen / (u_viewport * 0.5);
+    gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+    gl_PointSize = a_size * u_dpr * a_depth;
+    v_alpha = 0.3 + 0.7 * a_depth;
+  }
+`;
+const STAR_FS = `
+  precision mediump float;
+  varying float v_alpha;
+  void main() {
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+    float core = smoothstep(0.5, 0.0, dist);
+    gl_FragColor = vec4(0.82, 0.88, 1.0, core * v_alpha);
+  }
+`;
+
+// ==== Compile helpers ====
 
 function compileShader(gl, type, src) {
   const sh = gl.createShader(type);
@@ -125,30 +270,30 @@ function compileProgram(gl, vsSrc, fsSrc) {
   return prog;
 }
 
-// ==== State ====
+// ==== Module state ====
 
 let gl = null;
 let canvasEl = null;
-let pointProg = null, lineProg = null;
-let pointBuf = null, lineBuf = null;
 
-// Point layout per vertex: [x, y, r, g, b, a, size] = 7 floats
-const POINT_STRIDE = 7;
-// Line layout per vertex: [x, y, r, g, b, a] = 6 floats
-const LINE_STRIDE = 6;
+let pointProg, hubProg, lineProg, particleProg, starProg;
+let pointBuf, hubBuf, lineBuf, particleBuf, starBuf;
 
-let pointArr = null; // Float32Array
-let lineArr = null;  // Float32Array
-let pointCapacity = 0;
-let lineCapacity = 0;
+// Layouts (floats per vertex)
+const POINT_STRIDE = 9;    // x, y, r, g, b, a, size, phase, flags
+const HUB_STRIDE = 8;      // x, y, r, g, b, a, size, phase
+const LINE_STRIDE = 6;     // x, y, r, g, b, a
+const PARTICLE_STRIDE = 10; // ax, ay, bx, by, cx, cy, r, g, b, a (offset/speed вычисляются из mod+index)
+const STAR_STRIDE = 4;     // x, y, size, depth
 
-const EDGE_SEGMENTS = 8;
+let pointArr, hubArr, lineArr, particleArr;
+let starsBuilt = null; // Float32Array, statиc
 
-// Uniform locations cache
-let uPoint = {};
-let uLine = {};
-let aPoint = {};
-let aLine = {};
+// Uniforms
+const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {};
+const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {};
+
+const EDGE_SEGMENTS = 10;
+const PARTICLES_PER_EDGE = 2;
 
 // ==== Init ====
 
@@ -159,30 +304,39 @@ export function initWebglRenderer(canvas) {
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
   pointProg = compileProgram(gl, POINT_VS, POINT_FS);
+  hubProg = compileProgram(gl, HUB_VS, HUB_FS);
   lineProg = compileProgram(gl, LINE_VS, LINE_FS);
+  particleProg = compileProgram(gl, PARTICLE_VS, PARTICLE_FS);
+  starProg = compileProgram(gl, STAR_VS, STAR_FS);
 
-  aPoint.position = gl.getAttribLocation(pointProg, 'a_position');
-  aPoint.color = gl.getAttribLocation(pointProg, 'a_color');
-  aPoint.size = gl.getAttribLocation(pointProg, 'a_size');
-  uPoint.camera = gl.getUniformLocation(pointProg, 'u_camera');
-  uPoint.scale = gl.getUniformLocation(pointProg, 'u_scale');
-  uPoint.viewport = gl.getUniformLocation(pointProg, 'u_viewport');
-  uPoint.dpr = gl.getUniformLocation(pointProg, 'u_dpr');
-
-  aLine.position = gl.getAttribLocation(lineProg, 'a_position');
-  aLine.color = gl.getAttribLocation(lineProg, 'a_color');
-  uLine.camera = gl.getUniformLocation(lineProg, 'u_camera');
-  uLine.scale = gl.getUniformLocation(lineProg, 'u_scale');
-  uLine.viewport = gl.getUniformLocation(lineProg, 'u_viewport');
+  cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
+  cacheAttribs(hubProg, aHub, uHub, ['a_position', 'a_color', 'a_size', 'a_phase'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
+  cacheAttribs(lineProg, aLine, uLine, ['a_position', 'a_color'],
+    ['u_camera', 'u_scale', 'u_viewport']);
+  cacheAttribs(particleProg, aParticle, uParticle, ['a_start', 'a_end', 'a_ctrl', 'a_color', 'a_offset', 'a_speed'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
+  cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
 
   pointBuf = gl.createBuffer();
+  hubBuf = gl.createBuffer();
   lineBuf = gl.createBuffer();
+  particleBuf = gl.createBuffer();
+  starBuf = gl.createBuffer();
 
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive — glow складывается
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive
 
+  buildStars();
   resizeWebgl(canvas);
   return { gl };
+}
+
+function cacheAttribs(prog, aMap, uMap, aNames, uNames) {
+  for (const n of aNames) aMap[n.replace(/^a_/, '')] = gl.getAttribLocation(prog, n);
+  for (const n of uNames) uMap[n.replace(/^u_/, '')] = gl.getUniformLocation(prog, n);
 }
 
 export function resizeWebgl(canvas) {
@@ -197,37 +351,42 @@ export function resizeWebgl(canvas) {
   gl.viewport(0, 0, canvas.width, canvas.height);
 }
 
-function ensureCapacity(which, count) {
-  if (which === 'point') {
-    const needed = count * POINT_STRIDE;
-    if (!pointArr || pointArr.length < needed) {
-      pointArr = new Float32Array(Math.max(needed, (pointArr?.length || 0) * 2 || 1024));
-      pointCapacity = Math.floor(pointArr.length / POINT_STRIDE);
-    }
-  } else {
-    const needed = count * LINE_STRIDE;
-    if (!lineArr || lineArr.length < needed) {
-      lineArr = new Float32Array(Math.max(needed, (lineArr?.length || 0) * 2 || 1024));
-      lineCapacity = Math.floor(lineArr.length / LINE_STRIDE);
-    }
+// ==== Starfield build (один раз при init) ====
+
+function buildStars() {
+  const count = 500;
+  const range = 3000;
+  const arr = new Float32Array(count * STAR_STRIDE);
+  // Детерминированный PRNG чтобы звёзды не прыгали при resize
+  let seed = 0x13579;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return (seed >>> 8) / 16777216;
+  };
+  for (let i = 0; i < count; i++) {
+    const off = i * STAR_STRIDE;
+    arr[off + 0] = (rnd() - 0.5) * range * 2;
+    arr[off + 1] = (rnd() - 0.5) * range * 2;
+    arr[off + 2] = 1.0 + rnd() * 1.5;     // size
+    arr[off + 3] = 0.15 + rnd() * 0.35;   // depth (parallax)
   }
+  starsBuilt = arr;
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
 }
 
-// ==== Color helpers (мимо Canvas 2D renderer.glowRgba et al) ====
-
-// Все цвета — [r, g, b, a], 0..1.
-const _tmpRgba = [0, 0, 0, 1];
+// ==== Color helpers ====
 
 const ROLE_RGB = {
-  user: [0.482, 0.666, 0.941],        // #7BAAF0
-  assistant: [0.313, 0.831, 0.709],   // #50D4B5
-  tool_use: [0.925, 0.627, 0.250],    // #ECA040
+  user: [0.482, 0.666, 0.941],
+  assistant: [0.313, 0.831, 0.709],
+  tool_use: [0.925, 0.627, 0.250],
 };
 
 const DIFF_RGB = {
-  A: [1.0, 0.376, 0.686],  // #ff60af
-  B: [0.352, 0.823, 1.0],  // #5ad2ff
-  both: [0.784, 0.784, 0.839], // #c8c8d6
+  A: [1.0, 0.376, 0.686],
+  B: [0.352, 0.823, 1.0],
+  both: [0.784, 0.784, 0.839],
 };
 
 function hslToRgb(h, s, l) {
@@ -250,7 +409,7 @@ function nodeColor(n, state, out) {
   if (state.diffMode && n._diffOrigin) {
     [r, g, b] = DIFF_RGB[n._diffOrigin] || DIFF_RGB.both;
   } else if (state.topicsMode && n._topicHue != null) {
-    [r, g, b] = hslToRgb(n._topicHue, 0.7, 0.55);
+    [r, g, b] = hslToRgb(n._topicHue, 0.75, 0.58);
   } else {
     [r, g, b] = ROLE_RGB[n.role] || [0.5, 0.5, 0.5];
   }
@@ -263,17 +422,17 @@ function edgeColor(e, state, out) {
   if (state.diffMode && e.diffSide === 'B') {
     [r, g, b] = DIFF_RGB.B;
   } else if (e.adopted) {
-    r = 0.78; g = 0.71; b = 0.47; // #c8b478
+    r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
     r = 0.925; g = 0.627; b = 0.250;
   } else {
-    r = 0.0; g = 0.831; b = 1.0; // #00d4ff
+    r = 0.0; g = 0.831; b = 1.0;
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
 }
 
-// ==== Birth helpers (совпадают с renderer.js) ====
+// ==== Birth helpers ====
 
 function birthFactorLocal(bornAt, nowMs, duration) {
   if (bornAt == null) return 0;
@@ -284,10 +443,36 @@ function birthFactorLocal(bornAt, nowMs, duration) {
 }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-// ==== Buffer fills ====
+// ==== Capacity management ====
+
+function ensureArr(name, neededFloats) {
+  switch (name) {
+    case 'point':
+      if (!pointArr || pointArr.length < neededFloats) {
+        pointArr = new Float32Array(Math.max(neededFloats, (pointArr?.length || 0) * 2 || 1024));
+      }
+      return pointArr;
+    case 'hub':
+      if (!hubArr || hubArr.length < neededFloats) {
+        hubArr = new Float32Array(Math.max(neededFloats, (hubArr?.length || 0) * 2 || 256));
+      }
+      return hubArr;
+    case 'line':
+      if (!lineArr || lineArr.length < neededFloats) {
+        lineArr = new Float32Array(Math.max(neededFloats, (lineArr?.length || 0) * 2 || 2048));
+      }
+      return lineArr;
+    case 'particle':
+      if (!particleArr || particleArr.length < neededFloats) {
+        particleArr = new Float32Array(Math.max(neededFloats, (particleArr?.length || 0) * 2 || 1024));
+      }
+      return particleArr;
+  }
+}
+
+// ==== Fill buffers ====
 
 function fillPointBuffer(state, nowMs) {
-  // Видимые ноды: bornAt != null, не скрытая роль, не collapsed child
   const nodes = state.nodes;
   const collapsed = state.collapsed;
   const hidden = state.hiddenRoles;
@@ -295,10 +480,10 @@ function fillPointBuffer(state, nowMs) {
   const hasPath = state.pathSet && state.pathSet.size > 0;
   const topicFilter = state.topicFilter || null;
 
-  let count = 0;
-  ensureCapacity('point', nodes.length);
+  ensureArr('point', nodes.length * POINT_STRIDE);
   const arr = pointArr;
   const rgb = [0, 0, 0];
+  let count = 0;
 
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
@@ -308,19 +493,15 @@ function fillPointBuffer(state, nowMs) {
     const bf = birthFactorLocal(n.bornAt, nowMs, CFG.birthDurationMs);
     const ag = CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bf);
     const ss = CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bf);
-    // Dim по search/topic/path
     let dimMul = 1;
-    if (hasSearch) dimMul = state.searchMatches.has(n.id) ? 1 : CFG.searchDimAlpha;
+    const matchSearch = hasSearch && state.searchMatches.has(n.id);
+    if (hasSearch) dimMul = matchSearch ? 1 : CFG.searchDimAlpha;
     else if (topicFilter) dimMul = n._topicWord === topicFilter ? 1 : CFG.searchDimAlpha;
     else if (hasPath) dimMul = state.pathSet.has(n.id) ? 1 : CFG.focusDimAlpha;
-    const isMatch = hasSearch && state.searchMatches.has(n.id);
     const alpha = ag * dimMul;
-    // Hub pulse + search pulse — упрощённо без phase (чтобы точно влезло в кадр без overhead)
     const hubMul = n.isHub ? 1.25 : 1;
-    const matchMul = isMatch ? 1.35 : 1;
-    // Point size — в CSS px. Домножается на dpr в vertex shader.
-    // Плюс увеличим чтобы glow был виден (x3 от n.r)
-    const size = Math.max(2, n.r * ss * hubMul * matchMul * 2.6 * state.camera.scale);
+    // size в CSS-px — x3 от node.r для glow bleed, плюс scale камеры
+    const size = Math.max(3, n.r * ss * hubMul * 3.2 * state.camera.scale);
 
     nodeColor(n, state, rgb);
     const off = count * POINT_STRIDE;
@@ -331,6 +512,37 @@ function fillPointBuffer(state, nowMs) {
     arr[off + 4] = rgb[2];
     arr[off + 5] = alpha;
     arr[off + 6] = size;
+    arr[off + 7] = n.phase || 0;
+    arr[off + 8] = matchSearch ? 1 : 0; // flags: bit0
+    count++;
+  }
+  return count;
+}
+
+function fillHubBuffer(state, nowMs) {
+  const nodes = state.nodes;
+  const hidden = state.hiddenRoles;
+  ensureArr('hub', nodes.length * HUB_STRIDE);
+  const arr = hubArr;
+  let count = 0;
+  for (const n of nodes) {
+    if (!n.isHub) continue;
+    if (n.bornAt == null) continue;
+    if (hidden && hidden.has(n.role)) continue;
+    const bf = birthFactorLocal(n.bornAt, nowMs, CFG.birthDurationMs);
+    const ag = CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bf);
+    const ss = CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bf);
+    // Кольцо крупнее ноды x2.2
+    const size = Math.max(10, n.r * ss * 6.5 * state.camera.scale);
+    const off = count * HUB_STRIDE;
+    arr[off + 0] = n.x;
+    arr[off + 1] = n.y;
+    arr[off + 2] = 1.0;   // золотистый
+    arr[off + 3] = 0.84;
+    arr[off + 4] = 0.47;
+    arr[off + 5] = 0.85 * ag;
+    arr[off + 6] = size;
+    arr[off + 7] = n.phase || 0;
     count++;
   }
   return count;
@@ -349,33 +561,28 @@ function fillLineBuffer(state) {
   const collapsed = state.collapsed;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
   const topicFilter = state.topicFilter || null;
-
-  // 2 вершины per segment, EDGE_SEGMENTS сегментов per edge
-  ensureCapacity('line', edges.length * EDGE_SEGMENTS * 2);
+  ensureArr('line', edges.length * EDGE_SEGMENTS * 2 * LINE_STRIDE);
   const arr = lineArr;
   const rgb = [0, 0, 0];
   const p0 = [0, 0], p1 = [0, 0];
   let count = 0;
 
-  for (let e of edges) {
+  for (const e of edges) {
     if (!e.a || !e.b) continue;
     if (e.a.bornAt == null || e.b.bornAt == null) continue;
     if (hidden && (hidden.has(e.a.role) || hidden.has(e.b.role))) continue;
     if (e.adopted && !connectOrphans) continue;
-    // Skip edges to/from collapsed tool_use children
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
 
-    // Dim по search/topic filter
-    let edgeAlpha = e.adopted ? 0.22 : 0.55;
+    let edgeAlpha = e.adopted ? 0.25 : 0.6;
     if (hasSearch) {
       edgeAlpha *= (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
     } else if (topicFilter) {
       edgeAlpha *= (e.a._topicWord === topicFilter && e.b._topicWord === topicFilter) ? 1 : CFG.searchDimAlpha;
     }
-
     edgeColor(e, state, rgb);
-    // Control point — как в Canvas 2D (edgeCurveStrength)
+
     const ax = e.a.x, ay = e.a.y;
     const bx = e.b.x, by = e.b.y;
     const mx = (ax + bx) / 2;
@@ -391,18 +598,69 @@ function fillLineBuffer(state) {
       const t1 = (s + 1) / EDGE_SEGMENTS;
       quadBezier(ax, ay, bx, by, cx, cy, t0, p0);
       quadBezier(ax, ay, bx, by, cx, cy, t1, p1);
-      // Fade к середине (интенсивнее посредине, слабее по краям)
-      const fade0 = 1 - Math.abs(t0 - 0.5) * 0.4;
-      const fade1 = 1 - Math.abs(t1 - 0.5) * 0.4;
-      const off0 = count * LINE_STRIDE;
-      arr[off0 + 0] = p0[0]; arr[off0 + 1] = p0[1];
-      arr[off0 + 2] = rgb[0]; arr[off0 + 3] = rgb[1]; arr[off0 + 4] = rgb[2];
-      arr[off0 + 5] = edgeAlpha * fade0;
+      // Fade: интенсивнее ближе к ноде-цели (чтобы "стрелка" читалась)
+      const fade0 = 0.5 + 0.5 * t0;
+      const fade1 = 0.5 + 0.5 * t1;
+      let off0 = count * LINE_STRIDE;
+      arr[off0++] = p0[0]; arr[off0++] = p0[1];
+      arr[off0++] = rgb[0]; arr[off0++] = rgb[1]; arr[off0++] = rgb[2];
+      arr[off0++] = edgeAlpha * fade0;
       count++;
-      const off1 = count * LINE_STRIDE;
-      arr[off1 + 0] = p1[0]; arr[off1 + 1] = p1[1];
-      arr[off1 + 2] = rgb[0]; arr[off1 + 3] = rgb[1]; arr[off1 + 4] = rgb[2];
-      arr[off1 + 5] = edgeAlpha * fade1;
+      let off1 = count * LINE_STRIDE;
+      arr[off1++] = p1[0]; arr[off1++] = p1[1];
+      arr[off1++] = rgb[0]; arr[off1++] = rgb[1]; arr[off1++] = rgb[2];
+      arr[off1++] = edgeAlpha * fade1;
+      count++;
+    }
+  }
+  return count;
+}
+
+function fillParticleBuffer(state) {
+  const edges = state.edges;
+  const hidden = state.hiddenRoles;
+  const connectOrphans = !!state.connectOrphans;
+  const collapsed = state.collapsed;
+  const topicFilter = state.topicFilter || null;
+  const hasSearch = state.searchMatches && state.searchMatches.size > 0;
+  // PARTICLES_PER_EDGE частиц на ребро. Per-vertex: ax, ay, bx, by, cx, cy, r, g, b, a
+  ensureArr('particle', edges.length * PARTICLES_PER_EDGE * PARTICLE_STRIDE);
+  const arr = particleArr;
+  const rgb = [0, 0, 0];
+  let count = 0;
+
+  for (let ei = 0; ei < edges.length; ei++) {
+    const e = edges[ei];
+    if (!e.a || !e.b) continue;
+    if (e.a.bornAt == null || e.b.bornAt == null) continue;
+    if (hidden && (hidden.has(e.a.role) || hidden.has(e.b.role))) continue;
+    if (e.adopted) continue; // по adopted-рёбрам не гоняем частицы
+    const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
+    if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
+
+    // skip если edge dim'нут поиском/фильтром
+    if (hasSearch && !(state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id))) continue;
+    if (topicFilter && !(e.a._topicWord === topicFilter && e.b._topicWord === topicFilter)) continue;
+
+    edgeColor(e, state, rgb);
+    const ax = e.a.x, ay = e.a.y;
+    const bx = e.b.x, by = e.b.y;
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const off = len * CFG.edgeCurveStrength;
+    const cx = mx - (dy / len) * off;
+    const cy = my + (dx / len) * off;
+
+    for (let p = 0; p < PARTICLES_PER_EDGE; p++) {
+      // offset per particle фиксирован — визуально равномерно распределены
+      let o = count * PARTICLE_STRIDE;
+      arr[o++] = ax; arr[o++] = ay;
+      arr[o++] = bx; arr[o++] = by;
+      arr[o++] = cx; arr[o++] = cy;
+      arr[o++] = rgb[0]; arr[o++] = rgb[1]; arr[o++] = rgb[2];
+      arr[o++] = 0.9;
       count++;
     }
   }
@@ -414,17 +672,33 @@ function fillLineBuffer(state) {
 export function drawWebgl(state, tSec, viewport) {
   if (!gl) return;
   const nowMs = tSec * 1000;
-
-  // Фон — читаем CSS --bg, чтобы theme-toggle работал
-  const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
-  gl.clearColor(bg[0], bg[1], bg[2], 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const vw = viewport.width;
   const vh = viewport.height;
 
-  // ---- Edges (под точками) ----
+  const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // ---- 1. Starfield ----
+  if (starsBuilt) {
+    gl.useProgram(starProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
+    const stride = STAR_STRIDE * 4;
+    gl.enableVertexAttribArray(aStar.position);
+    gl.vertexAttribPointer(aStar.position, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(aStar.size);
+    gl.vertexAttribPointer(aStar.size, 1, gl.FLOAT, false, stride, 2 * 4);
+    gl.enableVertexAttribArray(aStar.depth);
+    gl.vertexAttribPointer(aStar.depth, 1, gl.FLOAT, false, stride, 3 * 4);
+    gl.uniform2f(uStar.camera, state.camera.x, state.camera.y);
+    gl.uniform1f(uStar.scale, state.camera.scale);
+    gl.uniform2f(uStar.viewport, vw, vh);
+    gl.uniform1f(uStar.dpr, dpr);
+    gl.drawArrays(gl.POINTS, 0, starsBuilt.length / STAR_STRIDE);
+  }
+
+  // ---- 2. Edge lines (основа) ----
   const lineCount = fillLineBuffer(state);
   if (lineCount > 0) {
     gl.useProgram(lineProg);
@@ -441,7 +715,69 @@ export function drawWebgl(state, tSec, viewport) {
     gl.drawArrays(gl.LINES, 0, lineCount);
   }
 
-  // ---- Points (ноды) ----
+  // ---- 3. Edge particles ----
+  const particleCount = fillParticleBuffer(state);
+  if (particleCount > 0) {
+    gl.useProgram(particleProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, particleBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, particleArr.subarray(0, particleCount * PARTICLE_STRIDE), gl.DYNAMIC_DRAW);
+    const stride = PARTICLE_STRIDE * 4;
+    gl.enableVertexAttribArray(aParticle.start);
+    gl.vertexAttribPointer(aParticle.start, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(aParticle.end);
+    gl.vertexAttribPointer(aParticle.end, 2, gl.FLOAT, false, stride, 2 * 4);
+    gl.enableVertexAttribArray(aParticle.ctrl);
+    gl.vertexAttribPointer(aParticle.ctrl, 2, gl.FLOAT, false, stride, 4 * 4);
+    gl.enableVertexAttribArray(aParticle.color);
+    gl.vertexAttribPointer(aParticle.color, 4, gl.FLOAT, false, stride, 6 * 4);
+    // offset/speed через vertexAttrib1f — фиксированные per-draw для простоты.
+    // Частицы чередуются — первая со сдвигом, вторая на противоположной фазе.
+    if (aParticle.offset >= 0) gl.disableVertexAttribArray(aParticle.offset);
+    if (aParticle.speed >= 0) gl.disableVertexAttribArray(aParticle.speed);
+    // Рисуем по очереди: 0-я частица каждого ребра, потом 1-я
+    for (let p = 0; p < PARTICLES_PER_EDGE; p++) {
+      const offset = p / PARTICLES_PER_EDGE;
+      const speed = 1.0 + p * 0.2;
+      if (aParticle.offset >= 0) gl.vertexAttrib1f(aParticle.offset, offset);
+      if (aParticle.speed >= 0) gl.vertexAttrib1f(aParticle.speed, speed);
+      gl.uniform1f(uParticle.time, tSec);
+      gl.uniform2f(uParticle.camera, state.camera.x, state.camera.y);
+      gl.uniform1f(uParticle.scale, state.camera.scale);
+      gl.uniform2f(uParticle.viewport, vw, vh);
+      gl.uniform1f(uParticle.dpr, dpr);
+      // рисуем каждую p-ю — все p=0 вершины через STRIDE offset
+      // Проще: частицы идут подряд в buffer — по 1 на ребро на шаг p
+      // Так как fillParticleBuffer кладёт их подряд, используем [p*edgeCount .. (p+1)*edgeCount]
+      const countPerPhase = Math.floor(particleCount / PARTICLES_PER_EDGE);
+      const start = p * countPerPhase;
+      gl.drawArrays(gl.POINTS, start, countPerPhase);
+    }
+  }
+
+  // ---- 4. Hub rings ----
+  const hubCount = fillHubBuffer(state, nowMs);
+  if (hubCount > 0) {
+    gl.useProgram(hubProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, hubBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, hubArr.subarray(0, hubCount * HUB_STRIDE), gl.DYNAMIC_DRAW);
+    const stride = HUB_STRIDE * 4;
+    gl.enableVertexAttribArray(aHub.position);
+    gl.vertexAttribPointer(aHub.position, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(aHub.color);
+    gl.vertexAttribPointer(aHub.color, 4, gl.FLOAT, false, stride, 2 * 4);
+    gl.enableVertexAttribArray(aHub.size);
+    gl.vertexAttribPointer(aHub.size, 1, gl.FLOAT, false, stride, 6 * 4);
+    gl.enableVertexAttribArray(aHub.phase);
+    gl.vertexAttribPointer(aHub.phase, 1, gl.FLOAT, false, stride, 7 * 4);
+    gl.uniform2f(uHub.camera, state.camera.x, state.camera.y);
+    gl.uniform1f(uHub.scale, state.camera.scale);
+    gl.uniform2f(uHub.viewport, vw, vh);
+    gl.uniform1f(uHub.dpr, dpr);
+    gl.uniform1f(uHub.time, tSec);
+    gl.drawArrays(gl.POINTS, 0, hubCount);
+  }
+
+  // ---- 5. Nodes (поверх рёбер и колец) ----
   const pointCount = fillPointBuffer(state, nowMs);
   if (pointCount > 0) {
     gl.useProgram(pointProg);
@@ -454,10 +790,15 @@ export function drawWebgl(state, tSec, viewport) {
     gl.vertexAttribPointer(aPoint.color, 4, gl.FLOAT, false, stride, 2 * 4);
     gl.enableVertexAttribArray(aPoint.size);
     gl.vertexAttribPointer(aPoint.size, 1, gl.FLOAT, false, stride, 6 * 4);
+    gl.enableVertexAttribArray(aPoint.phase);
+    gl.vertexAttribPointer(aPoint.phase, 1, gl.FLOAT, false, stride, 7 * 4);
+    gl.enableVertexAttribArray(aPoint.flags);
+    gl.vertexAttribPointer(aPoint.flags, 1, gl.FLOAT, false, stride, 8 * 4);
     gl.uniform2f(uPoint.camera, state.camera.x, state.camera.y);
     gl.uniform1f(uPoint.scale, state.camera.scale);
     gl.uniform2f(uPoint.viewport, vw, vh);
     gl.uniform1f(uPoint.dpr, dpr);
+    gl.uniform1f(uPoint.time, tSec);
     gl.drawArrays(gl.POINTS, 0, pointCount);
   }
 }
@@ -466,12 +807,9 @@ function readCssColor(cssVar, fallback) {
   try {
     const s = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
     if (!s) return fallback;
-    // Поддерживаем #rrggbb и rgb(r,g,b)
     if (s.startsWith('#')) {
       const hex = s.slice(1);
-      const h = hex.length === 3
-        ? hex.split('').map(c => c + c).join('')
-        : hex;
+      const h = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
       const r = parseInt(h.slice(0, 2), 16) / 255;
       const g = parseInt(h.slice(2, 4), 16) / 255;
       const b = parseInt(h.slice(4, 6), 16) / 255;

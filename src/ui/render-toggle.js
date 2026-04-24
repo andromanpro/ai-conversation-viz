@@ -17,15 +17,20 @@ export function initRenderToggle() {
   _canvas2d = document.getElementById('graph');
 
   if (!isWebglSupported() || !_webglCanvas) {
+    // WebGL не доступен — форсим canvas2d и прячем кнопку
+    state.renderBackend = 'canvas2d';
+    if (_webglCanvas) _webglCanvas.style.display = 'none';
+    if (_canvas2d) _canvas2d.style.display = 'block';
     if (_btn) _btn.style.display = 'none';
     return;
   }
 
-  // Восстановить выбор из localStorage
-  try {
-    const saved = localStorage.getItem(LS_KEY);
-    if (saved === 'webgl') setBackend('webgl', { silent: true });
-  } catch {}
+  // Восстановить выбор из localStorage. Если ничего не сохранено — WebGL
+  // как дефолт (он красивее + быстрее; canvas2d остаётся как fallback).
+  let saved = null;
+  try { saved = localStorage.getItem(LS_KEY); } catch {}
+  const initialBackend = saved === 'canvas2d' ? 'canvas2d' : 'webgl';
+  setBackend(initialBackend, { silent: true });
 
   if (_btn) _btn.addEventListener('click', () => {
     setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
