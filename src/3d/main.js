@@ -707,6 +707,19 @@ window.addEventListener('keydown', (ev) => {
   }
 });
 
+// === 3D Layout switch (Force / Radial / Swim) ===
+// state.layoutMode используется как и в 2D. В 3D-режиме 'force' даёт текущее
+// поведение (physics в плоскости + depth z). 'radial' и 'swim' выставляют
+// target-координаты из layouts3d.js и анимируют переход в течение
+// CFG.layoutTransitionMs миллисекунд. Во время не-force layout physics
+// отключается (n.x/y фиксированы layout'ом).
+//
+// Декларации идут ДО init-блока — иначе init3DLayoutSwitch() из init попадёт
+// в TDZ для _layoutBtns / _layoutTransition (let не hoisted).
+
+let _layoutTransition = null;  // { from: Map<id,{x,y,z}>, to: Map, t0, dur, toMode }
+let _layoutBtns = [];
+
 // ---- Init UI modules ----
 window.__viz = { state, CFG };
 initI18n();
@@ -721,16 +734,6 @@ initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0,
 initTopicsToggle();
 initOrphansToggle();
 init3DLayoutSwitch();
-
-// === 3D Layout switch (Force / Radial / Swim) ===
-// state.layoutMode используется как и в 2D. В 3D-режиме 'force' даёт текущее
-// поведение (physics в плоскости + depth z). 'radial' и 'swim' выставляют
-// target-координаты из layouts3d.js и анимируют переход в течение
-// CFG.layoutTransitionMs миллисекунд. Во время не-force layout physics
-// отключается (n.x/y фиксированы layout'ом).
-
-let _layoutTransition = null;  // { from: Map<id,{x,y,z}>, to: Map, t0, dur, toMode }
-let _layoutBtns = [];
 
 function init3DLayoutSwitch() {
   // Восстанавливаем сохранённый выбор из localStorage (отдельный ключ
