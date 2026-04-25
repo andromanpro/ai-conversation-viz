@@ -18,7 +18,9 @@
     --border: rgba(123, 170, 240, 0.25);
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+  html { background: var(--bg); }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+  body { background: transparent; }
   #three-container { position: fixed; inset: 0; }
   canvas { display: block; }
   .hud { position: fixed; pointer-events: none; z-index: 10; }
@@ -124,7 +126,6 @@
 </style>
 </head>
 <body>
-<canvas id="bg-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1;pointer-events:none;"></canvas>
 <div id="three-container"></div>
 
 <div class="hud" id="top-left">
@@ -143,7 +144,6 @@
     <button class="btn btn-icon" id="btn-camera-reset" data-i18n-title="tip.camera_reset">🎯</button>
     <button class="btn btn-icon" id="btn-drift" data-i18n-title="tip.drift_on">🌊</button>
     <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio" data-i18n-aria="aria.audio">♪</button>
-    <button class="btn btn-icon" id="btn-bg" title="Background" aria-haspopup="menu">·</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
     <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
@@ -222,7 +222,6 @@ python -m http.server 8000</pre>
   }
 }
 </script>
-<script src="./lib/lava-backgrounds.js"></script>
 <script type="module" src="./src/3d/main.js"></script>
 
 <script>

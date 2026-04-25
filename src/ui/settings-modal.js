@@ -61,6 +61,7 @@ function labelOf(key) {
 // state.<key>, 'CFG' → CFG.<key>. customApply вызывается после set value.
 const TOGGLES = [
   ['display', 'showReverseSignal', 'state'],
+  ['display', 'showForwardSignal', 'state'],
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
   ['metrics', 'showMetrics',       'state'],

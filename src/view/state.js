@@ -31,6 +31,7 @@ export const state = {
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
   showReverseSignal: true,// анимированный обратный импульс tool_result → tool_use
+  showForwardSignal: true,// частицы вдоль обычных edges (parent → child) в 3D
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях

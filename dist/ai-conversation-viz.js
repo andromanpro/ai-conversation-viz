@@ -1948,6 +1948,7 @@ const DICT = {
     'settings.postGapMs': 'Min gap between bubbles',
     'settings.birthMs': 'Birth animation (ms)',
     'settings.showReverseSignal': 'Reverse signal (tool_result → tool_use)',
+    'settings.showForwardSignal': 'Forward signal — particles along edges (3D)',
     'settings.showErrorRings': 'Error rings (red dashed)',
     'settings.showThinking': 'Thinking blocks (purple)',
     'settings.showMetrics': 'Token & duration badges',
@@ -2141,6 +2142,7 @@ const DICT = {
     'settings.postGapMs': 'Мин. пауза между пузырями',
     'settings.birthMs': 'Анимация рождения (мс)',
     'settings.showReverseSignal': 'Обратный сигнал (tool_result → tool_use)',
+    'settings.showForwardSignal': 'Сигнал вдоль связей в 3D (частицы)',
     'settings.showErrorRings': 'Кольца ошибок (красные пунктиры)',
     'settings.showThinking': 'Thinking-блоки (фиолетовые)',
     'settings.showMetrics': 'Бейджи токенов и времени',
@@ -2282,6 +2284,7 @@ const state = {
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
   showReverseSignal: true,// анимированный обратный импульс tool_result → tool_use
+  showForwardSignal: true,// частицы вдоль обычных edges (parent → child) в 3D
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
@@ -3005,16 +3008,20 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмный cyberpunk-фон
+  // Radial vignette — тёмный cyberpunk-фон. Если активен LavaBackgrounds
+  // (state.bgMode != 'none'), пропускаем — иначе непрозрачный vignette
+  // перекрыл бы bg-canvas. Vignette остаётся на default 'none' режиме.
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
-  const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
+  if (!state.bgMode || state.bgMode === 'none') {
+    const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
+    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   const cam = state.camera;
   const cutoff = timelineCutoff(state);
@@ -3797,7 +3804,9 @@ const PARTICLES_PER_EDGE = 2;
 
 function initWebglRenderer(canvas) {
   canvasEl = canvas;
-  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: false })
+  // alpha: true чтобы canvas мог быть прозрачным (для LavaBackgrounds).
+  // premultipliedAlpha: false — наши shaders не предумножают alpha.
+  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: true })
     || canvas.getContext('experimental-webgl', { antialias: true, premultipliedAlpha: false, alpha: false });
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
@@ -4305,8 +4314,16 @@ function drawWebgl(state, tSec, viewport) {
   const vw = viewport.width;
   const vh = viewport.height;
 
-  const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
-  gl.clearColor(bg[0], bg[1], bg[2], 1);
+  // Если активен LavaBackgrounds (state.bgMode != 'none') — clearColor
+  // прозрачный, чтобы bg-canvas просвечивал через WebGL canvas. Иначе
+  // непрозрачный body-bg цвет (как было).
+  const useBgCanvas = state.bgMode && state.bgMode !== 'none';
+  if (useBgCanvas) {
+    gl.clearColor(0, 0, 0, 0);
+  } else {
+    const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
+    gl.clearColor(bg[0], bg[1], bg[2], 1);
+  }
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   // ---- 1. Starfield ----
@@ -6011,6 +6028,7 @@ function labelOf(key) {
 // state.<key>, 'CFG' → CFG.<key>. customApply вызывается после set value.
 const TOGGLES = [
   ['display', 'showReverseSignal', 'state'],
+  ['display', 'showForwardSignal', 'state'],
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
   ['metrics', 'showMetrics',       'state'],

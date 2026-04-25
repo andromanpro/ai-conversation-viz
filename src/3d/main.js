@@ -35,7 +35,6 @@ import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { initAudio } from '../ui/audio.js';
 import { initFpsCounter, tickFps } from '../ui/fps-counter.js';
-import { initBackground, initBackgroundDropdown } from '../ui/background-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { applySphericalScatter } from './scatter.js';
@@ -80,10 +79,7 @@ const btnFile = document.getElementById('btn-file');
 const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
-// scene.background = null → Three.js renderer не очищает фон, виден
-// LavaBackgrounds canvas сзади (когда выбран режим). При mode='none'
-// background-canvas остаётся прозрачным, и виден body bg (#0a0e1a).
-scene.background = null;
+scene.background = new THREE.Color(0x0a0e1a);
 scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
@@ -92,7 +88,6 @@ camera.position.set(0, -300, 1200);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-renderer.setClearColor(0x000000, 0); // alpha=0 → bg-canvas просвечивает
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.85;
 container.appendChild(renderer.domElement);
@@ -327,47 +322,38 @@ function makeHaloMaterial(color) {
   });
 }
 
-// Round particle material — для birth-comet и reverse-signal частиц.
-// THREE.PointsMaterial рендерит квадраты (gl_PointCoord без discard);
-// здесь добавляем круглую soft-alpha форму через ShaderMaterial.
-// vertexColors=true → каждая частица берёт цвет из BufferAttribute.
-const ROUND_PARTICLE_VS = `
-  attribute vec3 color;
-  varying vec3 vColor;
-  uniform float uSize;
-  void main() {
-    vColor = color;
-    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * mvPos;
-    // Size с attenuation по distance — дальше частица меньше
-    gl_PointSize = uSize * (300.0 / -mvPos.z);
-  }
-`;
-const ROUND_PARTICLE_FS = `
-  precision mediump float;
-  varying vec3 vColor;
-  uniform float uOpacity;
-  void main() {
-    vec2 c = gl_PointCoord - vec2(0.5);
-    float d = length(c);
-    if (d > 0.5) discard;
-    // Smooth soft falloff к краю — не резкий circle, а glowy blob
-    float a = pow(1.0 - d * 2.0, 1.6) * uOpacity;
-    gl_FragColor = vec4(vColor, a);
-  }
-`;
+// Round particle material — Canvas-generated radial-gradient texture.
+// Three.js PointsMaterial с map+vertexColors надёжно работает (в отличие
+// от ShaderMaterial с custom attribute, которая ломалась в некоторых
+// браузерах). Texture даёт soft round shape вместо квадратов.
+let _roundParticleTex = null;
+function getRoundParticleTexture() {
+  if (_roundParticleTex) return _roundParticleTex;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0,   'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.7)');
+  g.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  _roundParticleTex = new THREE.CanvasTexture(c);
+  _roundParticleTex.minFilter = THREE.LinearFilter;
+  return _roundParticleTex;
+}
 function makeRoundParticleMaterial(size, opacity) {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uSize: { value: size },
-      uOpacity: { value: opacity },
-    },
-    vertexShader: ROUND_PARTICLE_VS,
-    fragmentShader: ROUND_PARTICLE_FS,
+  return new THREE.PointsMaterial({
+    size: size,
+    sizeAttenuation: true,
+    map: getRoundParticleTexture(),
+    vertexColors: true,
     transparent: true,
+    opacity: opacity,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
+    alphaTest: 0.01,
   });
 }
 
@@ -407,6 +393,15 @@ function clearGroups() {
   }
   while (edgesGroup.children.length) {
     const m = edgesGroup.children.pop();
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  }
+  // GPU MEMORY LEAK FIX: reverseSignalGroup не очищался при повторных
+  // loadText. Каждая загрузка добавляла +3 Points (reverseSignal,
+  // birthComet, forwardSignal) с своими geometry+material, старые
+  // оставались в сцене → GPU usage rose.
+  while (reverseSignalGroup.children.length) {
+    const m = reverseSignalGroup.children.pop();
     if (m.geometry) m.geometry.dispose();
     if (m.material) m.material.dispose();
   }
@@ -867,6 +862,11 @@ function updateBirthComets(nowMs) {
 const _fwdEdgeColor = new THREE.Color();
 function updateForwardSignalBuffer(tSec) {
   if (!forwardSignalPoints || !forwardSignalPositions || !forwardSignalColors) return;
+  if (state.showForwardSignal === false) {
+    forwardSignalPoints.visible = false;
+    return;
+  }
+  forwardSignalPoints.visible = true;
   const FAR = -1e6;
   const hidden = state.hiddenRoles;
   const collapsed = state.collapsed;
@@ -1350,8 +1350,6 @@ initOrphansToggle();
 initSettingsModal();
 initAudio();
 initFpsCounter('fps-counter');
-initBackground();
-initBackgroundDropdown('btn-bg');
 init3DLayoutSwitch();
 init3DDriftAndCameraButtons();
 
