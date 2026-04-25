@@ -375,18 +375,17 @@ export function draw(ctx, state, tSec, viewport, extras) {
     }
   }
 
-  // ---- REVERSE SIGNAL (tool_result → tool_use, animated lemon comet) ----
-  // Аналог WebGL pass'а: «комета» бежит от tool_result обратно к tool_use,
-  // визуализируя возврат ответа от инструмента к ассистенту.
+  // ---- REVERSE SIGNAL (tool_use → tool_result, animated lemon comet) ----
+  // Поток выполнения tool'а: tool_use (вызов) → tool_result (ответ).
   // На Canvas 2D рисуем 1 частицу на pair с pulsing position по quadratic
-  // Bezier (B → A) и затухающим следом.
+  // Bezier (A → B) и затухающим следом.
   if (state.showReverseSignal !== false && state.pairEdges && state.pairEdges.length) {
     ctx.save();
     for (const p of state.pairEdges) {
       if (!visible(p.a) || !visible(p.b)) continue;
-      // SWAP направление: комета летит от B (tool_result) к A (tool_use)
-      const ax = p.b.x, ay = p.b.y;
-      const bx = p.a.x, by = p.a.y;
+      // Forward: комета летит от A (tool_use) к B (tool_result)
+      const ax = p.a.x, ay = p.a.y;
+      const bx = p.b.x, by = p.b.y;
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;
       const dx = bx - ax, dy = by - ay;

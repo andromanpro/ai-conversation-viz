@@ -134,8 +134,16 @@ scene.add(starsObj);
 
 const nodesGroup = new THREE.Group();
 const edgesGroup = new THREE.Group();
+const reverseSignalGroup = new THREE.Group();
 scene.add(nodesGroup);
 scene.add(edgesGroup);
+scene.add(reverseSignalGroup);
+
+// Reverse-signal particles: один THREE.Points per state.pairEdges, обновляем
+// positions каждый кадр (bezier point по time + seed). Lemon-yellow halo
+// через PointsMaterial (sizeAttenuation: true, additive blending).
+let reverseSignalPoints = null;
+let reverseSignalPositions = null; // Float32Array — pos для каждой частицы
 
 // Глобальный LineSegments для всех рёбер — один draw call, обновляемый
 // каждый кадр из текущих позиций нод. Гарантирует что рёбра не «отрываются»
@@ -364,6 +372,34 @@ function buildFromState() {
   edgesMesh.frustumCulled = false;
   edgesGroup.add(edgesMesh);
 
+  // Reverse-signal points — одна частица на pair-edge, обновляется в tick
+  while (reverseSignalGroup.children.length) {
+    const m = reverseSignalGroup.children.pop();
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  }
+  reverseSignalPoints = null;
+  reverseSignalPositions = null;
+  const pairCount = (state.pairEdges || []).length;
+  if (pairCount > 0) {
+    reverseSignalPositions = new Float32Array(pairCount * 3);
+    const rsGeom = new THREE.BufferGeometry();
+    rsGeom.setAttribute('position', new THREE.BufferAttribute(reverseSignalPositions, 3));
+    const rsMat = new THREE.PointsMaterial({
+      color: 0xfff05c,             // lemon yellow
+      size: 14,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    });
+    reverseSignalPoints = new THREE.Points(rsGeom, rsMat);
+    reverseSignalPoints.frustumCulled = false;
+    reverseSignalGroup.add(reverseSignalPoints);
+  }
+
   // Инициализируем buffer первым кадром
   updateEdgeBuffer();
 
@@ -477,6 +513,112 @@ function updateEdgeBuffer() {
   edgesMesh.geometry.attributes.color.needsUpdate = true;
 }
 
+// Обновляет позиции reverse-signal частиц. Каждая частица движется по
+// quadratic Bezier от tool_use (a) к tool_result (b) с фазой
+// `(t * 0.6 + seed) % 1`. Если pair невидим (одна из нод не родилась
+// или скрыта role-фильтром) — частица прячется за камеру (-1e6).
+function updateReverseSignalBuffer(tSec) {
+  if (!reverseSignalPoints || !reverseSignalPositions) return;
+  if (state.showReverseSignal === false) {
+    reverseSignalPoints.visible = false;
+    return;
+  }
+  reverseSignalPoints.visible = true;
+  const pairs = state.pairEdges || [];
+  const pos = reverseSignalPositions;
+  const hidden = state.hiddenRoles;
+  const collapsed = state.collapsed;
+  const FAR = -1e6;
+  let i = 0;
+  for (const p of pairs) {
+    const a = p.a, b = p.b;
+    const off = i * 3;
+    i++;
+    const invisible = !a || !b
+      || a.bornAt == null || b.bornAt == null
+      || (hidden && (hidden.has(a.role) || hidden.has(b.role)))
+      || (a.role === 'tool_use' && a.parentId && collapsed && collapsed.has(a.parentId))
+      || (b.role === 'tool_use' && b.parentId && collapsed && collapsed.has(b.parentId));
+    if (invisible) {
+      pos[off] = FAR; pos[off + 1] = FAR; pos[off + 2] = FAR;
+      continue;
+    }
+    // Фаза t — каждая комета имеет собственный seed (по phase), движется
+    // со скоростью ~0.6 цикла/сек
+    const seed = ((a.phase || 0) + (b.phase || 0)) * 0.15;
+    const tt = ((tSec * 0.6 + seed) % 1.0 + 1.0) % 1.0;
+    // Bezier: A → B с control point чуть отнесён ортогонально для arc
+    const ax = a.x, ay = -a.y, az = a.z || 0;
+    const bx = b.x, by = -b.y, bz = b.z || 0;
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    // Control point — лёгкий arc вверх по Y (in three.js Y up)
+    const cx = (ax + bx) / 2;
+    const cy = (ay + by) / 2 + len * 0.12;
+    const cz = (az + bz) / 2;
+    const u = 1 - tt;
+    pos[off]     = u * u * ax + 2 * u * tt * cx + tt * tt * bx;
+    pos[off + 1] = u * u * ay + 2 * u * tt * cy + tt * tt * by;
+    pos[off + 2] = u * u * az + 2 * u * tt * cz + tt * tt * bz;
+  }
+  reverseSignalPoints.geometry.attributes.position.needsUpdate = true;
+}
+
+// === Explode intro ===
+//
+// При первой загрузке (или новом sample) ноды стартуют коллапсированными
+// в центре сцены, потом «взрываются» — анимированно разлетаются на свои
+// final positions за ~1500 мс с easeOutCubic. Дает яркий wow-эффект и
+// сразу демонстрирует объёмность 3D-сцены.
+let _explodeStart = null;
+const _explodeDuration = 1500;
+const _explodeFrom = new Map(); // nodeId → {x, y, z}
+const _explodeTo = new Map();   // nodeId → {x, y, z}
+
+function startExplodeIntro(nodes) {
+  _explodeFrom.clear();
+  _explodeTo.clear();
+  for (const n of nodes) {
+    // final position уже в n.x/y/z (после prewarm)
+    _explodeTo.set(n.id, { x: n.x, y: n.y, z: n.z || 0 });
+    // start position — около (0,0,0) с маленьким seeded jitter (нода не
+    // должна быть в нулевой точке абсолютно, иначе все начинают с одной
+    // координаты и repulsion сразу выкидывает каждую в случайную сторону)
+    const jx = ((n._seedDx || 0.5) - 0.5) * 30;
+    const jy = ((n._seedDy || 0.5) - 0.5) * 30;
+    const jz = ((n._seedDx || 0.5) - 0.5) * 30 * (n._seedDy != null ? -1 : 1);
+    n.x = jx;
+    n.y = jy;
+    n.z = jz;
+    n.vx = 0; n.vy = 0; n.vz = 0;
+    _explodeFrom.set(n.id, { x: jx, y: jy, z: jz });
+  }
+  _explodeStart = performance.now();
+  // Замораживаем physics на время explode чтобы repulsion не дёргал ноды
+  // одновременно с интерполяцией
+  if (state.sim) state.sim.frozen = true;
+}
+
+function tickExplode(nowMs) {
+  if (_explodeStart == null) return;
+  const t = Math.min(1, (nowMs - _explodeStart) / _explodeDuration);
+  // easeOutCubic — быстрый старт, плавное приземление
+  const e = 1 - Math.pow(1 - t, 3);
+  for (const n of state.nodes) {
+    const from = _explodeFrom.get(n.id);
+    const to = _explodeTo.get(n.id);
+    if (!from || !to) continue;
+    n.x = from.x + (to.x - from.x) * e;
+    n.y = from.y + (to.y - from.y) * e;
+    n.z = from.z + (to.z - from.z) * e;
+  }
+  if (t >= 1) {
+    _explodeStart = null;
+    // Размораживаем physics — она дойдёт до settled state самостоятельно
+    if (state.sim) state.sim.frozen = false;
+  }
+}
+
 function skipEdge(pos, col, pIdx, cIdx) {
   for (let s = 0; s < EDGE_SEGMENTS * 2; s++) {
     pos[pIdx++] = 0; pos[pIdx++] = 0; pos[pIdx++] = 0;
@@ -565,6 +707,14 @@ function loadText(text) {
   // Если активный layout не 'force' — мгновенно применяем target-координаты
   if (state.layoutMode === 'radial' || state.layoutMode === 'swim') {
     applyLayoutTargets3D(state.layoutMode, /*animate=*/ false);
+  }
+  // Explode intro — ноды коллапсируются в центр и взрываются на target за 1.5s.
+  // Вызывается ПОСЛЕ финальных positions (prewarm + опц. layout3D apply),
+  // запоминает их как target и переставляет current в (0,0,0)+jitter.
+  startExplodeIntro(state.nodes);
+  // Mesh positions обновятся в animation tick (через mesh.position.set)
+  for (const n of state.nodes) {
+    if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
   }
 }
 
@@ -802,13 +952,15 @@ init3DLayoutSwitch();
 
 function init3DLayoutSwitch() {
   // Восстанавливаем сохранённый выбор из localStorage (отдельный ключ
-  // для 3D — у 2D и 3D разные пространства)
+  // для 3D — у 2D и 3D разные пространства). Default 'radial' — на 3D
+  // сразу видна древовидная структура с ветвлением, для wow-эффекта
+  // лучше force с physics (force показывает структуру не сразу).
   let saved = null;
   try { saved = localStorage.getItem('viz:layoutMode-3d'); } catch {}
   if (saved === 'force' || saved === 'radial' || saved === 'swim') {
     state.layoutMode = saved;
   } else {
-    state.layoutMode = 'force';
+    state.layoutMode = 'radial';
   }
   const host = document.getElementById('layout-switch-3d');
   if (!host) return;
@@ -955,11 +1107,13 @@ function tick() {
   tickPlay();
   updateBirths3D(nowMs);
   tickLayoutTransition3D();
+  tickExplode(nowMs);  // intro animation — приоритет над physics
 
   // Physics — только в force-layout. В radial/swim ноды стоят на target.
   // CRITICAL: используем stepPhysics3D (а не 2D-шный stepPhysics).
   // 2D-physics не двигал z, отчего graph скатывался в плоский pancake
   // на каждом кадре несмотря на правильный 3D-prewarm.
+  // Explode-intro сам замораживает sim (sim.frozen=true) — physics ждёт.
   if (state.layoutMode === 'force' && state.sim && !state.sim.frozen && state.nodes.length) {
     stepPhysics3D(state.nodes, state.edges, { safeW: 2000 }, state.sim);
   }
@@ -1040,6 +1194,8 @@ function tick() {
   }
   // Обновить positions/colors для LineSegments — ребра будут следовать за нодами
   updateEdgeBuffer();
+  // Обновить reverse-signal частицы (lemon comets вдоль pair-edges)
+  updateReverseSignalBuffer(t);
 
   tickStory(nowMs, state);
   tickStats();

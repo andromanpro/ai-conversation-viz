@@ -766,15 +766,13 @@ function fillParticleBuffer(state) {
 
 // Заполняет буфер reverse-signal частиц.
 //
-// Идея: вместо статичных пунктирных tool_use ↔ tool_result связей, рисуем
-// светящуюся «комету», бегущую ОТ tool_result (b) → ОБРАТНО к tool_use (a).
-// Это визуализирует поток ответа от инструмента к ассистенту, который
-// его вызвал. Wow-эффект для multi-tool turn'ов: видно как N ответов
-// разлетаются обратно к N разным tool_use родителям.
+// Идея: рисуем светящуюся «комету» по pair-связи tool_use ↔ tool_result.
+// Семантически — это поток выполнения tool'а: ассистент вызвал tool_use →
+// инструмент сделал работу → результат пришёл к user-tool_result. Поэтому
+// частица летит ОТ tool_use (a) К tool_result (b) — в направлении дейст­вия.
 //
 // Переиспользуем существующий particleProg shader: тот же layout
-// (a_start, a_end, a_ctrl, a_color, a_offset, a_speed). SWAP a_start↔a_end
-// → particle движется в обратную сторону. Цвет — лимонно-жёлтый.
+// (a_start, a_end, a_ctrl, a_color, a_offset, a_speed). Цвет — лимонно-жёлтый.
 const REVERSE_PARTICLES_PER_EDGE = 1;
 const REVERSE_RGB = [1.0, 0.92, 0.36]; // lemon
 function fillReverseSignalBuffer(state) {
@@ -794,15 +792,14 @@ function fillReverseSignalBuffer(state) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(a) || isCollapsedChild(b)) continue;
 
-    // SWAP направление: start = b (tool_result), end = a (tool_use)
-    const ax = b.x, ay = b.y; // start
-    const bx = a.x, by = a.y; // end
+    // Forward направление: start = a (tool_use), end = b (tool_result)
+    const ax = a.x, ay = a.y; // start
+    const bx = b.x, by = b.y; // end
     // Control point — лёгкий arc, отнесён ортогонально от середины
     const mx = (ax + bx) / 2;
     const my = (ay + by) / 2;
     const dx = bx - ax, dy = by - ay;
     const len = Math.hypot(dx, dy) || 1;
-    // отгибаем влево от направления; небольшая амплитуда чтобы не путать
     const off = len * 0.10;
     const cx = mx - (dy / len) * off;
     const cy = my + (dx / len) * off;
