@@ -66,6 +66,25 @@ static text use `data-i18n="key"`, `data-i18n-title="key"`,
 - Circular imports are forbidden. Run `npm test` — the module-namespace bundler
   topologically sorts imports, cycles fail the build.
 
+## index.html and standalone.html must stay in sync
+
+There are two HTML entry points:
+
+- **`index.html`** — for development, loads `src/main.js` as ES modules.
+- **`standalone.html`** — for `file://` use, loads `dist/ai-conversation-viz.js` (the IIFE bundle).
+
+Both render the same UI. Any DOM change (new button, new panel, new id, new
+`data-i18n*` attribute) must be applied to **both** files in the same PR.
+
+Quick check before committing:
+
+```bash
+diff <(grep -E "btn-|data-i18n" index.html) <(grep -E "btn-|data-i18n" standalone.html)
+```
+
+Only legitimate diff: `header.subtitle_force` vs `header.subtitle_standalone`
+in the subtitle div. Anything else is a sync bug.
+
 ## Pull requests
 
 - One concern per PR. If you find three things, send three PRs.
