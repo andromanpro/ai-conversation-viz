@@ -80,7 +80,6 @@ const MODULES = [
   'src/ui/lang-toggle.js',
   'src/ui/metrics-overlay.js',
   'src/ui/fps-counter.js',
-  'src/ui/background-toggle.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',
   'src/ui/share.js',

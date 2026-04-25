@@ -349,9 +349,7 @@ const PARTICLES_PER_EDGE = 2;
 
 export function initWebglRenderer(canvas) {
   canvasEl = canvas;
-  // alpha: true чтобы canvas мог быть прозрачным (для LavaBackgrounds).
-  // premultipliedAlpha: false — наши shaders не предумножают alpha.
-  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: true })
+  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: false })
     || canvas.getContext('experimental-webgl', { antialias: true, premultipliedAlpha: false, alpha: false });
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
@@ -859,16 +857,8 @@ export function drawWebgl(state, tSec, viewport) {
   const vw = viewport.width;
   const vh = viewport.height;
 
-  // Если активен LavaBackgrounds (state.bgMode != 'none') — clearColor
-  // прозрачный, чтобы bg-canvas просвечивал через WebGL canvas. Иначе
-  // непрозрачный body-bg цвет (как было).
-  const useBgCanvas = state.bgMode && state.bgMode !== 'none';
-  if (useBgCanvas) {
-    gl.clearColor(0, 0, 0, 0);
-  } else {
-    const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
-    gl.clearColor(bg[0], bg[1], bg[2], 1);
-  }
+  const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   // ---- 1. Starfield ----

@@ -564,7 +564,9 @@ function buildFromState() {
     const fGeom = new THREE.BufferGeometry();
     fGeom.setAttribute('position', new THREE.BufferAttribute(forwardSignalPositions, 3));
     fGeom.setAttribute('color', new THREE.BufferAttribute(forwardSignalColors, 3));
-    forwardSignalPoints = new THREE.Points(fGeom, makeRoundParticleMaterial(10, 0.85));
+    // Размер 16 + opacity 1.0 — чтобы частицы прошли через bloomPass
+    // threshold (0.30) и светились через UnrealBloomPass.
+    forwardSignalPoints = new THREE.Points(fGeom, makeRoundParticleMaterial(16, 1.0));
     forwardSignalPoints.frustumCulled = false;
     reverseSignalGroup.add(forwardSignalPoints);
   }
@@ -891,12 +893,11 @@ function updateForwardSignalBuffer(tSec) {
       }
       const ax = a.x, ay = -a.y, az = a.z || 0;
       const bx = b.x, by = -b.y, bz = b.z || 0;
-      const dx = bx - ax, dy = by - ay, dz = bz - az;
-      const len = Math.hypot(dx, dy, dz) || 1;
-      // Control point чуть отнесён по +Y для arc'a (как edges)
-      const cx = (ax + bx) / 2;
-      const cy = (ay + by) / 2 + len * 0.10;
-      const cz = (az + bz) / 2;
+      // Control point — ИДЕНТИЧНО updateEdgeBuffer (jitter в x/y, +35 по z)
+      // чтобы частица бежала ровно по линии ребра, не по своей кривой.
+      const cx = (a.x + b.x) / 2 + ((a._seedDx || 0.5) - 0.5) * 30;
+      const cy = -((a.y + b.y) / 2) + ((a._seedDy || 0.5) - 0.5) * 30;
+      const cz = (az + bz) / 2 + 35;
       // Phase: уникальная для каждой частицы (по edge index + p)
       const seed = ((a.phase || 0) + (b.phase || 0)) * 0.13 + p * 0.5;
       const tt = ((tSec * 0.55 + seed) % 1.0 + 1.0) % 1.0;
@@ -904,11 +905,12 @@ function updateForwardSignalBuffer(tSec) {
       forwardSignalPositions[off3]     = u * u * ax + 2 * u * tt * cx + tt * tt * bx;
       forwardSignalPositions[off3 + 1] = u * u * ay + 2 * u * tt * cy + tt * tt * by;
       forwardSignalPositions[off3 + 2] = u * u * az + 2 * u * tt * cz + tt * tt * bz;
-      // Цвет — color of edge (edgeColorHex даёт hex)
+      // Цвет — color of edge × 1.4 (brighter чтобы bloom threshold 0.30
+      // зацепил частицу → glow halo через UnrealBloomPass).
       _fwdEdgeColor.setHex(edgeColorHex(e));
-      forwardSignalColors[off3]     = _fwdEdgeColor.r;
-      forwardSignalColors[off3 + 1] = _fwdEdgeColor.g;
-      forwardSignalColors[off3 + 2] = _fwdEdgeColor.b;
+      forwardSignalColors[off3]     = Math.min(1, _fwdEdgeColor.r * 1.4);
+      forwardSignalColors[off3 + 1] = Math.min(1, _fwdEdgeColor.g * 1.4);
+      forwardSignalColors[off3 + 2] = Math.min(1, _fwdEdgeColor.b * 1.4);
     }
   }
   forwardSignalPoints.geometry.attributes.position.needsUpdate = true;

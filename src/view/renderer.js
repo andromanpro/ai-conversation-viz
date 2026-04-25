@@ -215,20 +215,16 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 export function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмный cyberpunk-фон. Если активен LavaBackgrounds
-  // (state.bgMode != 'none'), пропускаем — иначе непрозрачный vignette
-  // перекрыл бы bg-canvas. Vignette остаётся на default 'none' режиме.
+  // Radial vignette — тёмный cyberpunk-фон
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
-  if (!state.bgMode || state.bgMode === 'none') {
-    const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-  }
+  const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
 
   const cam = state.camera;
   const cutoff = timelineCutoff(state);

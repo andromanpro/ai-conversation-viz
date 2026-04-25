@@ -36,7 +36,6 @@ export const state = {
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
   useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
-  bgMode: 'none',         // фон через LavaBackgrounds (none/space/aurora/embers/grid/rain/ocean/abstract)
   timelineByCount: false, // play slider — равномерно по count нод (true) или по ts (false, default)
 };
 

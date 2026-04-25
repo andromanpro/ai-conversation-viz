@@ -2289,7 +2289,6 @@ const state = {
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
   useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
-  bgMode: 'none',         // фон через LavaBackgrounds (none/space/aurora/embers/grid/rain/ocean/abstract)
   timelineByCount: false, // play slider — равномерно по count нод (true) или по ts (false, default)
 };
 
@@ -3008,20 +3007,16 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмный cyberpunk-фон. Если активен LavaBackgrounds
-  // (state.bgMode != 'none'), пропускаем — иначе непрозрачный vignette
-  // перекрыл бы bg-canvas. Vignette остаётся на default 'none' режиме.
+  // Radial vignette — тёмный cyberpunk-фон
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
-  if (!state.bgMode || state.bgMode === 'none') {
-    const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-    grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-    grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-    grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-  }
+  const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
 
   const cam = state.camera;
   const cutoff = timelineCutoff(state);
@@ -3804,9 +3799,7 @@ const PARTICLES_PER_EDGE = 2;
 
 function initWebglRenderer(canvas) {
   canvasEl = canvas;
-  // alpha: true чтобы canvas мог быть прозрачным (для LavaBackgrounds).
-  // premultipliedAlpha: false — наши shaders не предумножают alpha.
-  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: true })
+  gl = canvas.getContext('webgl', { antialias: true, premultipliedAlpha: false, alpha: false })
     || canvas.getContext('experimental-webgl', { antialias: true, premultipliedAlpha: false, alpha: false });
   if (!gl) throw new Error('WebGL не поддерживается браузером');
 
@@ -4314,16 +4307,8 @@ function drawWebgl(state, tSec, viewport) {
   const vw = viewport.width;
   const vh = viewport.height;
 
-  // Если активен LavaBackgrounds (state.bgMode != 'none') — clearColor
-  // прозрачный, чтобы bg-canvas просвечивал через WebGL canvas. Иначе
-  // непрозрачный body-bg цвет (как было).
-  const useBgCanvas = state.bgMode && state.bgMode !== 'none';
-  if (useBgCanvas) {
-    gl.clearColor(0, 0, 0, 0);
-  } else {
-    const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
-    gl.clearColor(bg[0], bg[1], bg[2], 1);
-  }
+  const bg = readCssColor('--bg', [0.039, 0.055, 0.102]);
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   // ---- 1. Starfield ----
@@ -8163,136 +8148,6 @@ function resetFps() {
     return { initFpsCounter, tickFps, resetFps };
   })();
 
-  // --- src/ui/background-toggle.js ---
-  __M["src/ui/background-toggle.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-// Background mode controller — wraps drop-in LavaBackgrounds library.
-// 7 WebGL2 шейдеров для full-screen фона за всем UI.
-//
-// API (window.LavaBackgrounds должен быть подгружен через <script>):
-//   LavaBackgrounds.init(canvas, { mode, dark })
-//   LavaBackgrounds.setMode(mode)
-//   LavaBackgrounds.setTheme(theme)
-//   LavaBackgrounds.destroy()
-//
-// Сохранение выбора в localStorage. Default — 'none' чтобы не сюрприз
-// при первой загрузке (и чтобы не давать дополнительной нагрузки тем
-// кому это не нужно).
-
-
-const KEY = 'viz:bg-mode';
-const BG_MODES = [
-  { id: 'none',     label: 'None',           emoji: '·' },
-  { id: 'space',    label: 'Space',          emoji: '🌌' },
-  { id: 'aurora',   label: 'Aurora',         emoji: '🌠' },
-  { id: 'embers',   label: 'Embers',         emoji: '🔥' },
-  { id: 'grid',     label: 'Synthwave',      emoji: '🎮' },
-  { id: 'rain',     label: 'Rain',           emoji: '🌧' },
-  { id: 'ocean',    label: 'Ocean',          emoji: '🌊' },
-  { id: 'abstract', label: 'Abstract blobs', emoji: '🫧' },
-];
-
-let _initialized = false;
-let _currentMode = 'none';
-
-function initBackground() {
-  if (typeof window === 'undefined') return;
-  if (typeof window.LavaBackgrounds === 'undefined') {
-    // Скрипт не подгрузился (offline/file:// без bundle) — silently skip
-    return;
-  }
-  const canvas = document.getElementById('bg-canvas');
-  if (!canvas) return;
-  let saved = null;
-  try { saved = localStorage.getItem(KEY); } catch {}
-  const mode = (saved && BG_MODES.some(m => m.id === saved)) ? saved : 'none';
-  _currentMode = mode;
-  state.bgMode = mode;
-  try {
-    window.LavaBackgrounds.init(canvas, { mode, dark: true });
-    _initialized = true;
-  } catch (e) {
-    if (typeof console !== 'undefined') console.warn('[background] init failed:', e.message);
-  }
-}
-
-function setBackgroundMode(mode) {
-  if (!BG_MODES.some(m => m.id === mode)) return;
-  _currentMode = mode;
-  state.bgMode = mode;
-  try { localStorage.setItem(KEY, mode); } catch {}
-  if (_initialized && window.LavaBackgrounds) {
-    try { window.LavaBackgrounds.setMode(mode); } catch (e) {}
-  }
-}
-
-function getCurrentBgMode() { return _currentMode; }
-
-// Dropdown UI — кнопка #btn-bg раскрывает меню. Стили `.samples-menu`
-// переиспользуем (одинаковая идиома). Иконка кнопки = эмодзи текущего mode.
-function initBackgroundDropdown(buttonId) {
-  if (typeof document === 'undefined') return;
-  const btn = document.getElementById(buttonId || 'btn-bg');
-  if (!btn) return;
-  function syncBtnLabel() {
-    const cur = BG_MODES.find(m => m.id === _currentMode) || BG_MODES[0];
-    btn.textContent = cur.emoji;
-    btn.title = 'Background: ' + cur.label;
-  }
-  syncBtnLabel();
-  btn.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    const existing = document.getElementById('bg-menu');
-    if (existing) { existing.remove(); btn.setAttribute('aria-expanded', 'false'); return; }
-    const menu = document.createElement('div');
-    menu.id = 'bg-menu';
-    menu.className = 'samples-menu';
-    menu.setAttribute('role', 'menu');
-    const rect = btn.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.left = rect.left + 'px';
-    menu.style.top = (rect.bottom + 4) + 'px';
-    menu.style.zIndex = '100';
-    menu.style.minWidth = '180px';
-
-    let outsideHandler = null;
-    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
-    const closeMenu = () => {
-      menu.remove();
-      btn.setAttribute('aria-expanded', 'false');
-      if (outsideHandler) {
-        document.removeEventListener('click', outsideHandler);
-        document.removeEventListener('keydown', escHandler);
-      }
-    };
-
-    for (const m of BG_MODES) {
-      const item = document.createElement('button');
-      item.className = 'samples-menu-item';
-      item.setAttribute('role', 'menuitem');
-      item.textContent = m.emoji + '  ' + m.label + (m.id === _currentMode ? '  ✓' : '');
-      item.addEventListener('click', () => {
-        closeMenu();
-        setBackgroundMode(m.id);
-        syncBtnLabel();
-      });
-      menu.appendChild(item);
-    }
-    document.body.appendChild(menu);
-    btn.setAttribute('aria-expanded', 'true');
-    setTimeout(() => {
-      outsideHandler = (e) => {
-        if (!menu.contains(e.target) && e.target !== btn) closeMenu();
-      };
-      document.addEventListener('click', outsideHandler);
-      document.addEventListener('keydown', escHandler);
-    }, 0);
-  });
-}
-
-    return { initBackground, setBackgroundMode, getCurrentBgMode, initBackgroundDropdown, BG_MODES };
-  })();
-
   // --- src/ui/interaction.js ---
   __M["src/ui/interaction.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
@@ -8917,7 +8772,6 @@ async function applyUrlParamsLate() {
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
     const { updateMetricsOverlay, clearMetricsOverlay } = __M["src/ui/metrics-overlay.js"];
     const { initFpsCounter, tickFps } = __M["src/ui/fps-counter.js"];
-    const { initBackground, initBackgroundDropdown } = __M["src/ui/background-toggle.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -8979,8 +8833,6 @@ initAnnotations();
 initBookmarks();
 initRenderToggle();
 initFpsCounter('fps-counter');
-initBackground();
-initBackgroundDropdown('btn-bg');
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
