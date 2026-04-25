@@ -34,6 +34,7 @@ import { initSearch, matchNodes } from '../ui/search.js';
 import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { initAudio } from '../ui/audio.js';
+import { initFpsCounter, tickFps } from '../ui/fps-counter.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
@@ -961,9 +962,7 @@ function loadText(text) {
   // рост 60 отростков выглядит хаотично.
   if (state.timelineMax >= 0.999) {
     const longAgo = performance.now() - CFG.birthDurationMs * 3;
-    for (const n of state.nodes) {
-      if (n.ts <= Infinity) n.bornAt = longAgo;
-    }
+    for (const n of state.nodes) n.bornAt = longAgo;
   }
   // Explode intro — ноды коллапсируются в центр и взрываются на target за 1.5s.
   // Это INDEPENDENT от birth animation — позиция animateётся, scale полный.
@@ -1204,6 +1203,7 @@ initTopicsToggle();
 initOrphansToggle();
 initSettingsModal();
 initAudio();
+initFpsCounter('fps-counter');
 init3DLayoutSwitch();
 init3DDriftAndCameraButtons();
 
@@ -1218,9 +1218,11 @@ function init3DDriftAndCameraButtons() {
   try {
     if (localStorage.getItem('viz:camera-rotate-3d') === '1') setCameraRotate(true);
     if (localStorage.getItem('viz:drift-3d') === '1') {
-      // Drift включаем чуть позже — после загрузки графа, иначе _driftCenter
-      // запишется на initial empty positions
-      setTimeout(() => setDrift(true), 2500);
+      // Drift включаем после explode intro (1500ms) + запас (~1000ms на
+      // settle physics после unfreeze) — иначе _driftCenter записался бы
+      // на промежуточные positions посреди анимации explode'а.
+      const driftDelay = _explodeDuration + 1000;
+      setTimeout(() => setDrift(true), driftDelay);
     }
   } catch {}
   updateDriftBtn();
@@ -1498,6 +1500,7 @@ function tick() {
 
   tickStory(nowMs, state);
   tickStats();
+  tickFps(nowMs);
 
   composer.render();
 }

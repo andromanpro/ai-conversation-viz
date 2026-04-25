@@ -35,6 +35,7 @@ import { drawWebgl } from './view/renderer-webgl.js';
 import { initI18n } from './core/i18n.js';
 import { initLangToggle } from './ui/lang-toggle.js';
 import { updateMetricsOverlay, clearMetricsOverlay } from './ui/metrics-overlay.js';
+import { initFpsCounter, tickFps } from './ui/fps-counter.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -95,6 +96,7 @@ initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
 initRenderToggle();
+initFpsCounter('fps-counter');
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -195,6 +197,7 @@ function frame(tms) {
   tickMinimap();
   tickStats();
   tickDiffLegend();
+  tickFps(tms);
 
   requestAnimationFrame(frame);
 }

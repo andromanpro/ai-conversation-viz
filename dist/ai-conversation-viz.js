@@ -8071,6 +8071,63 @@ function clearMetricsOverlay() {
     return { updateMetricsOverlay, clearMetricsOverlay };
   })();
 
+  // --- src/ui/fps-counter.js ---
+  __M["src/ui/fps-counter.js"] = (function () {
+// FPS counter — moving average по последним 60 кадрам.
+// Цвет адаптивный: зелёный ≥50, жёлтый 30-50, красный <30.
+//
+// API:
+//   initFpsCounter(elementId)  — привязывает к DOM-элементу
+//   tickFps(nowMs)             — вызывается на каждом кадре
+
+const WINDOW = 60;
+const _times = []; // ring buffer of frame timestamps
+let _idx = 0;
+let _el = null;
+let _lastDisplayed = -1;
+let _lastUpdateMs = 0;
+
+function initFpsCounter(elementId) {
+  _el = document.getElementById(elementId || 'fps-counter');
+}
+
+function tickFps(nowMs) {
+  if (!_el) return;
+  _times[_idx % WINDOW] = nowMs;
+  _idx++;
+  // Обновляем display раз в ~250 ms — иначе цифра дёргается слишком быстро
+  if (nowMs - _lastUpdateMs < 250) return;
+  _lastUpdateMs = nowMs;
+  const filled = Math.min(_idx, WINDOW);
+  if (filled < 2) return;
+  // Берём диапазон последних `filled` timestamps
+  const oldestIdx = (_idx - filled + WINDOW) % WINDOW;
+  const newestIdx = (_idx - 1 + WINDOW) % WINDOW;
+  const span = _times[newestIdx] - _times[oldestIdx];
+  if (span <= 0) return;
+  const fps = ((filled - 1) * 1000) / span;
+  const rounded = Math.round(fps);
+  if (rounded === _lastDisplayed) return;
+  _lastDisplayed = rounded;
+  _el.textContent = rounded + ' fps';
+  // Цвет: зелёный/жёлтый/красный по threshold'ам
+  let color;
+  if (rounded >= 50) color = 'rgba(120, 230, 160, 0.8)';
+  else if (rounded >= 30) color = 'rgba(240, 210, 110, 0.8)';
+  else color = 'rgba(255, 130, 130, 0.85)';
+  _el.style.color = color;
+}
+
+function resetFps() {
+  _times.length = 0;
+  _idx = 0;
+  _lastDisplayed = -1;
+  _lastUpdateMs = 0;
+}
+
+    return { initFpsCounter, tickFps, resetFps };
+  })();
+
   // --- src/ui/interaction.js ---
   __M["src/ui/interaction.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
@@ -8694,6 +8751,7 @@ async function applyUrlParamsLate() {
     const { initI18n } = __M["src/core/i18n.js"];
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
     const { updateMetricsOverlay, clearMetricsOverlay } = __M["src/ui/metrics-overlay.js"];
+    const { initFpsCounter, tickFps } = __M["src/ui/fps-counter.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -8754,6 +8812,7 @@ initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
 initRenderToggle();
+initFpsCounter('fps-counter');
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {
@@ -8854,6 +8913,7 @@ function frame(tms) {
   tickMinimap();
   tickStats();
   tickDiffLegend();
+  tickFps(tms);
 
   requestAnimationFrame(frame);
 }
