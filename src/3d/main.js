@@ -146,6 +146,14 @@ scene.add(reverseSignalGroup);
 let reverseSignalPoints = null;
 let reverseSignalPositions = null; // Float32Array — pos для каждой частицы
 
+// Birth-comet particles: для каждой ноды у которой идёт birth-animation,
+// рисуется яркая «комета» бегущая от parent.position к target.position
+// вдоль bezier. Когда комета достигает target, она исчезает и на её
+// месте начинает расцветать орб ноды. Один THREE.Points на все ноды.
+let birthCometPoints = null;
+let birthCometPositions = null; // Float32Array — позиция кометы каждой ноды
+let birthCometColors = null;    // Float32Array — RGB кометы (color per node)
+
 // Глобальный LineSegments для всех рёбер — один draw call, обновляемый
 // каждый кадр из текущих позиций нод. Гарантирует что рёбра не «отрываются»
 // от нод при физическом движении.
@@ -373,7 +381,9 @@ function buildFromState() {
   edgesMesh.frustumCulled = false;
   edgesGroup.add(edgesMesh);
 
-  // Reverse-signal points — одна частица на pair-edge, обновляется в tick
+  // Reverse-signal points — одна частица на pair-edge, обновляется в tick.
+  // Также birth-comet points — одна частица на ноду (показывается только
+  // во время birth-animation на конце растущего ребра).
   while (reverseSignalGroup.children.length) {
     const m = reverseSignalGroup.children.pop();
     if (m.geometry) m.geometry.dispose();
@@ -381,6 +391,9 @@ function buildFromState() {
   }
   reverseSignalPoints = null;
   reverseSignalPositions = null;
+  birthCometPoints = null;
+  birthCometPositions = null;
+  birthCometColors = null;
   const pairCount = (state.pairEdges || []).length;
   if (pairCount > 0) {
     reverseSignalPositions = new Float32Array(pairCount * 3);
@@ -401,19 +414,55 @@ function buildFromState() {
     reverseSignalGroup.add(reverseSignalPoints);
   }
 
+  // Birth-comets — один Points на все ноды, vertex colors per node
+  // (комета окрашивается в цвет ноды, чтобы было видно «куда бежит»).
+  if (state.nodes.length > 0) {
+    birthCometPositions = new Float32Array(state.nodes.length * 3);
+    birthCometColors = new Float32Array(state.nodes.length * 3);
+    const bcGeom = new THREE.BufferGeometry();
+    bcGeom.setAttribute('position', new THREE.BufferAttribute(birthCometPositions, 3));
+    bcGeom.setAttribute('color', new THREE.BufferAttribute(birthCometColors, 3));
+    const bcMat = new THREE.PointsMaterial({
+      size: 22,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      vertexColors: true,
+    });
+    birthCometPoints = new THREE.Points(bcGeom, bcMat);
+    birthCometPoints.frustumCulled = false;
+    reverseSignalGroup.add(birthCometPoints);
+  }
+
   // Инициализируем buffer первым кадром
   updateEdgeBuffer();
 
-  // Fit camera по bounding box нод. Это намного надёжнее maxD-from-origin
-  // потому что graph может быть offset'нут от центра после physics.
-  // Изометрический ракурс ~30° сверху-сбоку.
+  // Fit camera по bbox + intro auto-rotate
+  fitCameraToBBox();
+  controls.autoRotate = true;
+  if (_introRotateTimer) clearTimeout(_introRotateTimer);
+  _introRotateTimer = setTimeout(() => {
+    if (!_cameraRotateUserOn) controls.autoRotate = false;
+    _introRotateTimer = null;
+  }, 4000);
+  updateStats();
+}
+
+// Bounding box fit камеры по всем нодам сцены. Изометрический ракурс
+// ~30° сверху-сбоку. Реюзается: при load (buildFromState), при ручном
+// центрировании (btn-reset-3d), при включении camera rotate (btn-camera-rotate).
+function fitCameraToBBox() {
+  if (!state.nodes.length) return;
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
   for (const n of state.nodes) {
     if (n.x < minX) minX = n.x;
     if (n.x > maxX) maxX = n.x;
-    const ny = -n.y; // в three.js y инвертирован относительно state
+    const ny = -n.y;
     if (ny < minY) minY = ny;
     if (ny > maxY) maxY = ny;
     const nz = n.z || 0;
@@ -427,21 +476,10 @@ function buildFromState() {
   const sizeY = maxY - minY;
   const sizeZ = maxZ - minZ;
   const size = Math.max(sizeX, sizeY, sizeZ, 400);
-  // Расстояние камеры от bbox центра. fov=55° → tan(27.5°)≈0.52,
-  // dist = (size/2) / tan(fov/2) → но запас 1.7× для красивого fit
   const dist = (size * 0.5) / Math.tan((55 * Math.PI / 180) / 2) * 1.7;
   camera.position.set(cx + dist * 0.55, cy - dist * 0.45, cz + dist * 0.75);
   controls.target.set(cx, cy, cz);
   controls.update();
-  // Запускаем intro auto-rotate; через 4с — выключим (если пользователь
-  // не включил постоянное вращение явно через кнопку 🎥)
-  controls.autoRotate = true;
-  if (_introRotateTimer) clearTimeout(_introRotateTimer);
-  _introRotateTimer = setTimeout(() => {
-    if (!_cameraRotateUserOn) controls.autoRotate = false;
-    _introRotateTimer = null;
-  }, 4000);
-  updateStats();
 }
 
 // Цвет ребра: учитываем diff-режим (edge.diffSide), tool_use, adopted, role
@@ -489,13 +527,11 @@ function updateEdgeBuffer() {
     _tmpB.set(b.x, -b.y, bz);
     _tmpM.set(mx, my, mz);
 
-    // Edge growth: пока b «рождается», ребро не идёт до b — оно растёт
-    // от parent (a) к (a + (b-a) × growT). Когда b полностью born — ребро
-    // достигает target. Нода появляется на конце растущего ребра (после
-    // bf > 0.4 в node birth animation выше). Получается «отросток
-    // вырастает → нода появляется на конце».
+    // Edge growth: ребро растёт от parent к target по мере birth-фактора.
+    // К bf=0.7 (BIRTH_COMET_END) ребро на 100% — это момент когда комета
+    // достигает target и mesh ноды начинает расцветать.
     const childBf = birthFactor(b.bornAt, performance.now(), CFG.birthDurationMs);
-    const growT = Math.min(1, childBf * 1.6); // ребро растёт быстрее ноды (полный рост к bf=0.625)
+    const growT = Math.min(1, childBf / 0.7); // полный edge к bf=0.7
 
     const hex = edgeColorHex(e);
     _edgeColor.setHex(hex);
@@ -612,6 +648,67 @@ function startExplodeIntro(nodes) {
   if (state.sim) state.sim.frozen = true;
 }
 
+// Обновляет позиции birth-комет. Каждая нода во время birth-animation
+// (bf < BIRTH_COMET_END) показывает «комету» бегущую от parent к target
+// вдоль bezier. После BIRTH_COMET_END комета исчезает (-1e6) и на её
+// месте начинает расцветать сама нода (см. update node meshes ниже).
+const BIRTH_COMET_END = 0.7; // bf threshold: до 0.7 ребро + комета, 0.7→1.0 нода появляется
+const _bcA = new THREE.Vector3();
+const _bcB = new THREE.Vector3();
+const _bcM = new THREE.Vector3();
+const _bcOut = new THREE.Vector3();
+function updateBirthComets(nowMs) {
+  if (!birthCometPoints || !birthCometPositions || !birthCometColors) return;
+  const FAR = -1e6;
+  let i = 0;
+  for (const n of state.nodes) {
+    const off3 = i * 3;
+    i++;
+    if (n.bornAt == null || !n.parentId) {
+      birthCometPositions[off3] = FAR;
+      birthCometPositions[off3 + 1] = FAR;
+      birthCometPositions[off3 + 2] = FAR;
+      continue;
+    }
+    const bf = birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
+    if (bf >= BIRTH_COMET_END) {
+      birthCometPositions[off3] = FAR;
+      birthCometPositions[off3 + 1] = FAR;
+      birthCometPositions[off3 + 2] = FAR;
+      continue;
+    }
+    const parent = state.byId.get(n.parentId);
+    if (!parent || parent.bornAt == null) {
+      birthCometPositions[off3] = FAR;
+      birthCometPositions[off3 + 1] = FAR;
+      birthCometPositions[off3 + 2] = FAR;
+      continue;
+    }
+    // Bezier от parent (a) к target (b) с control point чуть отнесённым
+    const ax = parent.x, ay = -parent.y, az = parent.z || 0;
+    const bx = n.x, by = -n.y, bz = n.z || 0;
+    const mx = (ax + bx) / 2 + ((n._seedDx || 0) - 0.5) * 30;
+    const my = -((parent.y + n.y) / 2) + ((n._seedDy || 0) - 0.5) * 30;
+    const mz = (az + bz) / 2 + 35;
+    _bcA.set(ax, ay, az);
+    _bcB.set(bx, by, bz);
+    _bcM.set(mx, my, mz);
+    const tt = bf / BIRTH_COMET_END; // 0..1 от parent к target
+    const u = 1 - tt;
+    birthCometPositions[off3]     = u * u * ax + 2 * u * tt * mx + tt * tt * bx;
+    birthCometPositions[off3 + 1] = u * u * ay + 2 * u * tt * my + tt * tt * by;
+    birthCometPositions[off3 + 2] = u * u * az + 2 * u * tt * mz + tt * tt * bz;
+    // Цвет = цвет ноды (node color), чтобы комета явно «несла» цвет
+    const { color } = colorForNode(n);
+    _edgeColor.setHex(color);
+    birthCometColors[off3]     = _edgeColor.r * 1.5; // brighten
+    birthCometColors[off3 + 1] = _edgeColor.g * 1.5;
+    birthCometColors[off3 + 2] = _edgeColor.b * 1.5;
+  }
+  birthCometPoints.geometry.attributes.position.needsUpdate = true;
+  birthCometPoints.geometry.attributes.color.needsUpdate = true;
+}
+
 // === Drift mode ===
 //
 // Лёгкое sinusoidal-движение каждой ноды вокруг своей settled-позиции.
@@ -680,14 +777,21 @@ let _cameraRotateUserOn = false;
 function setCameraRotate(on) {
   _cameraRotateUserOn = on;
   controls.autoRotate = on;
-  // Если пользователь включил вручную — отменяем intro-timer чтобы он не
-  // выключил autoRotate через 4 секунды
   if (on && _introRotateTimer) {
     clearTimeout(_introRotateTimer);
     _introRotateTimer = null;
   }
+  // При включении rotate — сразу центруем камеру на bbox чтобы вращение
+  // было вокруг центра графа, а не вокруг старого target'а
+  if (on) fitCameraToBBox();
   try { localStorage.setItem('viz:camera-rotate-3d', on ? '1' : '0'); } catch {}
   updateCameraRotateBtn();
+}
+
+// Ручное центрирование камеры — кнопка 🎯 — без autoRotate.
+// Полезно когда пользователь увлёкся pan'ом и потерял граф из виду.
+function resetCamera3D() {
+  fitCameraToBBox();
 }
 
 function updateCameraRotateBtn() {
@@ -1062,8 +1166,10 @@ init3DDriftAndCameraButtons();
 function init3DDriftAndCameraButtons() {
   _btnDrift = document.getElementById('btn-drift');
   _btnCameraRotate = document.getElementById('btn-camera-rotate');
+  const btnCameraReset = document.getElementById('btn-camera-reset');
   if (_btnDrift) _btnDrift.addEventListener('click', () => setDrift(!_driftActive));
   if (_btnCameraRotate) _btnCameraRotate.addEventListener('click', () => setCameraRotate(!_cameraRotateUserOn));
+  if (btnCameraReset) btnCameraReset.addEventListener('click', resetCamera3D);
   // Restore persisted settings
   try {
     if (localStorage.getItem('viz:camera-rotate-3d') === '1') setCameraRotate(true);
@@ -1267,12 +1373,15 @@ function tick() {
     if (n._hubRing) n._hubRing.visible = visible;
     if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
-    // Birth animation: нода появляется НА КОНЦЕ растущего отростка от parent.
-    // 0.0 → 0.4: только ребро растёт от parent; нода невидима (alpha 0, scale 0)
-    // 0.4 → 1.0: нода появляется на target-позиции и расцветает в полный размер
-    // Edge growth обрабатывается отдельно в updateEdgeBuffer (см. ниже).
-    const bfRaw = bf; // 0..1 raw
-    const nodeBf = Math.max(0, (bfRaw - 0.4) / 0.6); // 0 пока bf<0.4, потом растёт
+    // Birth animation: яркая комета бежит от parent к target по bezier.
+    // 0.0 → 0.7 (BIRTH_COMET_END): комета видна, ребро растёт за ней.
+    //   Нода-mesh ещё невидима (scale 0, alpha 0) — на target виден ТОЛЬКО
+    //   яркий «летящий шарик» (THREE.Points в updateBirthComets).
+    // 0.7 → 1.0: комета исчезает, mesh начинает расцветать (scale 0→1,
+    //   alpha 0→1) на target-позиции. Edge уже full length.
+    // Edge growth обрабатывается отдельно в updateEdgeBuffer.
+    const bfRaw = bf;
+    const nodeBf = Math.max(0, (bfRaw - 0.7) / 0.3); // 0..1 после bf=0.7
     const ag = easeOutCubic(nodeBf);
     mesh.position.set(n.x, -n.y, n.z || 0);
     const baseR = n.r * 1.25;
@@ -1334,6 +1443,7 @@ function tick() {
   updateEdgeBuffer();
   // Обновить reverse-signal частицы (lemon comets вдоль pair-edges)
   updateReverseSignalBuffer(t);
+  updateBirthComets(nowMs);
 
   tickStory(nowMs, state);
   tickStats();
