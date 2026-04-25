@@ -3213,6 +3213,7 @@ const LINE_FS = `
 // varying, который меняется вдоль линии (в каждой паре вершин t=0 и t=1),
 // и в fragment отрезаем по mod(длина_от_старта).
 const PAIR_VS = `
+  precision mediump float;
   attribute vec2 a_position;
   attribute float a_t;          // 0 у source, 1 у target — позиция вдоль pair-edge
   attribute float a_seglen;     // длина сегмента в screen px (для частоты пунктира)
@@ -3249,6 +3250,7 @@ const PAIR_FS = `
 
 // --- Error ring (красная пунктирная окружность вокруг assistant с tool error) ---
 const ERR_VS = `
+  precision mediump float;
   attribute vec2 a_position;
   attribute float a_size;
   attribute float a_phase;
@@ -3450,8 +3452,12 @@ function initWebglRenderer(canvas) {
   lineProg = compileProgram(gl, LINE_VS, LINE_FS);
   particleProg = compileProgram(gl, PARTICLE_VS, PARTICLE_FS);
   starProg = compileProgram(gl, STAR_VS, STAR_FS);
-  pairProg = compileProgram(gl, PAIR_VS, PAIR_FS);
-  errProg = compileProgram(gl, ERR_VS, ERR_FS);
+  // Новые passes (v1.3) — компилируем отдельно, чтобы их падение не
+  // ломало всё. При fail просто отключаем pass через null-program.
+  try { pairProg = compileProgram(gl, PAIR_VS, PAIR_FS); }
+  catch (e) { pairProg = null; if (typeof console !== 'undefined') console.warn('[webgl] pairProg compile failed:', e.message); }
+  try { errProg = compileProgram(gl, ERR_VS, ERR_FS); }
+  catch (e) { errProg = null; if (typeof console !== 'undefined') console.warn('[webgl] errProg compile failed:', e.message); }
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
@@ -3463,9 +3469,9 @@ function initWebglRenderer(canvas) {
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
-  cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
+  if (pairProg) cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_time']);
-  cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
+  if (errProg) cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
   pointBuf = gl.createBuffer();
@@ -3860,8 +3866,15 @@ function fillPairBuffer(state, scale) {
 }
 
 // Заполняет буфер для error-rings (assistant-ноды у которых tool_use получил error).
-function fillErrBuffer(state, nowMs) {
-  ensureArr('err', state.nodes.length * ERR_STRIDE);
+function fillErrBuffer(state) {
+  if (!state.nodes || !state.nodes.length) return 0;
+  // Сначала посчитаем сколько нод с error — чтобы не аллоцировать на весь массив
+  let errCount = 0;
+  for (const n of state.nodes) {
+    if ((n._hasErrorTool || n._isErrorToolUse) && n.bornAt != null) errCount++;
+  }
+  if (!errCount) return 0;
+  ensureArr('err', errCount * ERR_STRIDE);
   const arr = errArr;
   let count = 0;
   const hidden = state.hiddenRoles;
@@ -3869,25 +3882,17 @@ function fillErrBuffer(state, nowMs) {
     if (!n._hasErrorTool && !n._isErrorToolUse) continue;
     if (n.bornAt == null) continue;
     if (hidden && hidden.has(n.role)) continue;
-    const baseR = n.r * 1.25 * (CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * 1);
-    // Радиус кольца: чуть больше ноды
-    const size = Math.max(10, n.r * 4.5 * state.camera.scale);
+    const r = (typeof n.r === 'number' && n.r > 0) ? n.r : 5;
+    const size = Math.max(10, r * 4.5 * state.camera.scale);
     const off = count * ERR_STRIDE;
-    arr[off + 0] = n.x;
-    arr[off + 1] = n.y;
+    arr[off + 0] = n.x || 0;
+    arr[off + 1] = n.y || 0;
     arr[off + 2] = size;
     arr[off + 3] = n.phase || 0;
     count++;
   }
   return count;
 }
-
-// ==== Capacity helpers (доп. категории) ====
-const _origEnsureArr = (function() {
-  // wrapping ensureArr to support 'pair' and 'err' (поскольку оригинальная
-  // функция использует switch с фиксированным набором имён, мы патчим её
-  // через прямую правку)
-})();
 
 // ==== Draw ====
 
@@ -4000,46 +4005,60 @@ function drawWebgl(state, tSec, viewport) {
   }
 
   // ---- 5. Pair edges (tool_use ↔ tool_result, lemon-yellow dotted) ----
-  // Рисуем перед нодами и hub-кольцами чтобы пунктир был поверх обычных
-  // edges, но под node-glow.
-  const pairCount = fillPairBuffer(state, state.camera.scale);
-  if (pairCount > 0) {
-    gl.useProgram(pairProg);
-    gl.bindBuffer(gl.ARRAY_BUFFER, pairBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, pairArr.subarray(0, pairCount * PAIR_STRIDE), gl.DYNAMIC_DRAW);
-    const stride = PAIR_STRIDE * 4;
-    gl.enableVertexAttribArray(aPair.position);
-    gl.vertexAttribPointer(aPair.position, 2, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(aPair.t);
-    gl.vertexAttribPointer(aPair.t, 1, gl.FLOAT, false, stride, 2 * 4);
-    gl.enableVertexAttribArray(aPair.seglen);
-    gl.vertexAttribPointer(aPair.seglen, 1, gl.FLOAT, false, stride, 3 * 4);
-    gl.uniform2f(uPair.camera, state.camera.x, state.camera.y);
-    gl.uniform1f(uPair.scale, state.camera.scale);
-    gl.uniform2f(uPair.viewport, vw, vh);
-    gl.uniform1f(uPair.time, tSec);
-    gl.drawArrays(gl.LINES, 0, pairCount);
+  // Defensive: если pair shader не скомпилировался или fillPairBuffer
+  // упадёт — не валим весь render.
+  try {
+    if (pairProg) {
+      const pairCount = fillPairBuffer(state, state.camera.scale);
+      if (pairCount > 0) {
+        gl.useProgram(pairProg);
+        gl.bindBuffer(gl.ARRAY_BUFFER, pairBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, pairArr.subarray(0, pairCount * PAIR_STRIDE), gl.DYNAMIC_DRAW);
+        const stride = PAIR_STRIDE * 4;
+        gl.enableVertexAttribArray(aPair.position);
+        gl.vertexAttribPointer(aPair.position, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(aPair.t);
+        gl.vertexAttribPointer(aPair.t, 1, gl.FLOAT, false, stride, 2 * 4);
+        gl.enableVertexAttribArray(aPair.seglen);
+        gl.vertexAttribPointer(aPair.seglen, 1, gl.FLOAT, false, stride, 3 * 4);
+        gl.uniform2f(uPair.camera, state.camera.x, state.camera.y);
+        gl.uniform1f(uPair.scale, state.camera.scale);
+        gl.uniform2f(uPair.viewport, vw, vh);
+        gl.uniform1f(uPair.time, tSec);
+        gl.drawArrays(gl.LINES, 0, pairCount);
+      }
+    }
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[webgl] pair-edges pass failed:', e.message);
+    pairProg = null;
   }
 
   // ---- 6. Error rings (красные пунктирные кольца у нод с tool error) ----
-  const errCount = fillErrBuffer(state, nowMs);
-  if (errCount > 0) {
-    gl.useProgram(errProg);
-    gl.bindBuffer(gl.ARRAY_BUFFER, errBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, errArr.subarray(0, errCount * ERR_STRIDE), gl.DYNAMIC_DRAW);
-    const stride = ERR_STRIDE * 4;
-    gl.enableVertexAttribArray(aErr.position);
-    gl.vertexAttribPointer(aErr.position, 2, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(aErr.size);
-    gl.vertexAttribPointer(aErr.size, 1, gl.FLOAT, false, stride, 2 * 4);
-    gl.enableVertexAttribArray(aErr.phase);
-    gl.vertexAttribPointer(aErr.phase, 1, gl.FLOAT, false, stride, 3 * 4);
-    gl.uniform2f(uErr.camera, state.camera.x, state.camera.y);
-    gl.uniform1f(uErr.scale, state.camera.scale);
-    gl.uniform2f(uErr.viewport, vw, vh);
-    gl.uniform1f(uErr.dpr, dpr);
-    gl.uniform1f(uErr.time, tSec);
-    gl.drawArrays(gl.POINTS, 0, errCount);
+  try {
+    if (errProg) {
+      const errCount = fillErrBuffer(state);
+      if (errCount > 0) {
+        gl.useProgram(errProg);
+        gl.bindBuffer(gl.ARRAY_BUFFER, errBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, errArr.subarray(0, errCount * ERR_STRIDE), gl.DYNAMIC_DRAW);
+        const stride = ERR_STRIDE * 4;
+        gl.enableVertexAttribArray(aErr.position);
+        gl.vertexAttribPointer(aErr.position, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(aErr.size);
+        gl.vertexAttribPointer(aErr.size, 1, gl.FLOAT, false, stride, 2 * 4);
+        gl.enableVertexAttribArray(aErr.phase);
+        gl.vertexAttribPointer(aErr.phase, 1, gl.FLOAT, false, stride, 3 * 4);
+        gl.uniform2f(uErr.camera, state.camera.x, state.camera.y);
+        gl.uniform1f(uErr.scale, state.camera.scale);
+        gl.uniform2f(uErr.viewport, vw, vh);
+        gl.uniform1f(uErr.dpr, dpr);
+        gl.uniform1f(uErr.time, tSec);
+        gl.drawArrays(gl.POINTS, 0, errCount);
+      }
+    }
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[webgl] err-rings pass failed:', e.message);
+    errProg = null;
   }
 
   // ---- 7. Nodes (поверх рёбер и колец) ----
