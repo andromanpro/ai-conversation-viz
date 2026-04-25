@@ -367,16 +367,34 @@ function buildFromState() {
   // Инициализируем buffer первым кадром
   updateEdgeBuffer();
 
-  // Fit camera — изометрический ракурс (под углом ~30° сверху-сбоку)
-  // даёт сразу видимое 3D даже для мелких/плоских графов.
-  let maxD = 0;
+  // Fit camera по bounding box нод. Это намного надёжнее maxD-from-origin
+  // потому что graph может быть offset'нут от центра после physics.
+  // Изометрический ракурс ~30° сверху-сбоку.
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
   for (const n of state.nodes) {
-    const d = Math.hypot(n.x, n.y, n.z || 0);
-    if (d > maxD) maxD = d;
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    const ny = -n.y; // в three.js y инвертирован относительно state
+    if (ny < minY) minY = ny;
+    if (ny > maxY) maxY = ny;
+    const nz = n.z || 0;
+    if (nz < minZ) minZ = nz;
+    if (nz > maxZ) maxZ = nz;
   }
-  const r = Math.max(maxD, 400);
-  camera.position.set(r * 0.7, -r * 0.55, r * 0.95 + 200);
-  controls.target.set(0, 0, 0);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const sizeX = maxX - minX;
+  const sizeY = maxY - minY;
+  const sizeZ = maxZ - minZ;
+  const size = Math.max(sizeX, sizeY, sizeZ, 400);
+  // Расстояние камеры от bbox центра. fov=55° → tan(27.5°)≈0.52,
+  // dist = (size/2) / tan(fov/2) → но запас 1.7× для красивого fit
+  const dist = (size * 0.5) / Math.tan((55 * Math.PI / 180) / 2) * 1.7;
+  camera.position.set(cx + dist * 0.55, cy - dist * 0.45, cz + dist * 0.75);
+  controls.target.set(cx, cy, cz);
   controls.update();
   // Запускаем intro auto-rotate; через 4с — выключим
   controls.autoRotate = true;
@@ -482,26 +500,30 @@ function updateStats() {
   statsEl.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; ${s.parsed} lines`;
 }
 
-// Раскидываем ноды по сферической Fibonacci-spirale — получается
-// плотное 3D-облако с самого начала. Radius пропорционален sqrt(N) —
-// даёт постоянную плотность независимо от размера графа.
-// Затем physics tick будет двигать x/y, но z остаётся как initial scatter
-// (3D-physics в 2D-движке всё равно нет, так что z должен задаваться руками).
+// Раскидываем ноды по сферической Fibonacci-spirale.
+// 2D physics дальше будет тянуть x/y по spring/repulsion, а z останется
+// от initial scatter (physics z не трогает) — так получается стабильно
+// 3D-объёмный layout с самого первого кадра.
+//
+// IMPORTANT: для x/y ставим _малый_ scatter (radius ~ √N × 25),
+// потому что physics всё равно их раздвинет до естественного размера.
+// Для z ставим _большой_ scatter (radius × 1.6), потому что z никем
+// не корректируется — это финальная глубина.
 function applySphericalScatter(nodes) {
   const N = nodes.length;
   if (!N) return;
   const golden = Math.PI * (3 - Math.sqrt(5));
-  const radius = Math.max(180, Math.sqrt(N) * 80);
+  const xyRadius = Math.max(80, Math.sqrt(N) * 25);   // x/y будут раздвинуты physics'ом
+  const zRadius  = Math.max(160, Math.sqrt(N) * 40);  // z финальный — побольше
   for (let i = 0; i < N; i++) {
     const n = nodes[i];
-    // Используем seedDx/Dy если есть — стабильно при ре-loadText
     const idx = i + 0.5;
-    const y = 1 - (idx / N) * 2;        // y ∈ [-1, 1]
+    const y = 1 - (idx / N) * 2;
     const r = Math.sqrt(Math.max(0, 1 - y * y));
     const theta = golden * i + (n._seedDx || 0) * 0.5;
-    n.x = Math.cos(theta) * r * radius;
-    n.y = y * radius;
-    n.z = Math.sin(theta) * r * radius;
+    n.x = Math.cos(theta) * r * xyRadius;
+    n.y = y * xyRadius;
+    n.z = Math.sin(theta) * r * zRadius;
     n.vx = 0; n.vy = 0;
   }
 }
@@ -520,12 +542,12 @@ function loadText(text) {
   state.connectOrphans = true;
   state.sim = createSim({ connectOrphans: true });
   // Spherical Fibonacci scatter для initial positions — даёт 3D-облако
-  // с самого начала, а не плоскую раскладку. Physics дальше может
-  // натянуть кластеры в 2D плоскость, но z остаётся естественным.
+  // с самого начала. xyRadius малый (physics раздвинет), zRadius больше
+  // (z после physics остаётся как есть — physics 2D).
   applySphericalScatter(g.nodes);
-  // Prewarm в 3 раза больше итераций — пока physics 2D, нужно
-  // разнести x/y чтобы не было «верёвки»
-  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations * 2);
+  // Prewarm стандартного количества итераций — physics комфортно
+  // разнесёт x/y без «улёта» далеко
+  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations);
   state.nodes = g.nodes;
   state.edges = g.edges;
   state.byId = g.byId;
