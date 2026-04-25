@@ -14,7 +14,7 @@ import { controlPoint, bezierPoint, advanceParticle } from '../src/view/particle
 import { generateStarfield, starScreen } from '../src/view/starfield.js';
 import { toolIcon } from '../src/view/tool-icons.js';
 import { matchNodes } from '../src/ui/search.js';
-import { computeStats, formatDuration, formatTokens } from '../src/ui/stats-hud.js';
+import { computeStats, formatDuration, formatTokens, initStats, recomputeStats } from '../src/ui/stats-hud.js';
 import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
@@ -565,6 +565,57 @@ test('stats: formatDuration handles h/m/s', () => {
   eq(formatDuration(45), '45s');
   eq(formatDuration(90), '1m 30s');
   eq(formatDuration(3661), '1h 1m 1s');
+});
+
+// Регрессия: 3D HUD не имеет элементов #stat-tokens/#stat-duration/#stat-top-tools/
+// #stat-longest, поэтому recomputeStats должен корректно работать когда они null.
+// Раньше падал с TypeError → render loop ломался → крах страницы.
+test('stats: recomputeStats null-safe когда DOM элементов нет', () => {
+  // Полностью отсутствующие элементы (3d.html scenario)
+  const fakeDoc = { getElementById: () => null };
+  const origDoc = globalThis.document;
+  globalThis.document = fakeDoc;
+  try {
+    initStats();
+    // Должно не упасть. Без panelEl — early-return.
+    let threw = false;
+    try { recomputeStats(); }
+    catch (e) { threw = true; }
+    assert(!threw, 'recomputeStats не должен бросать при отсутствии DOM');
+  } finally {
+    globalThis.document = origDoc;
+  }
+});
+
+test('stats: recomputeStats null-safe при частичном DOM (panel exists, stat-* отсутствуют)', () => {
+  // 3d.html scenario: stats-panel есть (panelEl truthy), но stat-tokens/
+  // duration/top-tools/longest все отсутствуют. recomputeStats должен
+  // дойти до строк с tokensEl.textContent и не упасть на null.
+  const panel = { style: {}, _display: '' };
+  Object.defineProperty(panel.style, 'display', {
+    set(v) { panel._display = v; },
+    get() { return panel._display; },
+  });
+  const els = { 'stats-panel': panel };
+  const fakeDoc = { getElementById: id => els[id] || null };
+  const origDoc = globalThis.document;
+  globalThis.document = fakeDoc;
+  try {
+    initStats();
+    // Подсунем state.nodes с одной нодой чтобы computeStats вернул не-null
+    // и код прошёл за `if (!s) return` — иначе ветка с tokensEl не достигнется.
+    const origNodes = globalState.nodes;
+    globalState.nodes = [
+      { id: 'a1', role: 'assistant', ts: 1000, text: 'hello world', textLen: 11 },
+    ];
+    let threw = false, errMsg = '';
+    try { recomputeStats(); }
+    catch (e) { threw = true; errMsg = e.message; }
+    globalState.nodes = origNodes;
+    assert(!threw, 'recomputeStats упал на null tokensEl: ' + errMsg);
+  } finally {
+    globalThis.document = origDoc;
+  }
 });
 
 test('stats: formatTokens uses k/M', () => {
