@@ -27,6 +27,7 @@
   "scripts": {
     "build": "node build.cjs",
     "test": "node tests/run.js",
+    "sonar": "G:/sonar-scanner/bin/sonar-scanner.bat -Dsonar.login=admin -Dsonar.password=$(cat ~/.sonar-token)",
     "prepublishOnly": "npm run test && npm run build"
   },
   "keywords": [
