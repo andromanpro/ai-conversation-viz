@@ -4,7 +4,8 @@ import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
 import { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
-import { MULTI_AGENT_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
+import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
+import { t } from '../core/i18n.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { hideDetail } from './detail-panel.js';
 import { hideTooltip } from './tooltip.js';
@@ -16,6 +17,62 @@ import { updateBadge as updateBookmarksBadge } from './bookmarks.js';
 
 let _getViewport;
 let _onReady = () => {};
+
+// ==== Examples ▾ dropdown menu ====
+
+const SAMPLE_OPTIONS = [
+  { id: 'basic', i18n: 'sample.basic', text: () => SAMPLE_JSONL },
+  { id: 'orchestration', i18n: 'sample.orchestration', text: () => MULTI_AGENT_ORCHESTRATION_JSONL },
+  { id: 'deep_orchestration', i18n: 'sample.deep_orchestration', text: () => DEEP_ORCHESTRATION_JSONL },
+];
+
+function toggleSamplesMenu(anchor) {
+  const existing = document.getElementById('samples-menu');
+  if (existing) { existing.remove(); anchor.setAttribute('aria-expanded', 'false'); return; }
+  const menu = document.createElement('div');
+  menu.id = 'samples-menu';
+  menu.className = 'samples-menu';
+  menu.setAttribute('role', 'menu');
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  let outsideHandler = null;
+  const closeMenu = () => {
+    menu.remove();
+    anchor.setAttribute('aria-expanded', 'false');
+    if (outsideHandler) {
+      document.removeEventListener('click', outsideHandler);
+      document.removeEventListener('keydown', escHandler);
+      outsideHandler = null;
+    }
+  };
+  const escHandler = (ev) => { if (ev.key === 'Escape') closeMenu(); };
+
+  for (const opt of SAMPLE_OPTIONS) {
+    const item = document.createElement('button');
+    item.className = 'samples-menu-item';
+    item.setAttribute('role', 'menuitem');
+    item.textContent = t(opt.i18n);
+    item.addEventListener('click', () => {
+      closeMenu();
+      clearSessionForHandoff();
+      loadText(opt.text());
+    });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+  anchor.setAttribute('aria-expanded', 'true');
+
+  setTimeout(() => {
+    outsideHandler = (ev) => {
+      if (!menu.contains(ev.target) && ev.target !== anchor) closeMenu();
+    };
+    document.addEventListener('click', outsideHandler);
+    document.addEventListener('keydown', escHandler);
+  }, 0);
+}
 
 export function initLoader(getViewportFn, onReady) {
   _getViewport = getViewportFn;
@@ -31,15 +88,14 @@ export function initLoader(getViewportFn, onReady) {
     fileInput.value = '';
   });
 
-  document.getElementById('btn-sample').addEventListener('click', () => {
-    clearSessionForHandoff(); // юзер явно выбрал sample — не сохраняем его как «последнюю сессию»
-    loadText(SAMPLE_JSONL);
-  });
-  const btnDemoOrch = document.getElementById('btn-demo-orchestration');
-  if (btnDemoOrch) {
-    btnDemoOrch.addEventListener('click', () => {
-      clearSessionForHandoff();
-      loadText(MULTI_AGENT_ORCHESTRATION_JSONL);
+  // Examples ▾ dropdown — на клик открывает меню с тремя примерами.
+  // Закрытие при клике вне или повторном клике по кнопке. Hover/focus
+  // не используется — только явный клик, чтобы не мешать туториал-скриншотам.
+  const sampleBtn = document.getElementById('btn-sample');
+  if (sampleBtn) {
+    sampleBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleSamplesMenu(sampleBtn);
     });
   }
   document.getElementById('btn-reset').addEventListener('click', resetView);

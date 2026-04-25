@@ -1125,9 +1125,9 @@ test('i18n: English by default returns key if missing', () => {
 
 test('i18n: known keys translate', () => {
   setLanguage('en');
-  eq(t('btn.sample'), 'Load sample');
+  eq(t('btn.sample'), 'Examples ▾');
   setLanguage('ru');
-  eq(t('btn.sample'), 'Загрузить пример');
+  eq(t('btn.sample'), 'Примеры ▾');
 });
 
 test('i18n: interpolation {name} works', () => {

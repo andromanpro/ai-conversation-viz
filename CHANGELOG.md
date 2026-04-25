@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-04-25
+
+### Added
+
+- **Examples ▾ dropdown** — заменил две отдельные кнопки («Load sample» +
+  «🤖 Multi-agent demo») на одну с выпадающим меню. Меню содержит:
+  - Basic — debug session (~40 nodes)
+  - 🤖 Multi-agent — security audit, 4 parallel subagents (~50 nodes)
+  - 🤖🤖 Deep orchestration — refactor monorepo, 2-level subagent spawn (~60 nodes)
+- **`samples/deep-orchestration.jsonl`** — новый пример с настоящей
+  tree-структурой: lead → 3 subagent → 8 sub-sub-agents → tool chains.
+  Сценарий — рефактор монорепо (split services/ → packages/), параллельные
+  Architect / Migrator / Tester, каждый сам спавнит 2-4 sub-sub-agent'а.
+  Branches:
+  - `a0 → 4 children` (3 subagent + tool_results return)
+  - `arch_a1 → 3 children`
+  - `mig_a1 → 5 children`
+  - `test_a1 → 3 children`
+
+Граф визуально становится «ветвистым» именно за счёт двух уровней
+параллельного spawn — раньше структура multi-agent была fan-out × 1
+уровень, теперь × 2.
+
+### i18n
+
+- `btn.sample` теперь «Examples ▾» / «Примеры ▾»
+- `sample.basic`, `sample.orchestration`, `sample.deep_orchestration` (RU + EN)
+
 ## [1.1.0] — 2026-04-25
 
 ### Fixed

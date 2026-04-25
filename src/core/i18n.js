@@ -35,14 +35,15 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.1 · force-directed',
-    'header.subtitle_standalone': 'v1.1 · standalone bundle',
+    'header.subtitle_force': 'v1.2 · force-directed',
+    'header.subtitle_standalone': 'v1.2 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
-    'btn.sample': 'Load sample',
-    'btn.demo_orchestration': '🤖 Multi-agent demo',
-    'tip.demo_orchestration': 'Load multi-agent orchestration sample (security audit across 4 microservices)',
+    'btn.sample': 'Examples ▾',
+    'sample.basic': 'Basic — debug session (~40 nodes)',
+    'sample.orchestration': '🤖 Multi-agent — security audit, 4 parallel subagents (~50 nodes)',
+    'sample.deep_orchestration': '🤖🤖 Deep orchestration — refactor monorepo, 2-level subagent spawn (~60 nodes)',
     'btn.file': 'Open JSONL…',
     'btn.reset': 'Reset view',
     'btn.share': '🔗 Share',
@@ -216,13 +217,14 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.1 · force-directed',
-    'header.subtitle_standalone': 'v1.1 · standalone-сборка',
+    'header.subtitle_force': 'v1.2 · force-directed',
+    'header.subtitle_standalone': 'v1.2 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
-    'btn.sample': 'Загрузить пример',
-    'btn.demo_orchestration': '🤖 Multi-agent',
-    'tip.demo_orchestration': 'Загрузить пример оркестрации — security-audit 4 микросервисов через параллельные subagent-ы',
+    'btn.sample': 'Примеры ▾',
+    'sample.basic': 'Базовый — debug-сессия (~40 нод)',
+    'sample.orchestration': '🤖 Multi-agent — security audit, 4 параллельных subagent-а (~50 нод)',
+    'sample.deep_orchestration': '🤖🤖 Deep orchestration — рефактор монорепо, 2-уровневый spawn (~60 нод)',
     'btn.file': 'Открыть JSONL…',
     'btn.reset': 'Сбросить вид',
     'btn.share': '🔗 Поделиться',

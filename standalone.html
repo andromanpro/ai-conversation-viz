@@ -68,9 +68,11 @@
   @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
   .btn.active-freeze { border-color: #7fd2ff; color: #7fd2ff; }
   .btn.active-orphans { border-color: var(--tool); color: var(--tool); }
-  .snapshot-menu { position: fixed; z-index: 25; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 180px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; }
-  .snapshot-menu-item { background: transparent; border: 0; color: var(--text); padding: 8px 12px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; }
-  .snapshot-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
+  .snapshot-menu, .samples-menu { position: fixed; z-index: 25; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 180px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; }
+  .samples-menu { min-width: 360px; }
+  .snapshot-menu-item, .samples-menu-item { background: transparent; border: 0; color: var(--text); padding: 8px 12px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; }
+  .samples-menu-item { padding: 10px 14px; line-height: 1.4; }
+  .snapshot-menu-item:hover, .samples-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
   .btn.active-diff { border-color: #5ad2ff; color: #5ad2ff; }
   .btn.active-sessions { border-color: #a5d8a1; color: #a5d8a1; }
@@ -234,10 +236,9 @@
 
 <div class="hud" id="top-left">
   <div class="title" data-i18n="header.title">AI Conversation Viz</div>
-  <div class="subtitle" data-i18n="header.subtitle_standalone">v1.1 · standalone bundle</div>
+  <div class="subtitle" data-i18n="header.subtitle_standalone">v1.2 · standalone bundle</div>
   <div class="controls controls-primary">
-    <button class="btn primary" id="btn-sample" data-i18n="btn.sample" data-i18n-aria="aria.sample">Load sample</button>
-    <button class="btn" id="btn-demo-orchestration" data-i18n="btn.demo_orchestration" data-i18n-title="tip.demo_orchestration">🤖 Multi-agent demo</button>
+    <button class="btn primary" id="btn-sample" data-i18n="btn.sample" data-i18n-aria="aria.sample" aria-haspopup="menu" aria-expanded="false">Examples ▾</button>
     <button class="btn" id="btn-file" data-i18n="btn.file" data-i18n-aria="aria.file">Open JSONL…</button>
     <a class="btn btn-3d" href="./3d.html" data-i18n-title="tip.3d" data-i18n-aria="aria.3d" data-i18n="btn.3d">🌐 3D →</a>
     <button class="btn accent" id="btn-reset" data-i18n="btn.reset" data-i18n-aria="aria.reset">Reset view</button>
