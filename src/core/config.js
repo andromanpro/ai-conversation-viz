@@ -99,6 +99,7 @@ export const CFG = {
   centerPullScaleN: 200,       // centerPull растёт как sqrt(N/200)
   leafSpringBoost: 2.5,        // spring для degree-1 edges в 2.5× сильнее (root/leaf не отрываются)
   playSpeedOptions: [0.5, 1, 2, 5],
+  cameraRotateSpeed: 0.5,      // 3D auto-rotate (degrees per ~10ms на default)
   storyPostGapMs: 800,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,

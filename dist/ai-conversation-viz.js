@@ -105,6 +105,7 @@ const CFG = {
   centerPullScaleN: 200,       // centerPull растёт как sqrt(N/200)
   leafSpringBoost: 2.5,        // spring для degree-1 edges в 2.5× сильнее (root/leaf не отрываются)
   playSpeedOptions: [0.5, 1, 2, 5],
+  cameraRotateSpeed: 0.5,      // 3D auto-rotate (degrees per ~10ms на default)
   storyPostGapMs: 800,
   focusDimAlpha: 0.3,
   cameraFollowLerp: 0.05,
@@ -1940,6 +1941,7 @@ const DICT = {
     'settings.starfield': 'Starfield density',
     'settings.nodeGlowRadiusMul': 'Node glow radius',
     'settings.nodeGlowAlphaBase': 'Node glow alpha',
+    'settings.cameraRotateSpeed': 'Camera rotate speed (3D)',
     'settings.stepMs': 'Play step interval (ms)',
     'settings.charMs': 'Typewriter speed (ms/char)',
     'settings.maxChars': 'Max chars per bubble',
@@ -2131,6 +2133,7 @@ const DICT = {
     'settings.starfield': 'Плотность звёздного поля',
     'settings.nodeGlowRadiusMul': 'Радиус свечения ноды',
     'settings.nodeGlowAlphaBase': 'Прозрачность свечения',
+    'settings.cameraRotateSpeed': 'Скорость вращения камеры (3D)',
     'settings.stepMs': 'Интервал шага play (мс)',
     'settings.charMs': 'Скорость печати (мс/символ)',
     'settings.maxChars': 'Макс. символов в пузыре',
@@ -5966,6 +5969,8 @@ const PARAMS = [
   ['playback','storyCharMs',     5,    80,    1],
   ['playback','storyMaxChars',   80,   1200,  20],
   ['playback','storyPostGapMs',  200,  3000,  50],
+  // 3D camera (актуально только в 3D режиме)
+  ['visual',  'cameraRotateSpeed', 0.1, 4.0,   0.1],
   // Birth
   ['birth',   'birthDurationMs', 100,  2500,  50],
 ];

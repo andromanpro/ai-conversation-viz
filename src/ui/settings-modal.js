@@ -33,6 +33,8 @@ const PARAMS = [
   ['playback','storyCharMs',     5,    80,    1],
   ['playback','storyMaxChars',   80,   1200,  20],
   ['playback','storyPostGapMs',  200,  3000,  50],
+  // 3D camera (актуально только в 3D режиме)
+  ['visual',  'cameraRotateSpeed', 0.1, 4.0,   0.1],
   // Birth
   ['birth',   'birthDurationMs', 100,  2500,  50],
 ];

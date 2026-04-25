@@ -96,7 +96,7 @@ controls.dampingFactor = 0.08;
 // Auto-rotate intro: первые 4 секунды камера медленно вращается чтобы
 // сразу было видно что это 3D, а не плоский граф.
 controls.autoRotate = true;
-controls.autoRotateSpeed = 1.6;
+controls.autoRotateSpeed = CFG.cameraRotateSpeed;
 let _introRotateTimer = null;
 
 // Post-processing — EffectComposer с RenderPass + UnrealBloomPass.
@@ -235,6 +235,54 @@ const ORB_FS = `
   }
 `;
 
+// Halo: вокруг каждой ноды soft-glow «облачко». Fragment shader:
+//   • Fresnel falloff (силуэт ярче чем центр) — даёт мягкий ободок
+//     наружу, без жёсткой границы sphere
+//   • Slow pulsation amplitude (0.7→1.0)
+//   • Альфа экспоненциально падает к центру → нода в halo читается
+const HALO_VS = `
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 pos = modelViewMatrix * vec4(position, 1.0);
+    vView = -normalize(pos.xyz);
+    gl_Position = projectionMatrix * pos;
+  }
+`;
+const HALO_FS = `
+  uniform vec3 uColor;
+  uniform float uTime;
+  uniform float uPhase;
+  uniform float uAlpha;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    float ndv = abs(dot(normalize(vNormal), normalize(vView)));
+    // Fresnel — soft outer glow, центр прозрачный, силуэт ярче
+    float fresnel = pow(1.0 - ndv, 2.5);
+    float pulse = 0.5 + 0.5 * sin(uTime * 1.2 + uPhase);
+    float a = fresnel * (0.7 + 0.3 * pulse) * uAlpha;
+    gl_FragColor = vec4(uColor * (1.4 + 0.3 * pulse), a * 0.45);
+  }
+`;
+function makeHaloMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uTime: { value: 0 },
+      uPhase: { value: Math.random() * Math.PI * 2 },
+      uAlpha: { value: 1.0 },
+    },
+    vertexShader: HALO_VS,
+    fragmentShader: HALO_FS,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.BackSide, // снаружи view → fresnel правильный
+  });
+}
+
 function makeOrbMaterial(color) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -305,16 +353,12 @@ function buildFromState() {
     nodesGroup.add(mesh);
     n._mesh = mesh;
 
-    // Halo — большая полупрозрачная sphere с additive blending: даёт
-    // «свечение» вокруг каждой ноды (имитация bloom без post-processing).
-    // Стартует СКРЫТЫМ — включится в tick() когда нода родится (bornAt != null).
-    const haloMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.12,
-      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-    });
+    // Halo — soft-glow shader (fresnel-based exponential falloff +
+    // pulsation), additive blending. Естественнее чем плоский opacity.
+    const haloMat = makeHaloMaterial(color);
     const halo = new THREE.Mesh(sphereGeoHalo, haloMat);
     halo.position.copy(mesh.position);
-    halo.scale.set(baseR * 2.4, baseR * 2.4, baseR * 2.4);
+    halo.scale.set(baseR * 2.6, baseR * 2.6, baseR * 2.6);
     halo.visible = false;
     halo.userData.haloOwner = n;
     nodesGroup.add(halo);
@@ -1320,11 +1364,12 @@ function updateBirths3D(nowMs) {
     const alive = n.ts <= cutoff;
     if (alive && n.bornAt == null) {
       n.bornAt = nowMs;
-      const parent = n.parentId ? state.byId.get(n.parentId) : null;
-      if (parent && parent.bornAt != null) {
-        n.x = parent.x + (Math.random() - 0.5) * 30;
-        n.y = parent.y + (Math.random() - 0.5) * 30;
-      }
+      // НЕ перетираем n.x/y/z на parent позицию — нода стартует на
+      // её final position (от prewarm3D или applyLayoutTargets3D).
+      // Birth animation сама показывает «откуда прилетела» через
+      // birth-comet (она бежит от parent к target). Раньше код ставил
+      // ноду на parent + 2D jitter, что схлопывало 3D layout в плоскость
+      // parent'а в play-режиме (z от physics терялся под parent.z).
       if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
     } else if (!alive && n.bornAt != null) {
       n.bornAt = null;
@@ -1338,6 +1383,8 @@ function tick() {
   const nowMs = performance.now();
   const dt = Math.min(0.1, (nowMs - prevMs) / 1000);
   prevMs = nowMs;
+  // Подхватываем cameraRotateSpeed из CFG (Settings modal может поменять)
+  controls.autoRotateSpeed = CFG.cameraRotateSpeed;
   controls.update();
 
   tickPlay();
@@ -1369,7 +1416,10 @@ function tick() {
     const bf = birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
     const visible = n.bornAt != null && (!state.hiddenRoles || !state.hiddenRoles.has(n.role));
     mesh.visible = visible;
-    if (n._halo) n._halo.visible = visible;
+    // Halo показывается ТОЛЬКО в phase 2 birth animation (после bf>=0.7),
+    // когда комета достигла target и сама нода появилась. Раньше halo
+    // зажигался при bornAt!=null — то есть до того как mesh появился.
+    if (n._halo) n._halo.visible = visible && bf >= BIRTH_COMET_END;
     if (n._hubRing) n._hubRing.visible = visible;
     if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
@@ -1405,17 +1455,18 @@ function tick() {
       u.uColor.value.setHex(color);
       u.uSelected.value = (state.selected === n) ? 1 : 0;
     }
-    // Halo — пульсирующая «атмосфера» вокруг ноды
-    if (n._halo) {
+    // Halo — soft-glow shader (см. HALO_FS), пульсирует и растёт вместе с ag.
+    if (n._halo && n._halo.visible) {
       n._halo.position.copy(mesh.position);
-      const haloR = baseR * (2.2 + 0.3 * Math.sin(t * 1.2 + n.phase));
+      const haloR = baseR * (2.4 + 0.25 * Math.sin(t * 1.0 + n.phase)) * (0.6 + 0.4 * ag);
       n._halo.scale.set(haloR, haloR, haloR);
-      if (n._halo.material) {
-        const isMatch = hasSearch && state.searchMatches.has(n.id);
-        n._halo.material.opacity = isMatch ? 0.28 : (0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.6 + n.phase))) * dimMul;
+      if (n._halo.material && n._halo.material.uniforms) {
+        const u = n._halo.material.uniforms;
+        u.uTime.value = t;
+        u.uAlpha.value = ag * dimMul * (hasSearch && state.searchMatches.has(n.id) ? 1.6 : 1.0);
         if (topicsMode || diffMode) {
           const { color } = colorForNode(n);
-          n._halo.material.color.setHex(color);
+          u.uColor.value.setHex(color);
         }
       }
     }
