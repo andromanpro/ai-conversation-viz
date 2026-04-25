@@ -222,13 +222,13 @@ export function tickStory(nowMs, state) {
   const newly = collectNew(state);
   if (newly.length) pendingQueue.push(...newly);
 
-  // Выдаём не чаще одной bubble за MIN_POST_GAP_MS (учитывая playSpeed)
+  // Выдаём ровно одну bubble за кадр (если прошёл MIN_POST_GAP_MS), чтобы
+  // typewriter не накладывался. playSpeed масштабирует gap.
   const minGap = CFG.storyPostGapMs / Math.max(0.1, state.playSpeed || 1);
-  while (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
+  if (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
     const n = pendingQueue.shift();
     postBubble(n);
     lastPostMs = nowMs;
-    break; // ровно одна за кадр — чтобы typewriter не накладывался
   }
 }
 

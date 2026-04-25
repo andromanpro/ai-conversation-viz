@@ -196,12 +196,9 @@ export function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
 
 // ---------- radial / bbox / fit (без изменений) ----------
 
-export function computeRadialLayout(nodes, byId, viewport) {
-  const positions = new Map();
-  if (!nodes.length) return positions;
-  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
-  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
-
+// Сложение parent-children словаря и списка корней. Дети одного родителя
+// сортируются по timestamp для стабильного визуала.
+function buildParentChildIndex(nodes, byId) {
   const children = new Map();
   const roots = [];
   for (const n of nodes) children.set(n.id, []);
@@ -209,50 +206,68 @@ export function computeRadialLayout(nodes, byId, viewport) {
     if (n.parentId && byId.has(n.parentId)) children.get(n.parentId).push(n.id);
     else roots.push(n.id);
   }
-  for (const arr of children.values()) arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+  const byTs = (a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0);
+  for (const arr of children.values()) arr.sort(byTs);
+  roots.sort(byTs);
+  return { children, roots };
+}
 
+// Подсчёт листьев в каждом поддереве — определяет угловой share.
+function countLeavesPerSubtree(roots, children) {
   const leaves = new Map();
-  const countLeaves = (id) => {
+  const visit = (id) => {
     const kids = children.get(id) || [];
     if (!kids.length) { leaves.set(id, 1); return 1; }
     let sum = 0;
-    for (const k of kids) sum += countLeaves(k);
+    for (const k of kids) sum += visit(k);
     leaves.set(id, sum);
     return sum;
   };
-  for (const r of roots) countLeaves(r);
+  for (const r of roots) visit(r);
+  return leaves;
+}
 
-  const ring = CFG.radialRingGap;
-  const assign = (id, depth, angleStart, angleEnd) => {
-    const mid = (angleStart + angleEnd) / 2;
-    const radius = depth * ring;
-    const x = cx + Math.cos(mid) * radius;
-    const y = cy + Math.sin(mid) * radius;
-    positions.set(id, { x, y });
-    const n = byId.get(id);
-    if (n) { n._radialX = x; n._radialY = y; }
-    const kids = children.get(id) || [];
-    if (!kids.length) return;
-    const total = leaves.get(id);
-    let cur = angleStart;
-    for (const k of kids) {
-      const share = leaves.get(k) / total;
-      const next = cur + (angleEnd - angleStart) * share;
-      assign(k, depth + 1, cur, next);
-      cur = next;
-    }
-  };
+// Один проход sunburst: рисуем ноду на радиусе depth*ring, делим
+// угловую долю между детьми пропорционально количеству их листьев.
+function assignRadialPosition(id, depth, angleStart, angleEnd, ctx) {
+  const { children, leaves, byId, positions, cx, cy, ring } = ctx;
+  const mid = (angleStart + angleEnd) / 2;
+  const radius = depth * ring;
+  const x = cx + Math.cos(mid) * radius;
+  const y = cy + Math.sin(mid) * radius;
+  positions.set(id, { x, y });
+  const n = byId.get(id);
+  if (n) { n._radialX = x; n._radialY = y; }
+  const kids = children.get(id) || [];
+  if (!kids.length) return;
+  const total = leaves.get(id);
+  let cur = angleStart;
+  for (const k of kids) {
+    const share = leaves.get(k) / total;
+    const next = cur + (angleEnd - angleStart) * share;
+    assignRadialPosition(k, depth + 1, cur, next, ctx);
+    cur = next;
+  }
+}
+
+export function computeRadialLayout(nodes, byId, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+  const { children, roots } = buildParentChildIndex(nodes, byId);
+  const leaves = countLeavesPerSubtree(roots, children);
+  const ctx = { children, leaves, byId, positions, cx, cy, ring: CFG.radialRingGap };
 
   if (roots.length === 1) {
-    assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
+    assignRadialPosition(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2, ctx);
   } else {
-    // Множественные roots — не сливать в точке. Ставим их на depth=1 (первое
-    // кольцо), оставляя центр свободным. Сортируем по ts для стабильного порядка.
-    roots.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+    // Несколько roots: каждый занимает свой сектор на depth=1, центр свободен.
     const slice = (Math.PI * 2) / roots.length;
-    const startDepth = 1;
     for (let i = 0; i < roots.length; i++) {
-      assign(roots[i], startDepth, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+      const a0 = i * slice - Math.PI / 2;
+      const a1 = (i + 1) * slice - Math.PI / 2;
+      assignRadialPosition(roots[i], 1, a0, a1, ctx);
     }
   }
   return positions;

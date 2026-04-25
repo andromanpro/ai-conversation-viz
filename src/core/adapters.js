@@ -3,32 +3,91 @@
 // либо пустая строка. loader.js использует detectFormat()
 // и вызывает соответствующий toClaudeJsonl().
 
-export function detectFormat(text) {
-  const trimmed = (text || '').trim();
-  if (!trimmed) return 'unknown';
-  if (trimmed[0] === '[' || trimmed[0] === '{') {
-    try {
-      const obj = JSON.parse(trimmed);
-      const sample = Array.isArray(obj) ? obj[0] : obj;
-      if (sample && sample.mapping) return 'chatgpt-export';
-      if (Array.isArray(obj) && obj.length && obj[0].role && obj[0].content != null) return 'anthropic-messages';
-    } catch { /* might be JSONL */ }
+// Известные тип-метки которые может содержать первая строка Claude JSONL.
+const CLAUDE_JSONL_TYPE_MARKERS = new Set([
+  'user', 'assistant', 'queue-operation', 'last-prompt',
+]);
+
+function tryParseJsonRoot(text) {
+  if (text[0] !== '[' && text[0] !== '{') return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function detectByJsonRoot(obj) {
+  const sample = Array.isArray(obj) ? obj[0] : obj;
+  if (sample && sample.mapping) return 'chatgpt-export';
+  if (Array.isArray(obj) && obj.length && obj[0].role && obj[0].content != null) {
+    return 'anthropic-messages';
   }
-  // Первая непустая строка — валидный JSON c типом/полями Claude Code
-  for (const line of trimmed.split(/\r?\n/)) {
+  return null;
+}
+
+function detectByJsonlFirstLine(text) {
+  for (const line of text.split(/\r?\n/)) {
     const s = line.trim();
     if (!s) continue;
     try {
       const obj = JSON.parse(s);
-      if (obj.type === 'user' || obj.type === 'assistant'
-          || obj.type === 'queue-operation' || obj.type === 'last-prompt'
-          || obj.parentUuid !== undefined) {
+      if (CLAUDE_JSONL_TYPE_MARKERS.has(obj.type) || obj.parentUuid !== undefined) {
         return 'claude-jsonl';
       }
-    } catch {}
-    break;
+    } catch { /* not parseable — not jsonl */ }
+    return null; // первая непустая строка не подошла → не jsonl
   }
+  return null;
+}
+
+export function detectFormat(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return 'unknown';
+  const root = tryParseJsonRoot(trimmed);
+  if (root) {
+    const byRoot = detectByJsonRoot(root);
+    if (byRoot) return byRoot;
+  }
+  const byJsonl = detectByJsonlFirstLine(trimmed);
+  if (byJsonl) return byJsonl;
   return 'unknown';
+}
+
+// ---- ChatGPT export ----
+// Структура: { conversation_id, mapping: { [nodeId]: { message, parent } } }
+// либо массив таких объектов. Нас интересуют только user/assistant ноды
+// с непустым текстом.
+
+function extractChatGptText(content) {
+  if (!content) return '';
+  const parts = Array.isArray(content.parts)
+    ? content.parts
+    : (content.text ? [content.text] : []);
+  return parts
+    .map(p => (typeof p === 'string' ? p : (p && p.text) || ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+function chatGptIdWithConv(convId, id) {
+  return convId ? `${convId}:${id}` : id;
+}
+
+function convertChatGptNode(id, node, convId) {
+  const msg = node && node.message;
+  if (!msg || !msg.author) return null;
+  const role = msg.author.role;
+  if (role !== 'user' && role !== 'assistant') return null;
+  const text = extractChatGptText(msg.content);
+  if (!text) return null;
+  const ts = msg.create_time
+    ? new Date(msg.create_time * 1000).toISOString()
+    : new Date().toISOString();
+  const parentId = node.parent || null;
+  return {
+    type: role,
+    uuid: chatGptIdWithConv(convId, id),
+    parentUuid: parentId ? chatGptIdWithConv(convId, parentId) : null,
+    timestamp: ts,
+    message: { role, content: text },
+  };
 }
 
 export function chatgptToClaudeJsonl(text) {
@@ -41,28 +100,8 @@ export function chatgptToClaudeJsonl(text) {
     if (!mapping) continue;
     const convId = conv.id || conv.conversation_id || '';
     for (const [id, node] of Object.entries(mapping)) {
-      const msg = node && node.message;
-      if (!msg || !msg.author) continue;
-      const role = msg.author.role;
-      if (role !== 'user' && role !== 'assistant') continue;
-      const c = msg.content || {};
-      const parts = Array.isArray(c.parts) ? c.parts : (c.text ? [c.text] : []);
-      const textJoined = parts
-        .map(p => (typeof p === 'string' ? p : (p && p.text) || ''))
-        .filter(Boolean)
-        .join('\n');
-      if (!textJoined) continue;
-      const ts = msg.create_time
-        ? new Date(msg.create_time * 1000).toISOString()
-        : new Date().toISOString();
-      const parentId = node.parent || null;
-      out.push(JSON.stringify({
-        type: role,
-        uuid: convId ? `${convId}:${id}` : id,
-        parentUuid: parentId ? (convId ? `${convId}:${parentId}` : parentId) : null,
-        timestamp: ts,
-        message: { role, content: textJoined },
-      }));
+      const converted = convertChatGptNode(id, node, convId);
+      if (converted) out.push(JSON.stringify(converted));
     }
   }
   return out.join('\n');

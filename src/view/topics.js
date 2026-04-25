@@ -36,43 +36,61 @@ function tokenize(text) {
  * @param {Array} nodes — state.nodes
  * @returns {Map<nodeId, { topWord: string, score: number }>}
  */
+// Document frequency — в скольких уникальных нодах встречается каждое слово.
+function buildDocFrequency(tokensById) {
+  const df = new Map();
+  for (const toks of tokensById.values()) {
+    for (const w of new Set(toks)) df.set(w, (df.get(w) || 0) + 1);
+  }
+  return df;
+}
+
+// Term frequency — сколько раз слово встречается в одной ноде.
+function buildTermFrequency(toks) {
+  const tf = new Map();
+  for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+  return tf;
+}
+
+// Основной выбор: среди слов с df >= 2 выбираем то у которого максимальный
+// score = tf × log(1 + df). Singleton-слова (df=1) отбрасываем — они не
+// кластеризуются.
+function pickRecurringTop(tf, df) {
+  let best = null, bestScore = 0;
+  for (const [w, c] of tf) {
+    const d = df.get(w) || 0;
+    if (d < 2) continue;
+    const score = c * Math.log(1 + d);
+    if (score > bestScore) { bestScore = score; best = w; }
+  }
+  return best ? { topWord: best, score: bestScore } : null;
+}
+
+// Fallback когда у ноды нет recurring-слов (например корпус = 1 нода):
+// просто берём слово с максимальным df в корпусе.
+function pickFallbackByDf(tf, df) {
+  let best = null, maxDf = 0;
+  for (const w of tf.keys()) {
+    const d = df.get(w) || 0;
+    if (d > maxDf) { maxDf = d; best = w; }
+  }
+  return best ? { topWord: best, score: maxDf } : null;
+}
+
 export function computeTopics(nodes) {
   const result = new Map();
   if (!nodes || !nodes.length) return result;
-  // DF — в скольких документах встречается слово
-  const df = new Map();
-  const nodeTokens = new Map();
-  for (const n of nodes) {
-    const toks = tokenize(n.text || '');
-    nodeTokens.set(n.id, toks);
-    const seen = new Set(toks);
-    for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
-  }
+  // Tokenize все ноды один раз — переиспользуется для DF и TF.
+  const tokensById = new Map();
+  for (const n of nodes) tokensById.set(n.id, tokenize(n.text || ''));
+  const df = buildDocFrequency(tokensById);
 
   for (const n of nodes) {
-    const toks = nodeTokens.get(n.id) || [];
+    const toks = tokensById.get(n.id) || [];
     if (!toks.length) { result.set(n.id, null); continue; }
-    // TF
-    const tf = new Map();
-    for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
-    // Пройдём два раза: сначала ищем среди non-singleton (df >= 2),
-    // потом fallback на слово с max df.
-    let best = null, bestScore = 0;
-    for (const [w, c] of tf) {
-      const d = df.get(w) || 0;
-      if (d < 2) continue;
-      const score = c * Math.log(1 + d);
-      if (score > bestScore) { bestScore = score; best = w; }
-    }
-    if (!best) {
-      // Fallback — берём самое «массовое» слово в корпусе из токенов ноды
-      let maxDf = 0;
-      for (const w of tf.keys()) {
-        const d = df.get(w) || 0;
-        if (d > maxDf) { maxDf = d; best = w; bestScore = d; }
-      }
-    }
-    result.set(n.id, best ? { topWord: best, score: bestScore } : null);
+    const tf = buildTermFrequency(toks);
+    const top = pickRecurringTop(tf, df) || pickFallbackByDf(tf, df);
+    result.set(n.id, top);
   }
   return result;
 }

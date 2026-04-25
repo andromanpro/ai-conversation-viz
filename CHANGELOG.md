@@ -4,6 +4,106 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-04-25
+
+### Fixed
+
+- **Bug** (`src/ui/story-mode.js:227`) — `while … break` всегда исполнялся
+  максимум один раз. Заменил на `if`. Поведение идентичное, но Sonar
+  больше не ругается, и читать код проще.
+
+### Changed (safe refactoring after Sonar audit)
+
+Снизил cognitive complexity у изолированных, протестированных, не-hot-path
+функций. Хот-функции рендера/физики (`draw()`, `stepPhysics()`, `tick()`,
+`fillLineBuffer/PointBuffer`) **намеренно не трогал** — там высокая
+сложность это плата за минимум аллокаций в frame loop.
+
+- `chatgptToClaudeJsonl()` (49 → ≤15) — извлёк `extractChatGptText`,
+  `convertChatGptNode`, `chatGptIdWithConv`.
+- `detectFormat()` (22 → ≤15) — выделил `tryParseJsonRoot`,
+  `detectByJsonRoot`, `detectByJsonlFirstLine`. CLAUDE_JSONL_TYPE_MARKERS
+  как Set вместо длинного OR-списка.
+- `computeTopics()` (35 → ≤15) — `buildDocFrequency`, `buildTermFrequency`,
+  `pickRecurringTop`, `pickFallbackByDf` как чистые helpers.
+- `computeRadialLayout()` (31 → ≤15) — `buildParentChildIndex`,
+  `countLeavesPerSubtree`, `assignRadialPosition` (рекурсивный helper
+  принимает context-объект вместо closure'а 6 переменных).
+- `buildGraph()` (29 → ≤15) — `createPhysicsNode`, `markOrphans`,
+  `buildEdges` как отдельные helpers.
+
+### Sonar metrics — до / после
+
+| | до | после |
+|---|---|---|
+| Bugs | 1 | **0** |
+| Code smells | 72 | **66** |
+| Tech debt (min) | 1006 | **887** |
+| Reliability rating | C | **A** |
+| Maintainability | A | A |
+| Security | A | A |
+
+122 tests passing.
+
+## [1.0.5] — 2026-04-25
+
+### Fixed
+
+- `.scannerwork/` (SonarQube working dir) попало в коммит v1.0.4. Удалено
+  из репо, добавлено в `.gitignore`.
+
+## [1.0.4] — 2026-04-25
+
+### Added
+
+- `sonar-project.properties` — конфиг для прогона через self-hosted
+  SonarQube. Excludes `dist/`, `samples/`, `samples-embedded.js`.
+- `npm run sonar` — алиас на `sonar-scanner` с подтянутым токеном.
+
+### Notes
+
+Первый прогон через SonarQube 9.9.8 показал: **0 vulnerabilities**,
+Security Rating A, Maintainability A, Reliability C (1 bug, 73 code
+smells — большинство cognitive complexity на hot-path функциях
+рендера/физики). 39 security hotspots — все false-positive (build-time
+regex backtracking при контролируемом входе + Math.random для
+starfield). 7244 NLOC, 0.2% duplication, ~17 часов tech debt.
+
+## [1.0.3] — 2026-04-25
+
+### Fixed
+
+- **Orchestration sample** теперь имеет правильную fan-out структуру.
+  В v1.0.2 sample был «гребёнкой»: каждый Task в отдельном assistant,
+  subagent'ы внуки/правнуки. Перепеределал в реалистичный Claude Code
+  паттерн: ОДИН assistant с 4 tool_use Task. Все 4 subagent-поддерева
+  имеют parentUuid=a2 — рисуются как 4 параллельные ветки от hub'а.
+  Подтверждено: `a2 → [sa1_u1, sb1_u1, sc1_u1, sd1_u1, u3]`.
+
+## [1.0.2] — 2026-04-25
+
+### Added
+
+- Кнопка **🤖 Multi-agent demo** в HUD, рядом с «Load sample».
+- `build.cjs` теперь автогенерирует `src/core/samples-embedded.js` из
+  `samples/*.jsonl` при каждом `npm run build`. Эмбед делает sample'ы
+  доступными через `import` без runtime fetch — работает в `file://` и
+  в npm-пакете.
+
+### i18n
+
+- `btn.demo_orchestration`, `tip.demo_orchestration` (RU + EN).
+
+## [1.0.1] — 2026-04-25
+
+### Fixed
+
+- **Privacy**: убрал реальный LAN-IP NAS (`192.168.1.130:3000/androman/`)
+  из фейкового `git push` output в `src/core/sample.js`. Заменил на
+  нейтральный `git@github.com:user/...`. RFC1918 не атакуется снаружи,
+  но раскрывал топологию личной LAN. Старые коммиты в git history не
+  переписываю — для public repo это плохая идея (ломает форки/звёзды).
+
 ## [1.0.0] — 2026-04-25
 
 First stable release. Feature-complete for the intended pet-project use case

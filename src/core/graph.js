@@ -81,37 +81,32 @@ export function appendRawNodes(state, rawNodes, viewport) {
   return added;
 }
 
-export function buildGraph(parsed, viewport) {
-  const { width, height } = viewport;
-  const cx = width / 2, cy = height / 2;
-  const n = parsed.nodes.length;
+// Создание одной physics-ноды из raw parsed-данных. Стартовая позиция —
+// круг радиуса 80-140 px вокруг центра viewport, чтобы prewarm не начинал
+// с одной точки.
+function createPhysicsNode(src, index, total, cx, cy) {
+  const angle = total ? (index / total) * Math.PI * 2 : 0;
+  const spread = 80 + Math.random() * 60;
+  const node = {
+    ...src,
+    x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
+    y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
+    vx: 0, vy: 0,
+    fxAcc: 0, fyAcc: 0,
+    r: CFG.minR,
+    recency: 0,
+    phase: Math.random() * Math.PI * 2,
+    degree: 0,
+    isHub: false,
+  };
+  applySeedJitter(node);
+  return node;
+}
 
-  const nodes = parsed.nodes.map((src, i) => {
-    const angle = n ? (i / n) * Math.PI * 2 : 0;
-    const spread = 80 + Math.random() * 60;
-    const node = {
-      ...src,
-      x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
-      y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
-      vx: 0, vy: 0,
-      fxAcc: 0, fyAcc: 0,
-      r: CFG.minR,
-      recency: 0,
-      phase: Math.random() * Math.PI * 2,
-      degree: 0,
-      isHub: false,
-    };
-    applySeedJitter(node);
-    return node;
-  });
-
-  const byId = new Map(nodes.map(node => [node.id, node]));
-
-  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
-  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
-  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
-  // решает как их показывать: как отдельный forest (off, default) или
-  // пунктирно-связанными с основной цепью (on).
+// Orphan detection: помечаем ноды у которых parentId не в byId (subagent-
+// сессии или обрезано maxMessages). Не меняем parentId — создаём
+// adopted-edge к ближайшему по ts предшественнику.
+function markOrphans(nodes, byId) {
   const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
   for (let i = 0; i < sortedByTs.length; i++) {
     const node = sortedByTs[i];
@@ -121,42 +116,41 @@ export function buildGraph(parsed, viewport) {
       if (prev) node._adoptedParentId = prev.id;
     }
   }
+}
 
+// Сборка edge-списка. Real edge — node.parentId известен. Adopted edge —
+// fallback для orphan-нод (отрисовывается пунктиром, в физике участвует
+// только когда state.connectOrphans=true).
+function buildEdges(nodes, byId) {
   const edges = [];
   for (const node of nodes) {
     if (node.parentId && byId.has(node.parentId)) {
       edges.push({
-        source: node.parentId,
-        target: node.id,
-        a: byId.get(node.parentId),
-        b: node,
-        adopted: false,
+        source: node.parentId, target: node.id,
+        a: byId.get(node.parentId), b: node, adopted: false,
       });
     } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
       const parent = byId.get(node._adoptedParentId);
       edges.push({
-        source: parent.id,
-        target: node.id,
-        a: parent,
-        b: node,
-        adopted: true,
+        source: parent.id, target: node.id,
+        a: parent, b: node, adopted: true,
       });
     }
   }
+  return edges;
+}
 
-  if (nodes.length) {
-    let tMin = Infinity, tMax = -Infinity;
-    for (const node of nodes) {
-      if (node.ts < tMin) tMin = node.ts;
-      if (node.ts > tMax) tMax = node.ts;
-    }
-    const dt = Math.max(1, tMax - tMin);
-    for (const node of nodes) {
-      node.recency = (node.ts - tMin) / dt;
-      node.r = computeRadius(node);
-    }
-  }
+export function buildGraph(parsed, viewport) {
+  const { width, height } = viewport;
+  const cx = width / 2, cy = height / 2;
+  const total = parsed.nodes.length;
 
+  const nodes = parsed.nodes.map((src, i) => createPhysicsNode(src, i, total, cx, cy));
+  const byId = new Map(nodes.map(node => [node.id, node]));
+
+  markOrphans(nodes, byId);
+  const edges = buildEdges(nodes, byId);
+  recomputeRecency(nodes);
   computeDegreesAndHubs(nodes, edges);
 
   return { nodes, edges, byId };

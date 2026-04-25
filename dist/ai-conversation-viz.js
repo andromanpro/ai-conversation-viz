@@ -549,32 +549,91 @@ function parseLine(line, seedCounter) {
 // либо пустая строка. loader.js использует detectFormat()
 // и вызывает соответствующий toClaudeJsonl().
 
-function detectFormat(text) {
-  const trimmed = (text || '').trim();
-  if (!trimmed) return 'unknown';
-  if (trimmed[0] === '[' || trimmed[0] === '{') {
-    try {
-      const obj = JSON.parse(trimmed);
-      const sample = Array.isArray(obj) ? obj[0] : obj;
-      if (sample && sample.mapping) return 'chatgpt-export';
-      if (Array.isArray(obj) && obj.length && obj[0].role && obj[0].content != null) return 'anthropic-messages';
-    } catch { /* might be JSONL */ }
+// Известные тип-метки которые может содержать первая строка Claude JSONL.
+const CLAUDE_JSONL_TYPE_MARKERS = new Set([
+  'user', 'assistant', 'queue-operation', 'last-prompt',
+]);
+
+function tryParseJsonRoot(text) {
+  if (text[0] !== '[' && text[0] !== '{') return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function detectByJsonRoot(obj) {
+  const sample = Array.isArray(obj) ? obj[0] : obj;
+  if (sample && sample.mapping) return 'chatgpt-export';
+  if (Array.isArray(obj) && obj.length && obj[0].role && obj[0].content != null) {
+    return 'anthropic-messages';
   }
-  // Первая непустая строка — валидный JSON c типом/полями Claude Code
-  for (const line of trimmed.split(/\r?\n/)) {
+  return null;
+}
+
+function detectByJsonlFirstLine(text) {
+  for (const line of text.split(/\r?\n/)) {
     const s = line.trim();
     if (!s) continue;
     try {
       const obj = JSON.parse(s);
-      if (obj.type === 'user' || obj.type === 'assistant'
-          || obj.type === 'queue-operation' || obj.type === 'last-prompt'
-          || obj.parentUuid !== undefined) {
+      if (CLAUDE_JSONL_TYPE_MARKERS.has(obj.type) || obj.parentUuid !== undefined) {
         return 'claude-jsonl';
       }
-    } catch {}
-    break;
+    } catch { /* not parseable — not jsonl */ }
+    return null; // первая непустая строка не подошла → не jsonl
   }
+  return null;
+}
+
+function detectFormat(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return 'unknown';
+  const root = tryParseJsonRoot(trimmed);
+  if (root) {
+    const byRoot = detectByJsonRoot(root);
+    if (byRoot) return byRoot;
+  }
+  const byJsonl = detectByJsonlFirstLine(trimmed);
+  if (byJsonl) return byJsonl;
   return 'unknown';
+}
+
+// ---- ChatGPT export ----
+// Структура: { conversation_id, mapping: { [nodeId]: { message, parent } } }
+// либо массив таких объектов. Нас интересуют только user/assistant ноды
+// с непустым текстом.
+
+function extractChatGptText(content) {
+  if (!content) return '';
+  const parts = Array.isArray(content.parts)
+    ? content.parts
+    : (content.text ? [content.text] : []);
+  return parts
+    .map(p => (typeof p === 'string' ? p : (p && p.text) || ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+function chatGptIdWithConv(convId, id) {
+  return convId ? `${convId}:${id}` : id;
+}
+
+function convertChatGptNode(id, node, convId) {
+  const msg = node && node.message;
+  if (!msg || !msg.author) return null;
+  const role = msg.author.role;
+  if (role !== 'user' && role !== 'assistant') return null;
+  const text = extractChatGptText(msg.content);
+  if (!text) return null;
+  const ts = msg.create_time
+    ? new Date(msg.create_time * 1000).toISOString()
+    : new Date().toISOString();
+  const parentId = node.parent || null;
+  return {
+    type: role,
+    uuid: chatGptIdWithConv(convId, id),
+    parentUuid: parentId ? chatGptIdWithConv(convId, parentId) : null,
+    timestamp: ts,
+    message: { role, content: text },
+  };
 }
 
 function chatgptToClaudeJsonl(text) {
@@ -587,28 +646,8 @@ function chatgptToClaudeJsonl(text) {
     if (!mapping) continue;
     const convId = conv.id || conv.conversation_id || '';
     for (const [id, node] of Object.entries(mapping)) {
-      const msg = node && node.message;
-      if (!msg || !msg.author) continue;
-      const role = msg.author.role;
-      if (role !== 'user' && role !== 'assistant') continue;
-      const c = msg.content || {};
-      const parts = Array.isArray(c.parts) ? c.parts : (c.text ? [c.text] : []);
-      const textJoined = parts
-        .map(p => (typeof p === 'string' ? p : (p && p.text) || ''))
-        .filter(Boolean)
-        .join('\n');
-      if (!textJoined) continue;
-      const ts = msg.create_time
-        ? new Date(msg.create_time * 1000).toISOString()
-        : new Date().toISOString();
-      const parentId = node.parent || null;
-      out.push(JSON.stringify({
-        type: role,
-        uuid: convId ? `${convId}:${id}` : id,
-        parentUuid: parentId ? (convId ? `${convId}:${parentId}` : parentId) : null,
-        timestamp: ts,
-        message: { role, content: textJoined },
-      }));
+      const converted = convertChatGptNode(id, node, convId);
+      if (converted) out.push(JSON.stringify(converted));
     }
   }
   return out.join('\n');
@@ -979,12 +1018,9 @@ function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
 
 // ---------- radial / bbox / fit (без изменений) ----------
 
-function computeRadialLayout(nodes, byId, viewport) {
-  const positions = new Map();
-  if (!nodes.length) return positions;
-  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
-  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
-
+// Сложение parent-children словаря и списка корней. Дети одного родителя
+// сортируются по timestamp для стабильного визуала.
+function buildParentChildIndex(nodes, byId) {
   const children = new Map();
   const roots = [];
   for (const n of nodes) children.set(n.id, []);
@@ -992,50 +1028,68 @@ function computeRadialLayout(nodes, byId, viewport) {
     if (n.parentId && byId.has(n.parentId)) children.get(n.parentId).push(n.id);
     else roots.push(n.id);
   }
-  for (const arr of children.values()) arr.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+  const byTs = (a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0);
+  for (const arr of children.values()) arr.sort(byTs);
+  roots.sort(byTs);
+  return { children, roots };
+}
 
+// Подсчёт листьев в каждом поддереве — определяет угловой share.
+function countLeavesPerSubtree(roots, children) {
   const leaves = new Map();
-  const countLeaves = (id) => {
+  const visit = (id) => {
     const kids = children.get(id) || [];
     if (!kids.length) { leaves.set(id, 1); return 1; }
     let sum = 0;
-    for (const k of kids) sum += countLeaves(k);
+    for (const k of kids) sum += visit(k);
     leaves.set(id, sum);
     return sum;
   };
-  for (const r of roots) countLeaves(r);
+  for (const r of roots) visit(r);
+  return leaves;
+}
 
-  const ring = CFG.radialRingGap;
-  const assign = (id, depth, angleStart, angleEnd) => {
-    const mid = (angleStart + angleEnd) / 2;
-    const radius = depth * ring;
-    const x = cx + Math.cos(mid) * radius;
-    const y = cy + Math.sin(mid) * radius;
-    positions.set(id, { x, y });
-    const n = byId.get(id);
-    if (n) { n._radialX = x; n._radialY = y; }
-    const kids = children.get(id) || [];
-    if (!kids.length) return;
-    const total = leaves.get(id);
-    let cur = angleStart;
-    for (const k of kids) {
-      const share = leaves.get(k) / total;
-      const next = cur + (angleEnd - angleStart) * share;
-      assign(k, depth + 1, cur, next);
-      cur = next;
-    }
-  };
+// Один проход sunburst: рисуем ноду на радиусе depth*ring, делим
+// угловую долю между детьми пропорционально количеству их листьев.
+function assignRadialPosition(id, depth, angleStart, angleEnd, ctx) {
+  const { children, leaves, byId, positions, cx, cy, ring } = ctx;
+  const mid = (angleStart + angleEnd) / 2;
+  const radius = depth * ring;
+  const x = cx + Math.cos(mid) * radius;
+  const y = cy + Math.sin(mid) * radius;
+  positions.set(id, { x, y });
+  const n = byId.get(id);
+  if (n) { n._radialX = x; n._radialY = y; }
+  const kids = children.get(id) || [];
+  if (!kids.length) return;
+  const total = leaves.get(id);
+  let cur = angleStart;
+  for (const k of kids) {
+    const share = leaves.get(k) / total;
+    const next = cur + (angleEnd - angleStart) * share;
+    assignRadialPosition(k, depth + 1, cur, next, ctx);
+    cur = next;
+  }
+}
+
+function computeRadialLayout(nodes, byId, viewport) {
+  const positions = new Map();
+  if (!nodes.length) return positions;
+  const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
+  const cy = viewport.cy != null ? viewport.cy : viewport.height / 2;
+  const { children, roots } = buildParentChildIndex(nodes, byId);
+  const leaves = countLeavesPerSubtree(roots, children);
+  const ctx = { children, leaves, byId, positions, cx, cy, ring: CFG.radialRingGap };
 
   if (roots.length === 1) {
-    assign(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2);
+    assignRadialPosition(roots[0], 0, -Math.PI / 2, (3 * Math.PI) / 2, ctx);
   } else {
-    // Множественные roots — не сливать в точке. Ставим их на depth=1 (первое
-    // кольцо), оставляя центр свободным. Сортируем по ts для стабильного порядка.
-    roots.sort((a, b) => (byId.get(a)?.ts || 0) - (byId.get(b)?.ts || 0));
+    // Несколько roots: каждый занимает свой сектор на depth=1, центр свободен.
     const slice = (Math.PI * 2) / roots.length;
-    const startDepth = 1;
     for (let i = 0; i < roots.length; i++) {
-      assign(roots[i], startDepth, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+      const a0 = i * slice - Math.PI / 2;
+      const a1 = (i + 1) * slice - Math.PI / 2;
+      assignRadialPosition(roots[i], 1, a0, a1, ctx);
     }
   }
   return positions;
@@ -1213,37 +1267,32 @@ function appendRawNodes(state, rawNodes, viewport) {
   return added;
 }
 
-function buildGraph(parsed, viewport) {
-  const { width, height } = viewport;
-  const cx = width / 2, cy = height / 2;
-  const n = parsed.nodes.length;
+// Создание одной physics-ноды из raw parsed-данных. Стартовая позиция —
+// круг радиуса 80-140 px вокруг центра viewport, чтобы prewarm не начинал
+// с одной точки.
+function createPhysicsNode(src, index, total, cx, cy) {
+  const angle = total ? (index / total) * Math.PI * 2 : 0;
+  const spread = 80 + Math.random() * 60;
+  const node = {
+    ...src,
+    x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
+    y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
+    vx: 0, vy: 0,
+    fxAcc: 0, fyAcc: 0,
+    r: CFG.minR,
+    recency: 0,
+    phase: Math.random() * Math.PI * 2,
+    degree: 0,
+    isHub: false,
+  };
+  applySeedJitter(node);
+  return node;
+}
 
-  const nodes = parsed.nodes.map((src, i) => {
-    const angle = n ? (i / n) * Math.PI * 2 : 0;
-    const spread = 80 + Math.random() * 60;
-    const node = {
-      ...src,
-      x: cx + Math.cos(angle) * spread + (Math.random() - 0.5) * 30,
-      y: cy + Math.sin(angle) * spread + (Math.random() - 0.5) * 30,
-      vx: 0, vy: 0,
-      fxAcc: 0, fyAcc: 0,
-      r: CFG.minR,
-      recency: 0,
-      phase: Math.random() * Math.PI * 2,
-      degree: 0,
-      isHub: false,
-    };
-    applySeedJitter(node);
-    return node;
-  });
-
-  const byId = new Map(nodes.map(node => [node.id, node]));
-
-  // Orphan detection: помечаем ноды у которых parentId не в byId (subagent
-  // сессии или обрезано maxMessages). Не меняем их parentId — создадим
-  // adopted-edge к ближайшему по ts предшественнику. Toggle `connectOrphans`
-  // решает как их показывать: как отдельный forest (off, default) или
-  // пунктирно-связанными с основной цепью (on).
+// Orphan detection: помечаем ноды у которых parentId не в byId (subagent-
+// сессии или обрезано maxMessages). Не меняем parentId — создаём
+// adopted-edge к ближайшему по ts предшественнику.
+function markOrphans(nodes, byId) {
   const sortedByTs = [...nodes].sort((a, b) => a.ts - b.ts);
   for (let i = 0; i < sortedByTs.length; i++) {
     const node = sortedByTs[i];
@@ -1253,42 +1302,41 @@ function buildGraph(parsed, viewport) {
       if (prev) node._adoptedParentId = prev.id;
     }
   }
+}
 
+// Сборка edge-списка. Real edge — node.parentId известен. Adopted edge —
+// fallback для orphan-нод (отрисовывается пунктиром, в физике участвует
+// только когда state.connectOrphans=true).
+function buildEdges(nodes, byId) {
   const edges = [];
   for (const node of nodes) {
     if (node.parentId && byId.has(node.parentId)) {
       edges.push({
-        source: node.parentId,
-        target: node.id,
-        a: byId.get(node.parentId),
-        b: node,
-        adopted: false,
+        source: node.parentId, target: node.id,
+        a: byId.get(node.parentId), b: node, adopted: false,
       });
     } else if (node._adoptedParentId && byId.has(node._adoptedParentId)) {
       const parent = byId.get(node._adoptedParentId);
       edges.push({
-        source: parent.id,
-        target: node.id,
-        a: parent,
-        b: node,
-        adopted: true,
+        source: parent.id, target: node.id,
+        a: parent, b: node, adopted: true,
       });
     }
   }
+  return edges;
+}
 
-  if (nodes.length) {
-    let tMin = Infinity, tMax = -Infinity;
-    for (const node of nodes) {
-      if (node.ts < tMin) tMin = node.ts;
-      if (node.ts > tMax) tMax = node.ts;
-    }
-    const dt = Math.max(1, tMax - tMin);
-    for (const node of nodes) {
-      node.recency = (node.ts - tMin) / dt;
-      node.r = computeRadius(node);
-    }
-  }
+function buildGraph(parsed, viewport) {
+  const { width, height } = viewport;
+  const cx = width / 2, cy = height / 2;
+  const total = parsed.nodes.length;
 
+  const nodes = parsed.nodes.map((src, i) => createPhysicsNode(src, i, total, cx, cy));
+  const byId = new Map(nodes.map(node => [node.id, node]));
+
+  markOrphans(nodes, byId);
+  const edges = buildEdges(nodes, byId);
+  recomputeRecency(nodes);
   computeDegreesAndHubs(nodes, edges);
 
   return { nodes, edges, byId };
@@ -2299,43 +2347,61 @@ function tokenize(text) {
  * @param {Array} nodes — state.nodes
  * @returns {Map<nodeId, { topWord: string, score: number }>}
  */
+// Document frequency — в скольких уникальных нодах встречается каждое слово.
+function buildDocFrequency(tokensById) {
+  const df = new Map();
+  for (const toks of tokensById.values()) {
+    for (const w of new Set(toks)) df.set(w, (df.get(w) || 0) + 1);
+  }
+  return df;
+}
+
+// Term frequency — сколько раз слово встречается в одной ноде.
+function buildTermFrequency(toks) {
+  const tf = new Map();
+  for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+  return tf;
+}
+
+// Основной выбор: среди слов с df >= 2 выбираем то у которого максимальный
+// score = tf × log(1 + df). Singleton-слова (df=1) отбрасываем — они не
+// кластеризуются.
+function pickRecurringTop(tf, df) {
+  let best = null, bestScore = 0;
+  for (const [w, c] of tf) {
+    const d = df.get(w) || 0;
+    if (d < 2) continue;
+    const score = c * Math.log(1 + d);
+    if (score > bestScore) { bestScore = score; best = w; }
+  }
+  return best ? { topWord: best, score: bestScore } : null;
+}
+
+// Fallback когда у ноды нет recurring-слов (например корпус = 1 нода):
+// просто берём слово с максимальным df в корпусе.
+function pickFallbackByDf(tf, df) {
+  let best = null, maxDf = 0;
+  for (const w of tf.keys()) {
+    const d = df.get(w) || 0;
+    if (d > maxDf) { maxDf = d; best = w; }
+  }
+  return best ? { topWord: best, score: maxDf } : null;
+}
+
 function computeTopics(nodes) {
   const result = new Map();
   if (!nodes || !nodes.length) return result;
-  // DF — в скольких документах встречается слово
-  const df = new Map();
-  const nodeTokens = new Map();
-  for (const n of nodes) {
-    const toks = tokenize(n.text || '');
-    nodeTokens.set(n.id, toks);
-    const seen = new Set(toks);
-    for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
-  }
+  // Tokenize все ноды один раз — переиспользуется для DF и TF.
+  const tokensById = new Map();
+  for (const n of nodes) tokensById.set(n.id, tokenize(n.text || ''));
+  const df = buildDocFrequency(tokensById);
 
   for (const n of nodes) {
-    const toks = nodeTokens.get(n.id) || [];
+    const toks = tokensById.get(n.id) || [];
     if (!toks.length) { result.set(n.id, null); continue; }
-    // TF
-    const tf = new Map();
-    for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
-    // Пройдём два раза: сначала ищем среди non-singleton (df >= 2),
-    // потом fallback на слово с max df.
-    let best = null, bestScore = 0;
-    for (const [w, c] of tf) {
-      const d = df.get(w) || 0;
-      if (d < 2) continue;
-      const score = c * Math.log(1 + d);
-      if (score > bestScore) { bestScore = score; best = w; }
-    }
-    if (!best) {
-      // Fallback — берём самое «массовое» слово в корпусе из токенов ноды
-      let maxDf = 0;
-      for (const w of tf.keys()) {
-        const d = df.get(w) || 0;
-        if (d > maxDf) { maxDf = d; best = w; bestScore = d; }
-      }
-    }
-    result.set(n.id, best ? { topWord: best, score: bestScore } : null);
+    const tf = buildTermFrequency(toks);
+    const top = pickRecurringTop(tf, df) || pickFallbackByDf(tf, df);
+    result.set(n.id, top);
   }
   return result;
 }
@@ -4278,13 +4344,13 @@ function tickStory(nowMs, state) {
   const newly = collectNew(state);
   if (newly.length) pendingQueue.push(...newly);
 
-  // Выдаём не чаще одной bubble за MIN_POST_GAP_MS (учитывая playSpeed)
+  // Выдаём ровно одну bubble за кадр (если прошёл MIN_POST_GAP_MS), чтобы
+  // typewriter не накладывался. playSpeed масштабирует gap.
   const minGap = CFG.storyPostGapMs / Math.max(0.1, state.playSpeed || 1);
-  while (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
+  if (pendingQueue.length && (nowMs - lastPostMs) >= minGap) {
     const n = pendingQueue.shift();
     postBubble(n);
     lastPostMs = nowMs;
-    break; // ровно одна за кадр — чтобы typewriter не накладывался
   }
 }
 
