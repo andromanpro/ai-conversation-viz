@@ -4,6 +4,66 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] — 2026-04-25
+
+### Added — 3D Force/Radial/Swim layouts
+
+- **3D Radial** (новый layout) — концентрические сферические оболочки
+  вокруг root. На каждой оболочке Fibonacci-spiral распределение точек.
+  Дочерние ноды попадают в cone (~60°) вокруг направления parent от
+  центра — естественное ветвление вместо «звёздного хаоса». Радиус
+  оболочки = depth × `RING_R_3D` (220).
+- **3D Swim Lanes** (новый layout) — длинная река вдоль оси X (по rank
+  от ts), Y разносит роли (3 lane: USER +320, ASSISTANT 0, TOOL_USE
+  -320), Z даёт parallax-глубину (thinking +180, tool_use -120).
+- **Layout switcher в 3D HUD** — три chip-кнопки FORCE / RADIAL / SWIM
+  как в 2D. Сохранение выбора в `localStorage['viz:layoutMode-3d']`.
+  Анимированный transition `CFG.layoutTransitionMs` мс между layouts.
+  Во время не-force layout physics автоматически замораживается.
+
+### Added — 3D Light theme
+
+- **Theme toggle в 3D HUD** — `#btn-theme` (☀/🌙). При переключении:
+  - `scene.background` и `scene.fog` меняются на light off-white
+  - Starfield скрывается на light theme
+  - Custom event `themechange` для синхронизации между 2D и 3D
+- **3D edges** — на light theme получают тёмные RGB (0x14479e вместо
+  0x00d4ff cyan, 0xa55308 вместо 0xeca040 orange, etc) — иначе на
+  белом фоне теряются.
+- **3D node colors** — отдельная `ROLE_COLORS_LIGHT` палитра
+  (тёмно-синий вместо пастельного голубого, etc). При theme change
+  uniform `uColor` обновляется в каждой ноде.
+
+### Files
+
+- `src/3d/layouts3d.js` — **новый** (compute3DRadialLayout +
+  compute3DSwimLanes)
+- `src/3d/main.js` — `init3DLayoutSwitch`, `applyLayoutTargets3D`,
+  `tickLayoutTransition3D`, `applyTheme3D`; `ROLE_COLORS_LIGHT`,
+  thinking color; edgeColorHex theme branch; physics только в force
+- `src/ui/theme-toggle.js` — dispatch `themechange` event при toggle
+- `3d.html` — `#layout-switch-3d` div, `#btn-theme` button,
+  `[data-theme="light"]` CSS-block, `.btn-layout-chip` styles
+- `standalone.html` — cache busting `?v=152` на script src
+
+### Fix — Light theme cache
+
+При обновлении кода shader'ы в WebGL могут оставаться кэшированными
+браузером (особенно при file:// или агрессивном HTTP-кэше). Добавлен
+query string `?v=152` к `dist/ai-conversation-viz.js`. Hard reload
+(Ctrl+Shift+R) больше не требуется при следующих обновлениях если
+script src идёт через `?v=`.
+
+### Notes
+
+3D Force-layout использует тот же `stepPhysics` что и в 2D — он
+обновляет только `n.x` и `n.y`, поэтому в 3D-Force ноды живут в
+плоскости `z = depth × 140 + jitter`. Это quasi-3D. Полное 3D
+physics (с обновлением vz/n.z) — отдельная итерация (потребует
+переработки `stepPhysics`).
+
+123 passed, bundle 353 KB / 51 modules.
+
 ## [1.5.1] — 2026-04-25
 
 ### Fixed / Added

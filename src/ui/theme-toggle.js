@@ -29,6 +29,10 @@ export function toggleTheme() {
   applyTheme(next);
   try { localStorage.setItem(KEY, next); } catch {}
   updateBtn();
+  // Уведомляем 3D-сцену и любых других слушателей
+  try {
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: next } }));
+  } catch {}
 }
 
 function applyTheme(theme) {

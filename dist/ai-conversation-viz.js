@@ -1668,8 +1668,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5 · force-directed',
-    'header.subtitle_standalone': 'v1.5 · standalone bundle',
+    'header.subtitle_force': 'v1.5.2 · force-directed',
+    'header.subtitle_standalone': 'v1.5.2 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1860,8 +1860,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5 · force-directed',
-    'header.subtitle_standalone': 'v1.5 · standalone-сборка',
+    'header.subtitle_force': 'v1.5.2 · force-directed',
+    'header.subtitle_standalone': 'v1.5.2 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -5689,6 +5689,10 @@ function toggleTheme() {
   applyTheme(next);
   try { localStorage.setItem(KEY, next); } catch {}
   updateBtn();
+  // Уведомляем 3D-сцену и любых других слушателей
+  try {
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: next } }));
+  } catch {}
 }
 
 function applyTheme(theme) {

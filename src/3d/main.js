@@ -35,11 +35,21 @@ import { initSearch, matchNodes } from '../ui/search.js';
 import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
+import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
+import { initThemeToggle } from '../ui/theme-toggle.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
   assistant: 0x50d4b5,
   tool_use: 0xeca040,
+  thinking: 0xb58cff,
+};
+// Тёмные варианты для светлой темы (пастельные плохо видны на белом)
+const ROLE_COLORS_LIGHT = {
+  user: 0x2c5fb8,
+  assistant: 0x1b9f7b,
+  tool_use: 0xc46a11,
+  thinking: 0x7b4fd9,
 };
 
 // Diff-режим: те же цвета, что и в 2D renderer (A=pink, B=cyan, both=gray)
@@ -49,19 +59,21 @@ const DIFF_COLORS = {
   both: 0xc8c8d6,
 };
 
-// Возвращает {color, emissive} для ноды с учётом topics/diff-режима.
+// Возвращает {color, emissive} для ноды с учётом topics/diff/theme.
 const _tmpColor = new THREE.Color();
 function colorForNode(n) {
+  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     const c = DIFF_COLORS[n._diffOrigin] || 0x888888;
     return { color: c, emissive: c };
   }
   if (state.topicsMode && n._topicHue != null) {
-    _tmpColor.setHSL(n._topicHue, 0.7, 0.55);
+    _tmpColor.setHSL(n._topicHue, 0.75, isLight ? 0.42 : 0.55);
     const hex = _tmpColor.getHex();
     return { color: hex, emissive: hex };
   }
-  const c = ROLE_COLORS[n.role] || 0x888888;
+  const palette = isLight ? ROLE_COLORS_LIGHT : ROLE_COLORS;
+  const c = palette[n.role] || 0x888888;
   return { color: c, emissive: c };
 }
 
@@ -110,6 +122,23 @@ composer.addPass(new OutputPass());
 // и даже мешает — он заливает всё ровным цветом, убивая объём.
 scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
+// === Theme application ===
+// При переключении dark↔light меняем background scene'ы и fog. Edges
+// тоже становятся темнее (читаемее на белом). Stars прячем.
+function applyTheme3D() {
+  const isLight = state.theme === 'light';
+  if (isLight) {
+    scene.background = new THREE.Color(0xeef2f8);
+    scene.fog = new THREE.Fog(0xeef2f8, 1800, 8000);
+    if (starsObj) starsObj.visible = false;
+  } else {
+    scene.background = new THREE.Color(0x0a0e1a);
+    scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
+    if (starsObj) starsObj.visible = true;
+  }
+}
+window.addEventListener('themechange', applyTheme3D);
+
 // Starfield
 const STAR_COUNT = 2000;
 const starGeo = new THREE.BufferGeometry();
@@ -120,9 +149,10 @@ for (let i = 0; i < STAR_COUNT; i++) {
   starPos[3*i+2] = (Math.random() - 0.5) * 5000;
 }
 starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+const starsObj = new THREE.Points(starGeo, new THREE.PointsMaterial({
   color: 0xc8dcff, size: 1.2, sizeAttenuation: true, transparent: true, opacity: 0.5, fog: false,
-})));
+}));
+scene.add(starsObj);
 
 const nodesGroup = new THREE.Group();
 const edgesGroup = new THREE.Group();
@@ -369,13 +399,16 @@ function buildFromState() {
   updateStats();
 }
 
-// Цвет ребра: учитываем diff-режим (edge.diffSide), tool_use, adopted, role
+// Цвет ребра: учитываем diff-режим, role, и текущую тему.
+// На светлой теме edges должны быть тёмными чтобы читались на белом.
 const _edgeColor = new THREE.Color();
 function edgeColorHex(e) {
-  if (state.diffMode && e.diffSide === 'B') return 0x5ad2ff;
-  if (e.adopted) return 0xc8b478;
-  if (e.b && e.b.role === 'tool_use') return 0xeca040;
-  return 0x00d4ff;
+  const isLight = state.theme === 'light';
+  if (state.diffMode && e.diffSide === 'B') return isLight ? 0x0d6ba0 : 0x5ad2ff;
+  if (e.adopted) return isLight ? 0x735a18 : 0xc8b478;
+  if (e.b && e.b.role === 'tool_use') return isLight ? 0xa55308 : 0xeca040;
+  if (e.b && e.b.role === 'thinking') return isLight ? 0x6b45b8 : 0xb58cff;
+  return isLight ? 0x14479e : 0x00d4ff;
 }
 
 /**
@@ -494,6 +527,10 @@ function loadText(text) {
   // Сохраним для возможного возврата в 2D. Sample не передаём —
   // при первом открытии 2D пусть показывает свой sample.
   if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
+  // Если активный layout не 'force' — мгновенно применяем target-координаты
+  if (state.layoutMode === 'radial' || state.layoutMode === 'swim') {
+    applyLayoutTargets3D(state.layoutMode, /*animate=*/ false);
+  }
 }
 
 // ---- UI ----
@@ -703,6 +740,8 @@ window.addEventListener('keydown', (ev) => {
 window.__viz = { state, CFG };
 initI18n();
 initLangToggle();
+initThemeToggle();
+applyTheme3D();
 initTimeline();
 initStory();
 initSpeedControl();
@@ -712,6 +751,132 @@ initStats();
 initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 }));
 initTopicsToggle();
 initOrphansToggle();
+init3DLayoutSwitch();
+
+// === 3D Layout switch (Force / Radial / Swim) ===
+// state.layoutMode используется как и в 2D. В 3D-режиме 'force' даёт текущее
+// поведение (physics в плоскости + depth z). 'radial' и 'swim' выставляют
+// target-координаты из layouts3d.js и анимируют переход в течение
+// CFG.layoutTransitionMs миллисекунд. Во время не-force layout physics
+// отключается (n.x/y фиксированы layout'ом).
+
+let _layoutTransition = null;  // { from: Map<id,{x,y,z}>, to: Map, t0, dur, toMode }
+let _layoutBtns = [];
+
+function init3DLayoutSwitch() {
+  // Восстанавливаем сохранённый выбор из localStorage (отдельный ключ
+  // для 3D — у 2D и 3D разные пространства)
+  let saved = null;
+  try { saved = localStorage.getItem('viz:layoutMode-3d'); } catch {}
+  if (saved === 'force' || saved === 'radial' || saved === 'swim') {
+    state.layoutMode = saved;
+  } else {
+    state.layoutMode = 'force';
+  }
+  const host = document.getElementById('layout-switch-3d');
+  if (!host) return;
+  host.innerHTML = '';
+  const modes = [
+    { id: 'force',  label: 'FORCE'  },
+    { id: 'radial', label: 'RADIAL' },
+    { id: 'swim',   label: '🌊 SWIM' },
+  ];
+  for (const m of modes) {
+    const el = document.createElement('button');
+    el.className = 'btn btn-layout-chip';
+    el.dataset.mode = m.id;
+    el.textContent = m.label;
+    el.addEventListener('click', () => switchLayout3D(m.id));
+    host.appendChild(el);
+    _layoutBtns.push({ mode: m.id, el });
+  }
+  updateLayoutBtns3D();
+  // Если уже есть загруженные ноды и saved !== force — применим сразу
+  if (state.nodes.length && state.layoutMode !== 'force') {
+    applyLayoutTargets3D(state.layoutMode, /*animate=*/ false);
+  }
+}
+
+function updateLayoutBtns3D() {
+  for (const b of _layoutBtns) b.el.classList.toggle('active', b.mode === state.layoutMode);
+}
+
+function switchLayout3D(toMode) {
+  if (_layoutTransition) return;
+  if (toMode === state.layoutMode) return;
+  try { localStorage.setItem('viz:layoutMode-3d', toMode); } catch {}
+  applyLayoutTargets3D(toMode, /*animate=*/ true);
+}
+
+// Берёт target-координаты для toMode и либо анимирует transition, либо
+// мгновенно проставляет позиции.
+function applyLayoutTargets3D(toMode, animate) {
+  const from = new Map();
+  for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y, z: n.z || 0 });
+
+  let to;
+  if (toMode === 'radial') {
+    to = compute3DRadialLayout(state.nodes, state.byId);
+  } else if (toMode === 'swim') {
+    to = compute3DSwimLanes(state.nodes);
+  } else {
+    // force — освобождаем физику. Цели = текущие позиции (без изменений)
+    to = from;
+  }
+
+  if (!animate) {
+    for (const [id, p] of to) {
+      const n = state.byId.get(id);
+      if (!n) continue;
+      n.x = p.x;
+      n.y = -p.y; // в нашей системе y инвертирован относительно three.js
+      n.z = p.z;
+      n.vx = 0; n.vy = 0;
+      if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
+    }
+    state.layoutMode = toMode;
+    if (state.sim) state.sim.frozen = (toMode !== 'force');
+    updateLayoutBtns3D();
+    return;
+  }
+
+  _layoutTransition = {
+    from,
+    to,
+    t0: performance.now(),
+    dur: CFG.layoutTransitionMs,
+    toMode,
+  };
+  // На время transition'а замораживаем physics, чтобы он не дёргал ноды
+  if (state.sim) state.sim.frozen = true;
+}
+
+function tickLayoutTransition3D() {
+  if (!_layoutTransition) return;
+  const { from, to, t0, dur, toMode } = _layoutTransition;
+  const t = Math.min(1, (performance.now() - t0) / dur);
+  // ease-in-out quad
+  const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  for (const n of state.nodes) {
+    const f = from.get(n.id);
+    const tg = to.get(n.id);
+    if (!f || !tg) continue;
+    // Внимание: tg.y «правильный» в 3D-pos системе (y вверх в three.js),
+    // а наш n.y инвертирован (n.y = -mesh.y). Чтобы сохранить
+    // совместимость, держим n.y в 2D-системе (mesh.position.y = -n.y).
+    n.x = f.x + (tg.x - f.x) * e;
+    n.y = f.y + ((-tg.y) - f.y) * e;
+    n.z = (f.z || 0) + (tg.z - (f.z || 0)) * e;
+    n.vx = 0; n.vy = 0;
+    if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
+  }
+  if (t >= 1) {
+    state.layoutMode = toMode;
+    _layoutTransition = null;
+    if (state.sim) state.sim.frozen = (toMode !== 'force');
+    updateLayoutBtns3D();
+  }
+}
 
 // ---- Animation loop ----
 function timelineCutoff() {
@@ -752,9 +917,10 @@ function tick() {
 
   tickPlay();
   updateBirths3D(nowMs);
+  tickLayoutTransition3D();
 
-  // Physics
-  if (state.sim && !state.sim.frozen && state.nodes.length) {
+  // Physics — только в force-layout. В radial/swim ноды стоят на target.
+  if (state.layoutMode === 'force' && state.sim && !state.sim.frozen && state.nodes.length) {
     const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0, safeW: 1600, safeH: 1000 };
     stepPhysics(state.nodes, state.edges, vp, state.sim);
   }

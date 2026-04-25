@@ -17,6 +17,18 @@
     --panel: rgba(10, 14, 26, 0.85);
     --border: rgba(123, 170, 240, 0.25);
   }
+  :root[data-theme="light"] {
+    --bg: #eef2f8;
+    --user: #2C5FB8;
+    --assistant: #1B9F7B;
+    --tool: #C46A11;
+    --edge: rgba(40, 90, 180, 0.55);
+    --accent: #C46A11;
+    --text: #1a2335;
+    --muted: #5a6580;
+    --panel: rgba(255, 255, 255, 0.94);
+    --border: rgba(60, 90, 170, 0.22);
+  }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
   #three-container { position: fixed; inset: 0; }
@@ -54,6 +66,13 @@
   .samples-menu { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 360px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   .samples-menu-item { background: transparent; border: 0; color: var(--text); padding: 10px 14px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; line-height: 1.4; }
   .samples-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
+  .toolbar-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; align-self: center; }
+  #layout-switch-3d { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .btn-layout-chip { background: transparent; border: 0; border-right: 1px solid var(--border); color: var(--muted); padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; transition: all .15s; }
+  .btn-layout-chip:last-child { border-right: 0; }
+  .btn-layout-chip:hover { color: var(--text); background: rgba(123,170,240,0.06); }
+  .btn-layout-chip.active { color: var(--assistant); background: rgba(80,212,181,0.12); }
+  .btn.btn-icon { width: 30px; height: 30px; padding: 0; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; letter-spacing: 0; text-transform: none; line-height: 1; }
   .btn.btn-back-2d { border-color: #7b69ff; color: #a59bff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; padding: 8px 16px; background: rgba(123,105,255,0.12); font-size: 12px; letter-spacing: 0.06em; }
   .btn.btn-back-2d:hover { background: rgba(123,105,255,0.25); border-color: #a59bff; color: #ffffff; box-shadow: 0 0 18px rgba(123,105,255,0.5); }
 
@@ -109,9 +128,13 @@
   <div class="controls">
     <button class="btn primary" id="btn-sample" data-i18n="btn.sample" aria-haspopup="menu" aria-expanded="false">Examples ▾</button>
     <button class="btn" id="btn-file" data-i18n="btn.file">Open JSONL…</button>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <div id="layout-switch-3d" aria-label="Layout mode"></div>
+    <span class="toolbar-sep" aria-hidden="true"></span>
     <button class="btn" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
     <button class="btn" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
     <button class="btn" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
+    <button class="btn btn-icon" id="btn-theme" data-i18n-title="tip.theme_light" data-i18n-aria="aria.theme">☀</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
