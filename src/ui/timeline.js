@@ -129,9 +129,19 @@ function advanceStep() {
   const id = sortedIds[stepIndex++];
   const node = state.byId.get(id);
   if (!node) return advanceStep();
-  const { tsMin, tsMax } = computeTsBounds();
-  const range = Math.max(1, tsMax - tsMin);
-  const desired = (node.ts - tsMin) / range;
+  // Two semantics:
+  //   timelineByCount=true  → slider растёт равномерно, шаг = 1/N (визуально
+  //     ровный прогресс вне зависимости от ts-разрывов)
+  //   timelineByCount=false → slider = (node.ts - tsMin) / range (default,
+  //     отражает реальное время — большой gap = большой прыжок)
+  let desired;
+  if (state.timelineByCount) {
+    desired = stepIndex / sortedIds.length; // stepIndex уже инкрементирован
+  } else {
+    const { tsMin, tsMax } = computeTsBounds();
+    const range = Math.max(1, tsMax - tsMin);
+    desired = (node.ts - tsMin) / range;
+  }
   state.timelineMax = Math.min(1, desired + 0.0001);
   // небольшой re-heat чтобы новорождённая нода могла устаканиться
   if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);

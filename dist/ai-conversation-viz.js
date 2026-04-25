@@ -1952,6 +1952,7 @@ const DICT = {
     'settings.showThinking': 'Thinking blocks (purple)',
     'settings.showMetrics': 'Token & duration badges',
     'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
+    'settings.timelineByCount': 'Play slider — равномерно по count нод (вместо ts)',
 
     // Live status
     'live.idle': 'idle',
@@ -2144,6 +2145,7 @@ const DICT = {
     'settings.showThinking': 'Thinking-блоки (фиолетовые)',
     'settings.showMetrics': 'Бейджи токенов и времени',
     'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
+    'settings.timelineByCount': 'Слайдер play — равномерно по нодам (вместо ts)',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',
@@ -2284,6 +2286,8 @@ const state = {
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
   useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
+  bgMode: 'none',         // фон через LavaBackgrounds (none/space/aurora/embers/grid/rain/ocean/abstract)
+  timelineByCount: false, // play slider — равномерно по count нод (true) или по ts (false, default)
 };
 
 function resetInteractionState() {
@@ -5240,9 +5244,19 @@ function advanceStep() {
   const id = sortedIds[stepIndex++];
   const node = state.byId.get(id);
   if (!node) return advanceStep();
-  const { tsMin, tsMax } = computeTsBounds();
-  const range = Math.max(1, tsMax - tsMin);
-  const desired = (node.ts - tsMin) / range;
+  // Two semantics:
+  //   timelineByCount=true  → slider растёт равномерно, шаг = 1/N (визуально
+  //     ровный прогресс вне зависимости от ts-разрывов)
+  //   timelineByCount=false → slider = (node.ts - tsMin) / range (default,
+  //     отражает реальное время — большой gap = большой прыжок)
+  let desired;
+  if (state.timelineByCount) {
+    desired = stepIndex / sortedIds.length; // stepIndex уже инкрементирован
+  } else {
+    const { tsMin, tsMax } = computeTsBounds();
+    const range = Math.max(1, tsMax - tsMin);
+    desired = (node.ts - tsMin) / range;
+  }
   state.timelineMax = Math.min(1, desired + 0.0001);
   // небольшой re-heat чтобы новорождённая нода могла устаканиться
   if (state.sim && state.sim.alpha < 0.12) reheat(state.sim, 0.15);
@@ -6000,6 +6014,8 @@ const TOGGLES = [
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
   ['metrics', 'showMetrics',       'state'],
+  // Play slider — равномерно по count нод вместо по реальному ts
+  ['playback', 'timelineByCount',  'state'],
   // useCanvas2D — boolean fallback вместо WebGL (продвинутая опция)
   ['advanced', 'useCanvas2D',      'state', (val) => setRenderBackend(val ? 'canvas2d' : 'webgl')],
 ];
@@ -6078,9 +6094,10 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      // Для useCanvas2D default = false (WebGL по умолчанию). Для остальных
-      // toggle'ов — default ON (если поле не задано — считаем true).
-      input.checked = key === 'useCanvas2D' ? !!target[key] : target[key] !== false;
+      // Toggles с default OFF: useCanvas2D, timelineByCount.
+      // Для остальных — default ON (если поле не задано в state — считаем true).
+      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount' || key === 'showMetrics';
+      input.checked = defaultOff ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
         save();
@@ -8128,6 +8145,136 @@ function resetFps() {
     return { initFpsCounter, tickFps, resetFps };
   })();
 
+  // --- src/ui/background-toggle.js ---
+  __M["src/ui/background-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+// Background mode controller — wraps drop-in LavaBackgrounds library.
+// 7 WebGL2 шейдеров для full-screen фона за всем UI.
+//
+// API (window.LavaBackgrounds должен быть подгружен через <script>):
+//   LavaBackgrounds.init(canvas, { mode, dark })
+//   LavaBackgrounds.setMode(mode)
+//   LavaBackgrounds.setTheme(theme)
+//   LavaBackgrounds.destroy()
+//
+// Сохранение выбора в localStorage. Default — 'none' чтобы не сюрприз
+// при первой загрузке (и чтобы не давать дополнительной нагрузки тем
+// кому это не нужно).
+
+
+const KEY = 'viz:bg-mode';
+const BG_MODES = [
+  { id: 'none',     label: 'None',           emoji: '·' },
+  { id: 'space',    label: 'Space',          emoji: '🌌' },
+  { id: 'aurora',   label: 'Aurora',         emoji: '🌠' },
+  { id: 'embers',   label: 'Embers',         emoji: '🔥' },
+  { id: 'grid',     label: 'Synthwave',      emoji: '🎮' },
+  { id: 'rain',     label: 'Rain',           emoji: '🌧' },
+  { id: 'ocean',    label: 'Ocean',          emoji: '🌊' },
+  { id: 'abstract', label: 'Abstract blobs', emoji: '🫧' },
+];
+
+let _initialized = false;
+let _currentMode = 'none';
+
+function initBackground() {
+  if (typeof window === 'undefined') return;
+  if (typeof window.LavaBackgrounds === 'undefined') {
+    // Скрипт не подгрузился (offline/file:// без bundle) — silently skip
+    return;
+  }
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas) return;
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch {}
+  const mode = (saved && BG_MODES.some(m => m.id === saved)) ? saved : 'none';
+  _currentMode = mode;
+  state.bgMode = mode;
+  try {
+    window.LavaBackgrounds.init(canvas, { mode, dark: true });
+    _initialized = true;
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[background] init failed:', e.message);
+  }
+}
+
+function setBackgroundMode(mode) {
+  if (!BG_MODES.some(m => m.id === mode)) return;
+  _currentMode = mode;
+  state.bgMode = mode;
+  try { localStorage.setItem(KEY, mode); } catch {}
+  if (_initialized && window.LavaBackgrounds) {
+    try { window.LavaBackgrounds.setMode(mode); } catch (e) {}
+  }
+}
+
+function getCurrentBgMode() { return _currentMode; }
+
+// Dropdown UI — кнопка #btn-bg раскрывает меню. Стили `.samples-menu`
+// переиспользуем (одинаковая идиома). Иконка кнопки = эмодзи текущего mode.
+function initBackgroundDropdown(buttonId) {
+  if (typeof document === 'undefined') return;
+  const btn = document.getElementById(buttonId || 'btn-bg');
+  if (!btn) return;
+  function syncBtnLabel() {
+    const cur = BG_MODES.find(m => m.id === _currentMode) || BG_MODES[0];
+    btn.textContent = cur.emoji;
+    btn.title = 'Background: ' + cur.label;
+  }
+  syncBtnLabel();
+  btn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const existing = document.getElementById('bg-menu');
+    if (existing) { existing.remove(); btn.setAttribute('aria-expanded', 'false'); return; }
+    const menu = document.createElement('div');
+    menu.id = 'bg-menu';
+    menu.className = 'samples-menu';
+    menu.setAttribute('role', 'menu');
+    const rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.zIndex = '100';
+    menu.style.minWidth = '180px';
+
+    let outsideHandler = null;
+    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
+    const closeMenu = () => {
+      menu.remove();
+      btn.setAttribute('aria-expanded', 'false');
+      if (outsideHandler) {
+        document.removeEventListener('click', outsideHandler);
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+
+    for (const m of BG_MODES) {
+      const item = document.createElement('button');
+      item.className = 'samples-menu-item';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = m.emoji + '  ' + m.label + (m.id === _currentMode ? '  ✓' : '');
+      item.addEventListener('click', () => {
+        closeMenu();
+        setBackgroundMode(m.id);
+        syncBtnLabel();
+      });
+      menu.appendChild(item);
+    }
+    document.body.appendChild(menu);
+    btn.setAttribute('aria-expanded', 'true');
+    setTimeout(() => {
+      outsideHandler = (e) => {
+        if (!menu.contains(e.target) && e.target !== btn) closeMenu();
+      };
+      document.addEventListener('click', outsideHandler);
+      document.addEventListener('keydown', escHandler);
+    }, 0);
+  });
+}
+
+    return { initBackground, setBackgroundMode, getCurrentBgMode, initBackgroundDropdown, BG_MODES };
+  })();
+
   // --- src/ui/interaction.js ---
   __M["src/ui/interaction.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
@@ -8752,6 +8899,7 @@ async function applyUrlParamsLate() {
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
     const { updateMetricsOverlay, clearMetricsOverlay } = __M["src/ui/metrics-overlay.js"];
     const { initFpsCounter, tickFps } = __M["src/ui/fps-counter.js"];
+    const { initBackground, initBackgroundDropdown } = __M["src/ui/background-toggle.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -8813,6 +8961,8 @@ initAnnotations();
 initBookmarks();
 initRenderToggle();
 initFpsCounter('fps-counter');
+initBackground();
+initBackgroundDropdown('btn-bg');
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

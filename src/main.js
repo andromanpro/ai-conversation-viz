@@ -36,6 +36,7 @@ import { initI18n } from './core/i18n.js';
 import { initLangToggle } from './ui/lang-toggle.js';
 import { updateMetricsOverlay, clearMetricsOverlay } from './ui/metrics-overlay.js';
 import { initFpsCounter, tickFps } from './ui/fps-counter.js';
+import { initBackground, initBackgroundDropdown } from './ui/background-toggle.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -97,6 +98,8 @@ initAnnotations();
 initBookmarks();
 initRenderToggle();
 initFpsCounter('fps-counter');
+initBackground();
+initBackgroundDropdown('btn-bg');
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

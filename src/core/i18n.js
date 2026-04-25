@@ -196,6 +196,7 @@ const DICT = {
     'settings.showThinking': 'Thinking blocks (purple)',
     'settings.showMetrics': 'Token & duration badges',
     'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
+    'settings.timelineByCount': 'Play slider — равномерно по count нод (вместо ts)',
 
     // Live status
     'live.idle': 'idle',
@@ -388,6 +389,7 @@ const DICT = {
     'settings.showThinking': 'Thinking-блоки (фиолетовые)',
     'settings.showMetrics': 'Бейджи токенов и времени',
     'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
+    'settings.timelineByCount': 'Слайдер play — равномерно по нодам (вместо ts)',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',

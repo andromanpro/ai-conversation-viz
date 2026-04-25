@@ -35,6 +35,7 @@ import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { initAudio } from '../ui/audio.js';
 import { initFpsCounter, tickFps } from '../ui/fps-counter.js';
+import { initBackground, initBackgroundDropdown } from '../ui/background-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { applySphericalScatter } from './scatter.js';
@@ -79,7 +80,10 @@ const btnFile = document.getElementById('btn-file');
 const btnSample = document.getElementById('btn-sample');
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0e1a);
+// scene.background = null → Three.js renderer не очищает фон, виден
+// LavaBackgrounds canvas сзади (когда выбран режим). При mode='none'
+// background-canvas остаётся прозрачным, и виден body bg (#0a0e1a).
+scene.background = null;
 scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
@@ -88,8 +92,9 @@ camera.position.set(0, -300, 1200);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setClearColor(0x000000, 0); // alpha=0 → bg-canvas просвечивает
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.85; // снижено с 1.1 — общая яркость поскромнее
+renderer.toneMappingExposure = 0.85;
 container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -1345,6 +1350,8 @@ initOrphansToggle();
 initSettingsModal();
 initAudio();
 initFpsCounter('fps-counter');
+initBackground();
+initBackgroundDropdown('btn-bg');
 init3DLayoutSwitch();
 init3DDriftAndCameraButtons();
 

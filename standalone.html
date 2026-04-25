@@ -234,6 +234,7 @@
 </style>
 </head>
 <body>
+<canvas id="bg-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1;pointer-events:none;"></canvas>
 <canvas id="graph"></canvas>
 <canvas id="graph-webgl" style="display:none;position:fixed;inset:0;"></canvas>
 
@@ -262,6 +263,7 @@
     <button class="btn btn-icon" id="btn-sessions" data-i18n-title="tip.sessions_empty" data-i18n-aria="aria.sessions">📚</button>
     <button class="btn btn-icon" id="btn-bookmarks" data-i18n-title="tip.bookmarks_empty" data-i18n-aria="aria.bookmarks">⭐</button>
     <span class="toolbar-sep" aria-hidden="true"></span>
+    <button class="btn btn-icon" id="btn-bg" title="Background" aria-haspopup="menu">·</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang" data-i18n-aria="aria.lang">EN</button>
     <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
@@ -366,6 +368,7 @@
   <div class="row"><span class="swatch sw-both"></span><span data-i18n="diff.legend_both">common</span></div>
 </div>
 
+<script src="./lib/lava-backgrounds.js"></script>
 <script src="./dist/ai-conversation-viz.js?v=153"></script>
 </body>
 </html>

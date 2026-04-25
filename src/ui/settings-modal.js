@@ -64,6 +64,8 @@ const TOGGLES = [
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
   ['metrics', 'showMetrics',       'state'],
+  // Play slider — равномерно по count нод вместо по реальному ts
+  ['playback', 'timelineByCount',  'state'],
   // useCanvas2D — boolean fallback вместо WebGL (продвинутая опция)
   ['advanced', 'useCanvas2D',      'state', (val) => setRenderBackend(val ? 'canvas2d' : 'webgl')],
 ];
@@ -142,9 +144,10 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      // Для useCanvas2D default = false (WebGL по умолчанию). Для остальных
-      // toggle'ов — default ON (если поле не задано — считаем true).
-      input.checked = key === 'useCanvas2D' ? !!target[key] : target[key] !== false;
+      // Toggles с default OFF: useCanvas2D, timelineByCount.
+      // Для остальных — default ON (если поле не задано в state — считаем true).
+      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount' || key === 'showMetrics';
+      input.checked = defaultOff ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
         save();
