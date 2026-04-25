@@ -500,31 +500,57 @@ function updateStats() {
   statsEl.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; ${s.parsed} lines`;
 }
 
-// Раскидываем ноды по сферической Fibonacci-spirale.
-// 2D physics дальше будет тянуть x/y по spring/repulsion, а z останется
-// от initial scatter (physics z не трогает) — так получается стабильно
-// 3D-объёмный layout с самого первого кадра.
-//
-// IMPORTANT: для x/y ставим _малый_ scatter (radius ~ √N × 25),
-// потому что physics всё равно их раздвинет до естественного размера.
-// Для z ставим _большой_ scatter (radius × 1.6), потому что z никем
-// не корректируется — это финальная глубина.
+// Initial scatter — ноды на сферической Fibonacci-spirale. Это даёт
+// устойчивое 3D-распределение для z (физика z не трогает, так что
+// z после physics остаётся как initial). x/y physics будет раздвигать,
+// но это нормально — главное чтобы nodes стартовали неперекрытыми.
 function applySphericalScatter(nodes) {
   const N = nodes.length;
   if (!N) return;
   const golden = Math.PI * (3 - Math.sqrt(5));
-  const xyRadius = Math.max(80, Math.sqrt(N) * 25);   // x/y будут раздвинуты physics'ом
-  const zRadius  = Math.max(160, Math.sqrt(N) * 40);  // z финальный — побольше
+  const radius = Math.max(120, Math.sqrt(N) * 30);
   for (let i = 0; i < N; i++) {
     const n = nodes[i];
     const idx = i + 0.5;
     const y = 1 - (idx / N) * 2;
     const r = Math.sqrt(Math.max(0, 1 - y * y));
     const theta = golden * i + (n._seedDx || 0) * 0.5;
-    n.x = Math.cos(theta) * r * xyRadius;
-    n.y = y * xyRadius;
-    n.z = Math.sin(theta) * r * zRadius;
+    n.x = Math.cos(theta) * r * radius;
+    n.y = y * radius;
+    n.z = Math.sin(theta) * r * radius;
     n.vx = 0; n.vy = 0;
+  }
+}
+
+// КЛЮЧЕВОЙ FIX для «pancake»-проблемы.
+//
+// stepPhysics 2D — обновляет vx/vy/x/y но не z. После prewarm xy
+// растягиваются repulsion'ом до ~1500-3000 px (для 40 nodes), а z
+// остаётся в начальном диапазоне ~250 px. Соотношение 6:1 = плоский
+// pancake, выглядит как сжатая колбаса под углом, а не 3D-облако.
+//
+// Решение: после physics измеряем xy-spread и rescale z пропорционально.
+// targetZ = xySpread × 0.6 — куб слегка приплюснут (60% толщины),
+// чтобы 3D читалось но не доминировало над plane (где physics реально
+// работает).
+function rescaleZToMatchXY(nodes) {
+  if (!nodes.length) return;
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+    if (n.z < minZ) minZ = n.z; if (n.z > maxZ) maxZ = n.z;
+  }
+  const xySpread = Math.max(maxX - minX, maxY - minY);
+  const zSpread = maxZ - minZ;
+  if (zSpread < 1 || xySpread < 1) return;
+  const targetZ = xySpread * 0.6;
+  const k = targetZ / zSpread;
+  const zCenter = (minZ + maxZ) / 2;
+  for (const n of nodes) {
+    n.z = (n.z - zCenter) * k;
   }
 }
 
@@ -541,13 +567,13 @@ function loadText(text) {
   // юзер наблюдал при ручном клике "🔗 соединить сиротки".
   state.connectOrphans = true;
   state.sim = createSim({ connectOrphans: true });
-  // Spherical Fibonacci scatter для initial positions — даёт 3D-облако
-  // с самого начала. xyRadius малый (physics раздвинет), zRadius больше
-  // (z после physics остаётся как есть — physics 2D).
+  // Spherical Fibonacci scatter для initial positions
   applySphericalScatter(g.nodes);
-  // Prewarm стандартного количества итераций — physics комфортно
-  // разнесёт x/y без «улёта» далеко
+  // Prewarm — 2D physics разнесёт x/y, z не тронет
   prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations);
+  // Post-physics z rescale — без этого получается плоский pancake
+  // потому что physics 2D раздвигает x/y, но z остаётся initial-малым
+  rescaleZToMatchXY(g.nodes);
   state.nodes = g.nodes;
   state.edges = g.edges;
   state.byId = g.byId;
