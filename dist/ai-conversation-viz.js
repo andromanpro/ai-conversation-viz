@@ -3128,6 +3128,15 @@ function draw(ctx, state, tSec, viewport, extras) {
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
 
+    // Тёмный outline на светлой теме — чтобы ноды не сливались с фоном
+    if (isLight && r >= 2) {
+      ctx.strokeStyle = `rgba(20, 28, 48, ${0.55 * ag})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     // Hub ring (yellow-gold outline для нод с high degree)
     if (n.isHub && perfMode !== 'minimal') {
       ctx.strokeStyle = `rgba(255, 215, 120, ${0.55 * ag})`;
@@ -3362,34 +3371,47 @@ const POINT_VS = `
 `;
 
 // Multi-layer glow: плотное белое ядро → насыщенный цветной middle →
-// мягкий halo. Даёт бёрн-эффект как у реальных светящихся орбов.
+// мягкий halo. На тёмной теме — wow-эффект как у светящихся орбов.
+// На светлой теме (u_light=1.0) — solid цветной диск с тёмным кантом
+// без white-core/halo (иначе ноды растворяются в белом фоне).
 const POINT_FS = `
   precision mediump float;
   varying vec4 v_color;
   varying float v_pulse;
   varying float v_highlight;
+  uniform float u_light;   // 0 = dark theme, 1 = light theme
 
   void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) discard;
 
-    // Три слоя:
-    //   core   — плотная яркая сердцевина (белая, нормализованная цветом)
-    //   mid    — основной тон ноды
-    //   halo   — мягкое свечение до края
     float core = smoothstep(0.25, 0.0, dist);
     float mid  = smoothstep(0.5, 0.15, dist);
     float halo = smoothstep(0.5, 0.0, dist) * 0.45;
 
-    // Белая сердцевина: цвет стремится к белому в центре.
-    vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
+    vec3 rgb;
+    float alpha;
 
-    // Композиция (additive-friendly)
-    vec3 rgb = whiteCore * (mid + halo * 0.35);
-    float alpha = (mid + halo) * v_color.a;
+    if (u_light > 0.5) {
+      // Light theme: solid цвет ноды + тёмный outline на ободе
+      // Никакого whiteCore — иначе нода превращается в белое пятно
+      rgb = v_color.rgb;
+      // Лёгкое затемнение от центра к краю (имитация объёма)
+      rgb *= 0.85 + 0.15 * (1.0 - dist * 2.0);
+      // Тёмный кант
+      float outline = smoothstep(0.40, 0.50, dist);
+      rgb = mix(rgb, vec3(0.05, 0.08, 0.18), outline * 0.85);
+      // Сплошная alpha внутри диска, плавный край
+      alpha = smoothstep(0.5, 0.45, dist) * v_color.a * 1.05;
+    } else {
+      // Dark theme: glow + whiteCore — wow эффект
+      vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
+      rgb = whiteCore * (mid + halo * 0.35);
+      alpha = (mid + halo) * v_color.a;
+    }
 
-    // Search-match — подсветка белым поверх
+    // Search-match подсветка работает в обеих темах
     if (mod(v_highlight, 2.0) >= 1.0) {
       float flash = smoothstep(0.5, 0.2, dist) * (0.5 + 0.5 * v_pulse);
       rgb += vec3(1.0, 1.0, 0.85) * flash * 0.6;
@@ -3498,15 +3520,16 @@ const PAIR_FS = `
   varying float v_t;
   varying float v_seglen;
   uniform float u_time;
+  uniform vec3 u_color;       // RGB для пунктира (зависит от темы)
+  uniform float u_alpha;      // общая прозрачность
   void main() {
-    // Pattern: 12px on / 8px off, плюс лёгкая «беготня» по линии за счёт u_time.
+    // Pattern: 12px on / 8px off + animated phase
     float distance_px = v_t * v_seglen;
-    float anim = u_time * 12.0; // px/sec
+    float anim = u_time * 12.0;
     float phase = mod(distance_px - anim, 20.0);
     if (phase > 12.0) discard;
     float fade = smoothstep(12.0, 8.0, phase);
-    // Лимонно-жёлтый
-    gl_FragColor = vec4(1.0, 0.92, 0.36, fade * 0.85);
+    gl_FragColor = vec4(u_color, fade * u_alpha);
   }
 `;
 
@@ -3722,7 +3745,7 @@ function initWebglRenderer(canvas) {
   catch (e) { errProg = null; if (typeof console !== 'undefined') console.warn('[webgl] errProg compile failed:', e.message); }
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time', 'u_light']);
   cacheAttribs(hubProg, aHub, uHub, ['a_position', 'a_color', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(lineProg, aLine, uLine, ['a_position', 'a_color'],
@@ -3732,7 +3755,7 @@ function initWebglRenderer(canvas) {
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
   if (pairProg) cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_time']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_time', 'u_color', 'u_alpha']);
   if (errProg) cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
@@ -3801,6 +3824,13 @@ const ROLE_RGB = {
   tool_use: [0.925, 0.627, 0.250],
   thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
+// Тёмные варианты для светлой темы — пастельные цвета теряются на белом
+const ROLE_RGB_LIGHT = {
+  user: [0.17, 0.37, 0.72],       // тёмно-синий
+  assistant: [0.10, 0.62, 0.48],  // тёмно-зелёный
+  tool_use: [0.77, 0.42, 0.07],   // burnt orange
+  thinking: [0.48, 0.31, 0.85],   // насыщенный фиолетовый
+};
 
 const DIFF_RGB = {
   A: [1.0, 0.376, 0.686],
@@ -3825,12 +3855,15 @@ function hslToRgb(h, s, l) {
 
 function nodeColor(n, state, out) {
   let r, g, b;
+  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     [r, g, b] = DIFF_RGB[n._diffOrigin] || DIFF_RGB.both;
   } else if (state.topicsMode && n._topicHue != null) {
-    [r, g, b] = hslToRgb(n._topicHue, 0.75, 0.58);
+    // На light теме — насыщенные цвета (lightness ниже)
+    [r, g, b] = hslToRgb(n._topicHue, 0.75, isLight ? 0.42 : 0.58);
   } else {
-    [r, g, b] = ROLE_RGB[n.role] || [0.5, 0.5, 0.5];
+    const palette = isLight ? ROLE_RGB_LIGHT : ROLE_RGB;
+    [r, g, b] = palette[n.role] || [0.5, 0.5, 0.5];
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -3838,16 +3871,21 @@ function nodeColor(n, state, out) {
 
 function edgeColor(e, state, out) {
   let r, g, b;
+  const isLight = state.theme === 'light';
   if (state.diffMode && e.diffSide === 'B') {
     [r, g, b] = DIFF_RGB.B;
   } else if (e.adopted) {
-    r = 0.78; g = 0.71; b = 0.47;
+    if (isLight) { r = 0.45; g = 0.35; b = 0.10; }
+    else { r = 0.78; g = 0.71; b = 0.47; }
   } else if (e.b && e.b.role === 'tool_use') {
-    r = 0.925; g = 0.627; b = 0.250;
+    if (isLight) { r = 0.65; g = 0.32; b = 0.08; }   // darker burnt-orange
+    else { r = 0.925; g = 0.627; b = 0.250; }
   } else if (e.b && e.b.role === 'thinking') {
-    r = 0.71; g = 0.55; b = 1.0;
+    if (isLight) { r = 0.42; g = 0.27; b = 0.78; }   // насыщенный фиолетовый
+    else { r = 0.71; g = 0.55; b = 1.0; }
   } else {
-    r = 0.0; g = 0.831; b = 1.0;
+    if (isLight) { r = 0.08; g = 0.27; b = 0.62; }   // тёмно-синий навсегда
+    else { r = 0.0; g = 0.831; b = 1.0; }
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -4010,7 +4048,9 @@ function fillLineBuffer(state) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
 
-    let edgeAlpha = e.adopted ? 0.25 : 0.6;
+    // На светлой теме edges должны быть жирнее, иначе теряются
+    const edgeBoost = state.theme === 'light' ? 1.5 : 1.0;
+    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * edgeBoost;
     if (hasSearch) {
       edgeAlpha *= (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
     } else if (topicFilter) {
@@ -4297,6 +4337,14 @@ function drawWebgl(state, tSec, viewport) {
         gl.uniform1f(uPair.scale, state.camera.scale);
         gl.uniform2f(uPair.viewport, vw, vh);
         gl.uniform1f(uPair.time, tSec);
+        // Цвет пунктира: на тёмной — лимонно-жёлтый, на светлой — насыщенный янтарь
+        if (state.theme === 'light') {
+          gl.uniform3f(uPair.color, 0.62, 0.42, 0.05);
+          gl.uniform1f(uPair.alpha, 0.95);
+        } else {
+          gl.uniform3f(uPair.color, 1.0, 0.92, 0.36);
+          gl.uniform1f(uPair.alpha, 0.85);
+        }
         gl.drawArrays(gl.LINES, 0, pairCount);
       }
     }
@@ -4355,6 +4403,7 @@ function drawWebgl(state, tSec, viewport) {
     gl.uniform2f(uPoint.viewport, vw, vh);
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
+    gl.uniform1f(uPoint.light, state.theme === 'light' ? 1.0 : 0.0);
     gl.drawArrays(gl.POINTS, 0, pointCount);
   }
 }
@@ -7799,6 +7848,170 @@ function updateBtn() {
     return { initLangToggle };
   })();
 
+  // --- src/ui/metrics-overlay.js ---
+  __M["src/ui/metrics-overlay.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { worldToScreen } = __M["src/view/camera.js"];
+// Metrics overlay — HTML/CSS bubble badges поверх WebGL canvas.
+//
+// Зачем: WebGL не умеет рисовать AA-текст «из коробки». В Canvas 2D мы
+// рисуем `drawMetricsBadges` через ctx.fillText, в WebGL же используем
+// DOM-overlay: <div id="metrics-overlay"> с position:fixed, inside —
+// маленькие <div class="metrics-badge"> с tokens / ⏱latency, transform
+// перенастраивается каждый кадр под экранные координаты ноды.
+//
+// Cost: на 200 ассистент-нод = ~400 DOM элементов. Обновление через
+// transform: translate (compositor-friendly). Профилировано — < 1 ms на
+// кадр на средней плотности.
+
+
+let overlayEl = null;
+const cache = new Map(); // nodeId → { wrap, tokenEl, latencyEl, lastTokens, lastLatency }
+
+function formatTokensCompact(n) {
+  if (n >= 10000) return Math.round(n / 1000) + 'k';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+function formatLatencyCompact(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const sec = ms / 1000;
+  if (sec < 60) return sec.toFixed(sec < 10 ? 1 : 0) + 's';
+  const m = Math.floor(sec / 60);
+  return m + 'm' + Math.round(sec - m * 60) + 's';
+}
+
+function ensureOverlay() {
+  if (overlayEl) return overlayEl;
+  overlayEl = document.createElement('div');
+  overlayEl.id = 'metrics-overlay';
+  overlayEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:5;font-family:ui-monospace,Consolas,monospace;font-size:10px;';
+  document.body.appendChild(overlayEl);
+  // Inject CSS только один раз
+  if (!document.getElementById('metrics-overlay-style')) {
+    const style = document.createElement('style');
+    style.id = 'metrics-overlay-style';
+    style.textContent = `
+      .metrics-wrap { position: absolute; left: 0; top: 0; transform: translate(-9999px,-9999px); display: flex; gap: 3px; will-change: transform; white-space: nowrap; }
+      .metrics-badge { background: rgba(20, 30, 60, 0.82); color: rgba(220,235,255,0.95); padding: 1px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+      :root[data-theme="light"] .metrics-badge { background: rgba(50, 60, 90, 0.9); color: rgba(245, 250, 255, 0.98); }
+      .metrics-badge.long { background: rgba(180, 80, 30, 0.88); color: rgba(255, 230, 200, 1); }
+      :root[data-theme="light"] .metrics-badge.long { background: rgba(165, 70, 25, 0.95); color: rgba(255, 240, 220, 1); }
+    `;
+    document.head.appendChild(style);
+  }
+  return overlayEl;
+}
+
+function getOrCreateBadge(node) {
+  let entry = cache.get(node.id);
+  if (entry) return entry;
+  const wrap = document.createElement('div');
+  wrap.className = 'metrics-wrap';
+  const latencyEl = document.createElement('div');
+  latencyEl.className = 'metrics-badge';
+  const tokenEl = document.createElement('div');
+  tokenEl.className = 'metrics-badge';
+  // latency слева, tokens справа — порядок в DOM = порядок отображения
+  wrap.appendChild(latencyEl);
+  wrap.appendChild(tokenEl);
+  overlayEl.appendChild(wrap);
+  entry = { wrap, tokenEl, latencyEl, lastTokens: -1, lastLatency: -1, lastVisible: false };
+  cache.set(node.id, entry);
+  return entry;
+}
+
+function hideEntry(entry) {
+  if (!entry.lastVisible) return;
+  entry.wrap.style.transform = 'translate(-9999px,-9999px)';
+  entry.lastVisible = false;
+}
+
+function isVisibleNode(n, cutoff) {
+  if (n.bornAt == null) return false;
+  if (n.ts > cutoff) return false;
+  if (state.hiddenRoles && state.hiddenRoles.has(n.role)) return false;
+  return true;
+}
+
+function timelineCutoff() {
+  if (!state.nodes.length) return Infinity;
+  let tsMin = Infinity, tsMax = -Infinity;
+  for (const n of state.nodes) {
+    if (n.ts < tsMin) tsMin = n.ts;
+    if (n.ts > tsMax) tsMax = n.ts;
+  }
+  return tsMin + (tsMax - tsMin) * state.timelineMax;
+}
+
+/**
+ * Вызывается каждый кадр из main.js (только в WebGL-режиме). Update'ит
+ * positions всех бейджей под текущую камеру; добавляет/удаляет элементы
+ * по необходимости.
+ */
+function updateMetricsOverlay(viewport) {
+  if (!state.showMetrics) {
+    if (overlayEl && overlayEl.children.length) {
+      overlayEl.innerHTML = '';
+      cache.clear();
+    }
+    return;
+  }
+  ensureOverlay();
+  const cam = state.camera;
+  const cutoff = timelineCutoff();
+  const seen = new Set();
+
+  for (const n of state.nodes) {
+    if (n.role !== 'assistant') continue;
+    const tokens = n.tokensOut || 0;
+    const latency = n.responseLatencyMs || 0;
+    if (!tokens && latency < 1500) continue;
+    if (!isVisibleNode(n, cutoff)) continue;
+    seen.add(n.id);
+
+    const entry = getOrCreateBadge(n);
+    // Сборка/обновление текстов (только если изменилось — экономит paint)
+    if (entry.lastTokens !== tokens) {
+      entry.tokenEl.textContent = tokens > 0 ? formatTokensCompact(tokens) : '';
+      entry.tokenEl.style.display = tokens > 0 ? '' : 'none';
+      entry.lastTokens = tokens;
+    }
+    if (entry.lastLatency !== latency) {
+      if (latency >= 1500) {
+        entry.latencyEl.textContent = '⏱' + formatLatencyCompact(latency);
+        entry.latencyEl.style.display = '';
+        entry.latencyEl.classList.toggle('long', latency > 10000);
+      } else {
+        entry.latencyEl.style.display = 'none';
+      }
+      entry.lastLatency = latency;
+    }
+
+    // Position: под нодой по центру (transform CSS = compositor-only)
+    const s = worldToScreen(n.x, n.y, cam);
+    const r = (n.r || 5) * cam.scale;
+    const x = Math.round(s.x);
+    const y = Math.round(s.y + r + 3);
+    entry.wrap.style.transform = `translate(calc(${x}px - 50%), ${y}px)`;
+    entry.lastVisible = true;
+  }
+
+  // Скрываем (но не удаляем) бейджи нод, которых нет в видимом наборе.
+  // Удаление приведёт к дёрганью при play (нода скрылась → удалили DOM).
+  for (const [id, entry] of cache) {
+    if (!seen.has(id)) hideEntry(entry);
+  }
+}
+
+function clearMetricsOverlay() {
+  if (overlayEl) overlayEl.innerHTML = '';
+  cache.clear();
+}
+
+    return { updateMetricsOverlay, clearMetricsOverlay };
+  })();
+
   // --- src/ui/interaction.js ---
   __M["src/ui/interaction.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
@@ -8408,6 +8621,7 @@ async function applyUrlParamsLate() {
     const { initI18n } = __M["src/core/i18n.js"];
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
     const { initThemeToggle } = __M["src/ui/theme-toggle.js"];
+    const { updateMetricsOverlay, clearMetricsOverlay } = __M["src/ui/metrics-overlay.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -8550,7 +8764,11 @@ function frame(tms) {
     // которая жила внутри draw(). Вынесем её в view/renderer.js как export.
     updateBirthsForWebgl(state, tSec, vp);
     drawWebgl(state, tSec, vp);
+    // Metrics в WebGL — через DOM-overlay (тексты не рисуются в WebGL)
+    updateMetricsOverlay(vp);
   } else {
+    // В Canvas 2D — рисуем metrics inline через ctx.fillText, overlay не нужен
+    clearMetricsOverlay();
     draw(ctx, state, tSec, vp, {
       allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
       starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),

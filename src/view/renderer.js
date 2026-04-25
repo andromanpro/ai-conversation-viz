@@ -473,6 +473,15 @@ export function draw(ctx, state, tSec, viewport, extras) {
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
 
+    // Тёмный outline на светлой теме — чтобы ноды не сливались с фоном
+    if (isLight && r >= 2) {
+      ctx.strokeStyle = `rgba(20, 28, 48, ${0.55 * ag})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     // Hub ring (yellow-gold outline для нод с high degree)
     if (n.isHub && perfMode !== 'minimal') {
       ctx.strokeStyle = `rgba(255, 215, 120, ${0.55 * ag})`;

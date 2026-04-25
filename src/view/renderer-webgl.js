@@ -55,34 +55,47 @@ const POINT_VS = `
 `;
 
 // Multi-layer glow: плотное белое ядро → насыщенный цветной middle →
-// мягкий halo. Даёт бёрн-эффект как у реальных светящихся орбов.
+// мягкий halo. На тёмной теме — wow-эффект как у светящихся орбов.
+// На светлой теме (u_light=1.0) — solid цветной диск с тёмным кантом
+// без white-core/halo (иначе ноды растворяются в белом фоне).
 const POINT_FS = `
   precision mediump float;
   varying vec4 v_color;
   varying float v_pulse;
   varying float v_highlight;
+  uniform float u_light;   // 0 = dark theme, 1 = light theme
 
   void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) discard;
 
-    // Три слоя:
-    //   core   — плотная яркая сердцевина (белая, нормализованная цветом)
-    //   mid    — основной тон ноды
-    //   halo   — мягкое свечение до края
     float core = smoothstep(0.25, 0.0, dist);
     float mid  = smoothstep(0.5, 0.15, dist);
     float halo = smoothstep(0.5, 0.0, dist) * 0.45;
 
-    // Белая сердцевина: цвет стремится к белому в центре.
-    vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
+    vec3 rgb;
+    float alpha;
 
-    // Композиция (additive-friendly)
-    vec3 rgb = whiteCore * (mid + halo * 0.35);
-    float alpha = (mid + halo) * v_color.a;
+    if (u_light > 0.5) {
+      // Light theme: solid цвет ноды + тёмный outline на ободе
+      // Никакого whiteCore — иначе нода превращается в белое пятно
+      rgb = v_color.rgb;
+      // Лёгкое затемнение от центра к краю (имитация объёма)
+      rgb *= 0.85 + 0.15 * (1.0 - dist * 2.0);
+      // Тёмный кант
+      float outline = smoothstep(0.40, 0.50, dist);
+      rgb = mix(rgb, vec3(0.05, 0.08, 0.18), outline * 0.85);
+      // Сплошная alpha внутри диска, плавный край
+      alpha = smoothstep(0.5, 0.45, dist) * v_color.a * 1.05;
+    } else {
+      // Dark theme: glow + whiteCore — wow эффект
+      vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
+      rgb = whiteCore * (mid + halo * 0.35);
+      alpha = (mid + halo) * v_color.a;
+    }
 
-    // Search-match — подсветка белым поверх
+    // Search-match подсветка работает в обеих темах
     if (mod(v_highlight, 2.0) >= 1.0) {
       float flash = smoothstep(0.5, 0.2, dist) * (0.5 + 0.5 * v_pulse);
       rgb += vec3(1.0, 1.0, 0.85) * flash * 0.6;
@@ -191,15 +204,16 @@ const PAIR_FS = `
   varying float v_t;
   varying float v_seglen;
   uniform float u_time;
+  uniform vec3 u_color;       // RGB для пунктира (зависит от темы)
+  uniform float u_alpha;      // общая прозрачность
   void main() {
-    // Pattern: 12px on / 8px off, плюс лёгкая «беготня» по линии за счёт u_time.
+    // Pattern: 12px on / 8px off + animated phase
     float distance_px = v_t * v_seglen;
-    float anim = u_time * 12.0; // px/sec
+    float anim = u_time * 12.0;
     float phase = mod(distance_px - anim, 20.0);
     if (phase > 12.0) discard;
     float fade = smoothstep(12.0, 8.0, phase);
-    // Лимонно-жёлтый
-    gl_FragColor = vec4(1.0, 0.92, 0.36, fade * 0.85);
+    gl_FragColor = vec4(u_color, fade * u_alpha);
   }
 `;
 
@@ -415,7 +429,7 @@ export function initWebglRenderer(canvas) {
   catch (e) { errProg = null; if (typeof console !== 'undefined') console.warn('[webgl] errProg compile failed:', e.message); }
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time', 'u_light']);
   cacheAttribs(hubProg, aHub, uHub, ['a_position', 'a_color', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(lineProg, aLine, uLine, ['a_position', 'a_color'],
@@ -425,7 +439,7 @@ export function initWebglRenderer(canvas) {
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
   if (pairProg) cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_time']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_time', 'u_color', 'u_alpha']);
   if (errProg) cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
@@ -494,6 +508,13 @@ const ROLE_RGB = {
   tool_use: [0.925, 0.627, 0.250],
   thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
+// Тёмные варианты для светлой темы — пастельные цвета теряются на белом
+const ROLE_RGB_LIGHT = {
+  user: [0.17, 0.37, 0.72],       // тёмно-синий
+  assistant: [0.10, 0.62, 0.48],  // тёмно-зелёный
+  tool_use: [0.77, 0.42, 0.07],   // burnt orange
+  thinking: [0.48, 0.31, 0.85],   // насыщенный фиолетовый
+};
 
 const DIFF_RGB = {
   A: [1.0, 0.376, 0.686],
@@ -518,12 +539,15 @@ function hslToRgb(h, s, l) {
 
 function nodeColor(n, state, out) {
   let r, g, b;
+  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     [r, g, b] = DIFF_RGB[n._diffOrigin] || DIFF_RGB.both;
   } else if (state.topicsMode && n._topicHue != null) {
-    [r, g, b] = hslToRgb(n._topicHue, 0.75, 0.58);
+    // На light теме — насыщенные цвета (lightness ниже)
+    [r, g, b] = hslToRgb(n._topicHue, 0.75, isLight ? 0.42 : 0.58);
   } else {
-    [r, g, b] = ROLE_RGB[n.role] || [0.5, 0.5, 0.5];
+    const palette = isLight ? ROLE_RGB_LIGHT : ROLE_RGB;
+    [r, g, b] = palette[n.role] || [0.5, 0.5, 0.5];
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -531,16 +555,21 @@ function nodeColor(n, state, out) {
 
 function edgeColor(e, state, out) {
   let r, g, b;
+  const isLight = state.theme === 'light';
   if (state.diffMode && e.diffSide === 'B') {
     [r, g, b] = DIFF_RGB.B;
   } else if (e.adopted) {
-    r = 0.78; g = 0.71; b = 0.47;
+    if (isLight) { r = 0.45; g = 0.35; b = 0.10; }
+    else { r = 0.78; g = 0.71; b = 0.47; }
   } else if (e.b && e.b.role === 'tool_use') {
-    r = 0.925; g = 0.627; b = 0.250;
+    if (isLight) { r = 0.65; g = 0.32; b = 0.08; }   // darker burnt-orange
+    else { r = 0.925; g = 0.627; b = 0.250; }
   } else if (e.b && e.b.role === 'thinking') {
-    r = 0.71; g = 0.55; b = 1.0;
+    if (isLight) { r = 0.42; g = 0.27; b = 0.78; }   // насыщенный фиолетовый
+    else { r = 0.71; g = 0.55; b = 1.0; }
   } else {
-    r = 0.0; g = 0.831; b = 1.0;
+    if (isLight) { r = 0.08; g = 0.27; b = 0.62; }   // тёмно-синий навсегда
+    else { r = 0.0; g = 0.831; b = 1.0; }
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -703,7 +732,9 @@ function fillLineBuffer(state) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
 
-    let edgeAlpha = e.adopted ? 0.25 : 0.6;
+    // На светлой теме edges должны быть жирнее, иначе теряются
+    const edgeBoost = state.theme === 'light' ? 1.5 : 1.0;
+    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * edgeBoost;
     if (hasSearch) {
       edgeAlpha *= (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
     } else if (topicFilter) {
@@ -990,6 +1021,14 @@ export function drawWebgl(state, tSec, viewport) {
         gl.uniform1f(uPair.scale, state.camera.scale);
         gl.uniform2f(uPair.viewport, vw, vh);
         gl.uniform1f(uPair.time, tSec);
+        // Цвет пунктира: на тёмной — лимонно-жёлтый, на светлой — насыщенный янтарь
+        if (state.theme === 'light') {
+          gl.uniform3f(uPair.color, 0.62, 0.42, 0.05);
+          gl.uniform1f(uPair.alpha, 0.95);
+        } else {
+          gl.uniform3f(uPair.color, 1.0, 0.92, 0.36);
+          gl.uniform1f(uPair.alpha, 0.85);
+        }
         gl.drawArrays(gl.LINES, 0, pairCount);
       }
     }
@@ -1048,6 +1087,7 @@ export function drawWebgl(state, tSec, viewport) {
     gl.uniform2f(uPoint.viewport, vw, vh);
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
+    gl.uniform1f(uPoint.light, state.theme === 'light' ? 1.0 : 0.0);
     gl.drawArrays(gl.POINTS, 0, pointCount);
   }
 }

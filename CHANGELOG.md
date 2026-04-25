@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-04-25
+
+### Fixed / Added
+
+- **WebGL metrics badges** — ранее tokens/⏱latency бейджи рисовались
+  только в Canvas 2D (через `ctx.fillText`). В WebGL текста рендеринга
+  нет, бейджей не было. Решено через **DOM-overlay**:
+  `src/ui/metrics-overlay.js` создаёт `<div id="metrics-overlay">`
+  поверх canvas, на каждый кадр обновляет positions ассистент-нод через
+  `transform: translate` (compositor-friendly). Кеш по nodeId,
+  показ/скрытие через transform off-screen. На 200 нодах ≈ <1 ms / frame.
+  Стиль .metrics-badge адаптируется к теме через CSS-vars.
+- **Light theme — ноды стали видимыми**. На скриншоте от пользователя
+  в светлой теме ноды получались светло-серые из-за `whiteCore` mix в
+  POINT_FS shader'е (центр ноды → белый). На светлом фоне это = пятно.
+  Фикс:
+  - POINT_FS получил uniform `u_light` (0|1). На light: `whiteCore`
+    отключается, рисуется solid `v_color.rgb` с тёмным `outline`
+    (smoothstep 0.40→0.50, mix к `vec3(0.05, 0.08, 0.18)`).
+  - Добавлена отдельная `ROLE_RGB_LIGHT` палитра — пастельный голубой
+    `(0.482, 0.666, 0.941)` заменяется на тёмно-синий
+    `(0.17, 0.37, 0.72)`, мятный → тёмно-зелёный, etc. На белом фоне
+    эти варианты читаются.
+- **Light theme — edges и pair-edges**. На светлой теме:
+  - `edgeColor()` возвращает тёмные RGB (`0.08, 0.27, 0.62` для default,
+    burnt-orange для tool_use, насыщенный фиолетовый для thinking)
+  - Edge-alpha `× 1.5` boost (иначе теряются)
+  - Pair edges (tool_use ↔ tool_result): получили uniform `u_color` +
+    `u_alpha`. На light — тёмно-янтарь `(0.62, 0.42, 0.05)` с alpha 0.95
+    вместо лимонно-жёлтого
+  - Topics palette: `lightness` снижен с 0.58 → 0.42 на light
+- **3D: Examples ▾ dropdown** — раньше в `3d.html` была одна кнопка
+  «Load sample» которая грузила только `SAMPLE_JSONL`. Теперь она
+  превращена в trigger такого же dropdown как в 2D режиме — три
+  опции (basic / orchestration / deep_orchestration).
+  CSS `.samples-menu/.samples-menu-item` скопирован в 3d.html.
+
+### Files
+
+- `src/ui/metrics-overlay.js` — **новый** модуль (DOM-overlay)
+- `src/main.js` — `updateMetricsOverlay(vp)` в WebGL frame loop;
+  `clearMetricsOverlay()` при switch на Canvas 2D
+- `src/view/renderer-webgl.js` — POINT_FS theme branch; ROLE_RGB_LIGHT;
+  edgeColor light branch; pair shader uniforms u_color/u_alpha; edge
+  alpha boost; nodeColor light palette; topics lightness 0.42
+- `src/view/renderer.js` — Canvas 2D dark outline на light theme
+- `src/3d/main.js` — Examples ▾ dropdown (3 sample'а вместо 1 кнопки)
+- `3d.html` — `.samples-menu` CSS, btn-sample → "Examples ▾"
+- `build.cjs` — `metrics-overlay.js` в MODULES
+
+### Known limitations
+
+- **3D layout (Radial / Force)** — 3D режим использует свой 3D physics
+  и не разделяется по layout-mode из 2D state. Реализация сложнее
+  чем переключатель и отложена. В 3D: только 3D-force.
+- **3D file:// поддержка** — три.js загружается через CDN-importmap
+  и file:// CORS блокирует в Firefox. Workaround: HTTP server
+  (`python -m http.server 8000`).
+
+123 passed, bundle 353 KB / 51 modules.
+
 ## [1.5.0] — 2026-04-25
 
 ### Added

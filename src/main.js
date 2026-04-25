@@ -35,6 +35,7 @@ import { drawWebgl } from './view/renderer-webgl.js';
 import { initI18n } from './core/i18n.js';
 import { initLangToggle } from './ui/lang-toggle.js';
 import { initThemeToggle } from './ui/theme-toggle.js';
+import { updateMetricsOverlay, clearMetricsOverlay } from './ui/metrics-overlay.js';
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -177,7 +178,11 @@ function frame(tms) {
     // которая жила внутри draw(). Вынесем её в view/renderer.js как export.
     updateBirthsForWebgl(state, tSec, vp);
     drawWebgl(state, tSec, vp);
+    // Metrics в WebGL — через DOM-overlay (тексты не рисуются в WebGL)
+    updateMetricsOverlay(vp);
   } else {
+    // В Canvas 2D — рисуем metrics inline через ctx.fillText, overlay не нужен
+    clearMetricsOverlay();
     draw(ctx, state, tSec, vp, {
       allowHeartbeat: allowHeartbeat && perfMode !== 'minimal',
       starfield: perfMode === 'minimal' ? null : (c, t) => drawStarfield(c, state.stars, state.camera, vp, t),

@@ -51,6 +51,9 @@
   .btn.active-freeze { border-color: #7fd2ff; color: #7fd2ff; }
   .btn.active-orphans { border-color: var(--tool); color: var(--tool); }
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
+  .samples-menu { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 360px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .samples-menu-item { background: transparent; border: 0; color: var(--text); padding: 10px 14px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; line-height: 1.4; }
+  .samples-menu-item:hover { background: rgba(80,212,181,0.1); color: var(--assistant); }
   .btn.btn-back-2d { border-color: #7b69ff; color: #a59bff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; padding: 8px 16px; background: rgba(123,105,255,0.12); font-size: 12px; letter-spacing: 0.06em; }
   .btn.btn-back-2d:hover { background: rgba(123,105,255,0.25); border-color: #a59bff; color: #ffffff; box-shadow: 0 0 18px rgba(123,105,255,0.5); }
 
@@ -104,7 +107,7 @@
   <div class="title" data-i18n="header.title">AI Conversation Viz · 3D</div>
   <div class="subtitle" data-i18n="header.subtitle_3d">Three.js · glowing orbs</div>
   <div class="controls">
-    <button class="btn primary" id="btn-sample" data-i18n="btn.sample">Load sample</button>
+    <button class="btn primary" id="btn-sample" data-i18n="btn.sample" aria-haspopup="menu" aria-expanded="false">Examples ▾</button>
     <button class="btn" id="btn-file" data-i18n="btn.file">Open JSONL…</button>
     <button class="btn" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
     <button class="btn" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>

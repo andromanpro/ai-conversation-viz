@@ -15,6 +15,7 @@ import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
 import { prewarm, stepPhysics, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
+import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
 import { computeDepths } from '../core/tree.js';
 import { toolIcon } from '../view/tool-icons.js';
@@ -496,9 +497,68 @@ function loadText(text) {
 }
 
 // ---- UI ----
-btnSample.addEventListener('click', () => {
-  clearSessionForHandoff();
-  loadText(SAMPLE_JSONL);
+
+// Examples ▾ dropdown — портим из ui/loader.js, поскольку 3D не использует
+// loader. Одинаковый список из трёх sample'ов.
+const SAMPLE_OPTIONS_3D = [
+  { id: 'basic', i18nKey: 'sample.basic', text: () => SAMPLE_JSONL },
+  { id: 'orchestration', i18nKey: 'sample.orchestration', text: () => MULTI_AGENT_ORCHESTRATION_JSONL },
+  { id: 'deep_orchestration', i18nKey: 'sample.deep_orchestration', text: () => DEEP_ORCHESTRATION_JSONL },
+];
+
+import('../core/i18n.js').then(({ t }) => {
+  // Превратим btn-sample в dropdown trigger; при клике строим меню по тем же
+  // CSS-правилам что и в 2D (.samples-menu).
+  function toggleSamplesMenu(anchor) {
+    const existing = document.getElementById('samples-menu-3d');
+    if (existing) { existing.remove(); anchor.setAttribute('aria-expanded', 'false'); return; }
+    const menu = document.createElement('div');
+    menu.id = 'samples-menu-3d';
+    menu.className = 'samples-menu';
+    menu.setAttribute('role', 'menu');
+    const rect = anchor.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.zIndex = '100';
+    let outsideHandler = null;
+    const escHandler = (ev) => { if (ev.key === 'Escape') closeMenu(); };
+    const closeMenu = () => {
+      menu.remove();
+      anchor.setAttribute('aria-expanded', 'false');
+      if (outsideHandler) {
+        document.removeEventListener('click', outsideHandler);
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    for (const opt of SAMPLE_OPTIONS_3D) {
+      const item = document.createElement('button');
+      item.className = 'samples-menu-item';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = t(opt.i18nKey);
+      item.addEventListener('click', () => {
+        closeMenu();
+        clearSessionForHandoff();
+        loadText(opt.text());
+      });
+      menu.appendChild(item);
+    }
+    document.body.appendChild(menu);
+    anchor.setAttribute('aria-expanded', 'true');
+    setTimeout(() => {
+      outsideHandler = (ev) => {
+        if (!menu.contains(ev.target) && ev.target !== anchor) closeMenu();
+      };
+      document.addEventListener('click', outsideHandler);
+      document.addEventListener('keydown', escHandler);
+    }, 0);
+  }
+  if (btnSample) {
+    btnSample.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleSamplesMenu(btnSample);
+    });
+  }
 });
 btnFile.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (ev) => {
