@@ -13,6 +13,14 @@ let _ltGetViewport = () => ({
 
 export function initLayoutToggle(_ltGetViewportFn) {
   if (_ltGetViewportFn) _ltGetViewport = _ltGetViewportFn;
+  // Восстанавливаем закреплённый выбор пользователя — иначе остаётся
+  // дефолт 'force' и auto-detect в loader'е может его переопределить.
+  try {
+    const saved = localStorage.getItem('viz:layoutMode');
+    if (saved === 'force' || saved === 'radial' || saved === 'swim') {
+      state.layoutMode = saved;
+    }
+  } catch {}
   const host = document.getElementById('layout-switch');
   if (!host) return;
   host.innerHTML = '';
@@ -37,6 +45,10 @@ export function initLayoutToggle(_ltGetViewportFn) {
 function switchTo(toMode) {
   if (transition) return;
   if (toMode === state.layoutMode) return;
+  // Запоминаем явный выбор пользователя — отключает auto-detect tree
+  // при следующем loadText. Если пользователь хочет сбросить
+  // (вернуть авто-detect) — localStorage.removeItem('viz:layoutMode').
+  try { localStorage.setItem('viz:layoutMode', toMode); } catch {}
   const from = new Map();
   for (const n of state.nodes) from.set(n.id, { x: n.x, y: n.y });
   let to;

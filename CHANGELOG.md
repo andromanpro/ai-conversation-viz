@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-04-25
+
+### Added (по плану A4 + B + C1)
+
+- **Pair edges** (B) — пунктирные lemon-yellow связи между tool_use ↔
+  tool_result через matching `tool_use_id`. Парсер сохраняет
+  `node.toolUseId` на virtual-tool_use нодах и `node.toolResultIds[]` +
+  `node.hasError` на user-нодах. `buildGraph` собирает `pairEdges` массив.
+  WebGL рендерер рисует отдельным pass'ом перед нодами через `gl.LINES`
+  с varying `t` и shader-pattern (12 px on / 8 off, animated через u_time).
+  Для parallel Task получается N пунктиров от virtual-tool_use нод
+  → одной user-ноды tool_result message — без overlap (start-точки разные).
+- **Error rings** (C1) — assistant-ноды у которых хотя бы один tool_use
+  получил `is_error: true` в matching tool_result, получают красное
+  пунктирное кольцо. Отдельный gl.POINTS pass с annulus + dashed angles
+  + pulse. Также самой virtual-tool_use ноде ставим `_isErrorToolUse`.
+- **Auto-detect tree-shape** (A4) — `detectTreeShape(nodes, edges)` в
+  graph.js: если граф ≥30 нод, max depth ≥3 и ≥2 узла с fan-out ≥3 →
+  loader.js при первом open переключает в `radial` layout. Закрепляется
+  в localStorage только если пользователь явно выбрал layout через
+  toggle (для сохранения уважения к ручному выбору).
+- **Force defaults tuned** (A1) — repulsion 9000→14000, springLen 90→140,
+  centerPull 0.002→0.0012, fitPadding 0.85→0.7, prewarmIterations 180→260.
+  Раньше графы 50+ нод схлопывались в кучу — теперь больше воздуха.
+  Layout-tests обновлены (cam.scale 5.1→4.2 от 0.7-padding).
+
+### Внутренности
+
+- `state.pairEdges` добавлен.
+- Renderer-webgl: новые `pairProg`/`errProg` + buffers + ensureArr cases
+  ('pair', 'err'). Layout: 7 passes (был 5).
+- Layout-toggle: при init читает `viz:layoutMode` из localStorage,
+  switchTo сохраняет.
+
+### Sample fix
+
+Bundle 327k (+14k за shader-код), 49 modules, 122 passed.
+
 ## [1.2.0] — 2026-04-25
 
 ### Added

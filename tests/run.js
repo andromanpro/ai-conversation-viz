@@ -213,7 +213,8 @@ test('layout: fitToView centers bbox in viewport', () => {
     { x: 100, y: 100, r: 0 },
   ];
   const cam = fitToView(nodes, { width: 800, height: 600 });
-  approx(cam.scale, 5.1, 1e-6);
+  // 600/100 * 0.7 = 4.2 (CFG.fitPadding tuned to 0.7 в v1.3 для большего воздуха)
+  approx(cam.scale, 4.2, 1e-6);
   // worldToScreen(50, 50, cam) should map to (400, 300)
   const s = worldToScreen(50, 50, cam);
   approx(s.x, 400, 1e-6);
@@ -240,7 +241,7 @@ test('layout: fitToView respects safe-area (cx/cy + safeW/safeH)', () => {
   approx(s.x, 400, 1e-6);
   approx(s.y, 330, 1e-6);
   // scale должен помещать bbox в safe area, не в весь viewport
-  approx(cam.scale, Math.min(600 / 100, 400 / 100) * 0.85);
+  approx(cam.scale, Math.min(600 / 100, 400 / 100) * 0.7);
 });
 
 test('layout: stepPhysics moves isolated pair apart (repulsion)', () => {

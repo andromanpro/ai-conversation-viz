@@ -140,6 +140,69 @@ function buildEdges(nodes, byId) {
   return edges;
 }
 
+// Эвристика: «дерево» в смысле визуальной читаемости — есть глубина и
+// несколько fan-out точек. Используется loader'ом для авто-выбора radial
+// layout вместо force при первом open. Простой алгоритм: BFS от roots,
+// считаем maxDepth и кол-во nodes с ≥3 children.
+export function detectTreeShape(nodes, edges) {
+  if (nodes.length < 30) return false;
+  const childrenByParent = new Map();
+  for (const n of nodes) childrenByParent.set(n.id, []);
+  for (const e of edges) {
+    if (!e.adopted) childrenByParent.get(e.source).push(e.target);
+  }
+  const roots = nodes.filter(n => !n.parentId || !childrenByParent.has(n.parentId)).map(n => n.id);
+  if (!roots.length) return false;
+  let maxDepth = 0;
+  let bigFanOuts = 0;
+  const queue = roots.map(id => [id, 0]);
+  while (queue.length) {
+    const [id, d] = queue.shift();
+    if (d > maxDepth) maxDepth = d;
+    const kids = childrenByParent.get(id) || [];
+    if (kids.length >= 3) bigFanOuts++;
+    for (const k of kids) queue.push([k, d + 1]);
+  }
+  return maxDepth >= 3 && bigFanOuts >= 2;
+}
+
+// Pair edges — соединяют tool_use ноду с user-нодой содержащей matching
+// tool_result. Эти связи существуют в JSONL через `tool_use_id`, но не
+// материализованы как parent-child. Рисуются пунктиром в renderer'е.
+//
+// Для parallel Task (4 tool_use → 1 user-message с 4 tool_result) получаем
+// 4 разных pairEdge — каждая исходит из своей virtual tool_use ноды
+// (`<assistantId>#tu<index>`), все упираются в одну user-message, но визуально
+// не overlap'ят потому что start-точки разные.
+//
+// Также проставляем флаг node.hasErrorTool для всех assistant-нод чьи
+// virtual-children-tool_use получили is_error в matching tool_result —
+// renderer рисует красную окантовку.
+function buildPairEdges(nodes, byId) {
+  // toolUseId → source node (virtual tool_use)
+  const toolUseIndex = new Map();
+  for (const n of nodes) {
+    if (n.toolUseId) toolUseIndex.set(n.toolUseId, n);
+  }
+  const pairs = [];
+  for (const n of nodes) {
+    if (!n.toolResultIds || !n.toolResultIds.length) continue;
+    for (const tuid of n.toolResultIds) {
+      const src = toolUseIndex.get(tuid);
+      if (!src) continue; // tool_use не нашёлся (orphan tool_result)
+      pairs.push({ source: src.id, target: n.id, a: src, b: n });
+      // Mark error на assistant если её tool_use получил is_error result
+      if (n.hasError) {
+        const assistantId = src.parentId; // virtual-tool_use's parent = assistant
+        const assistant = byId.get(assistantId);
+        if (assistant) assistant._hasErrorTool = true;
+        src._isErrorToolUse = true; // на самой tool_use ноде тоже отметим
+      }
+    }
+  }
+  return pairs;
+}
+
 export function buildGraph(parsed, viewport) {
   const { width, height } = viewport;
   const cx = width / 2, cy = height / 2;
@@ -150,8 +213,9 @@ export function buildGraph(parsed, viewport) {
 
   markOrphans(nodes, byId);
   const edges = buildEdges(nodes, byId);
+  const pairEdges = buildPairEdges(nodes, byId);
   recomputeRecency(nodes);
   computeDegreesAndHubs(nodes, edges);
 
-  return { nodes, edges, byId };
+  return { nodes, edges, byId, pairEdges };
 }

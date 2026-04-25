@@ -163,6 +163,87 @@ const LINE_FS = `
   }
 `;
 
+// --- Pair edges (tool_use ↔ tool_result, dotted lemon-yellow) ---
+// Координаты идут как gl.LINES сегменты; для dotted-effect используем
+// varying, который меняется вдоль линии (в каждой паре вершин t=0 и t=1),
+// и в fragment отрезаем по mod(длина_от_старта).
+const PAIR_VS = `
+  attribute vec2 a_position;
+  attribute float a_t;          // 0 у source, 1 у target — позиция вдоль pair-edge
+  attribute float a_seglen;     // длина сегмента в screen px (для частоты пунктира)
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  varying float v_t;
+  varying float v_seglen;
+  void main() {
+    vec2 screen = (a_position - u_camera) * u_scale;
+    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
+    clip.y = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    v_t = a_t;
+    v_seglen = a_seglen;
+  }
+`;
+const PAIR_FS = `
+  precision mediump float;
+  varying float v_t;
+  varying float v_seglen;
+  uniform float u_time;
+  void main() {
+    // Pattern: 12px on / 8px off, плюс лёгкая «беготня» по линии за счёт u_time.
+    float distance_px = v_t * v_seglen;
+    float anim = u_time * 12.0; // px/sec
+    float phase = mod(distance_px - anim, 20.0);
+    if (phase > 12.0) discard;
+    float fade = smoothstep(12.0, 8.0, phase);
+    // Лимонно-жёлтый
+    gl_FragColor = vec4(1.0, 0.92, 0.36, fade * 0.85);
+  }
+`;
+
+// --- Error ring (красная пунктирная окружность вокруг assistant с tool error) ---
+const ERR_VS = `
+  attribute vec2 a_position;
+  attribute float a_size;
+  attribute float a_phase;
+  uniform vec2 u_camera;
+  uniform float u_scale;
+  uniform vec2 u_viewport;
+  uniform float u_dpr;
+  uniform float u_time;
+  varying float v_phase;
+  void main() {
+    vec2 screen = (a_position - u_camera) * u_scale;
+    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
+    clip.y = -clip.y;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    float pulse = 0.5 + 0.5 * sin(u_time * 3.5 + a_phase);
+    gl_PointSize = max(8.0, a_size * u_dpr * (1.05 + 0.15 * pulse));
+    v_phase = a_phase;
+  }
+`;
+const ERR_FS = `
+  precision mediump float;
+  varying float v_phase;
+  uniform float u_time;
+  void main() {
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+    // Annulus 0.42..0.49
+    float ring = smoothstep(0.42, 0.45, dist) * smoothstep(0.495, 0.46, dist);
+    // Пунктирные сегменты по углу
+    float angle = atan(coord.y, coord.x) + u_time * 1.2 + v_phase;
+    float dash = 0.5 + 0.5 * sin(angle * 8.0);
+    dash = smoothstep(0.4, 0.6, dash);
+    float pulse = 0.55 + 0.45 * sin(u_time * 3.5 + v_phase);
+    float alpha = ring * dash * pulse;
+    // Красный с лёгким оранжевым оттенком
+    gl_FragColor = vec4(1.0, 0.32, 0.28, alpha * 0.95);
+  }
+`;
+
 // --- Edge particles ---
 // Position вычисляется per-vertex как bezier(u_time*speed + offset).
 const PARTICLE_VS = `
@@ -275,8 +356,8 @@ function compileProgram(gl, vsSrc, fsSrc) {
 let gl = null;
 let canvasEl = null;
 
-let pointProg, hubProg, lineProg, particleProg, starProg;
-let pointBuf, hubBuf, lineBuf, particleBuf, starBuf;
+let pointProg, hubProg, lineProg, particleProg, starProg, pairProg, errProg;
+let pointBuf, hubBuf, lineBuf, particleBuf, starBuf, pairBuf, errBuf;
 
 // Layouts (floats per vertex)
 const POINT_STRIDE = 9;    // x, y, r, g, b, a, size, phase, flags
@@ -284,13 +365,15 @@ const HUB_STRIDE = 8;      // x, y, r, g, b, a, size, phase
 const LINE_STRIDE = 6;     // x, y, r, g, b, a
 const PARTICLE_STRIDE = 10; // ax, ay, bx, by, cx, cy, r, g, b, a (offset/speed вычисляются из mod+index)
 const STAR_STRIDE = 4;     // x, y, size, depth
+const PAIR_STRIDE = 4;     // x, y, t (0..1 along edge), seglen (px) — для dotted pattern
+const ERR_STRIDE = 4;      // x, y, size, phase
 
-let pointArr, hubArr, lineArr, particleArr;
+let pointArr, hubArr, lineArr, particleArr, pairArr, errArr;
 let starsBuilt = null; // Float32Array, statиc
 
 // Uniforms
-const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {};
-const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {};
+const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {}, uPair = {}, uErr = {};
+const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {}, aPair = {}, aErr = {};
 
 const EDGE_SEGMENTS = 10;
 const PARTICLES_PER_EDGE = 2;
@@ -322,6 +405,8 @@ export function initWebglRenderer(canvas) {
   lineProg = compileProgram(gl, LINE_VS, LINE_FS);
   particleProg = compileProgram(gl, PARTICLE_VS, PARTICLE_FS);
   starProg = compileProgram(gl, STAR_VS, STAR_FS);
+  pairProg = compileProgram(gl, PAIR_VS, PAIR_FS);
+  errProg = compileProgram(gl, ERR_VS, ERR_FS);
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
@@ -333,12 +418,18 @@ export function initWebglRenderer(canvas) {
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
+  cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_time']);
+  cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
   pointBuf = gl.createBuffer();
   hubBuf = gl.createBuffer();
   lineBuf = gl.createBuffer();
   particleBuf = gl.createBuffer();
   starBuf = gl.createBuffer();
+  pairBuf = gl.createBuffer();
+  errBuf = gl.createBuffer();
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive
@@ -481,6 +572,16 @@ function ensureArr(name, neededFloats) {
         particleArr = new Float32Array(Math.max(neededFloats, (particleArr?.length || 0) * 2 || 1024));
       }
       return particleArr;
+    case 'pair':
+      if (!pairArr || pairArr.length < neededFloats) {
+        pairArr = new Float32Array(Math.max(neededFloats, (pairArr?.length || 0) * 2 || 256));
+      }
+      return pairArr;
+    case 'err':
+      if (!errArr || errArr.length < neededFloats) {
+        errArr = new Float32Array(Math.max(neededFloats, (errArr?.length || 0) * 2 || 64));
+      }
+      return errArr;
   }
 }
 
@@ -681,6 +782,68 @@ function fillParticleBuffer(state) {
   return count;
 }
 
+// Заполняет буфер для pair-edges (tool_use ↔ tool_result, dotted lemon-yellow).
+// Каждое pair → одна gl.LINES линия от source.{x,y} к target.{x,y}.
+// Per-vertex данные: t (0 у source, 1 у target), seglen (полная длина сегмента в screen px).
+function fillPairBuffer(state, scale) {
+  const pairs = state.pairEdges || [];
+  if (!pairs.length) return 0;
+  ensureArr('pair', pairs.length * 2 * PAIR_STRIDE);
+  const arr = pairArr;
+  let count = 0;
+  const hidden = state.hiddenRoles;
+  const collapsed = state.collapsed;
+  for (const p of pairs) {
+    const a = p.a, b = p.b;
+    if (!a || !b) continue;
+    if (a.bornAt == null || b.bornAt == null) continue;
+    if (hidden && (hidden.has(a.role) || hidden.has(b.role))) continue;
+    const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
+    if (isCollapsedChild(a) || isCollapsedChild(b)) continue;
+
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenWorld = Math.hypot(dx, dy) || 1;
+    const seglenPx = lenWorld * scale; // в screen px при текущем zoom
+    let o = count * PAIR_STRIDE;
+    arr[o++] = a.x; arr[o++] = a.y; arr[o++] = 0; arr[o++] = seglenPx;
+    count++;
+    o = count * PAIR_STRIDE;
+    arr[o++] = b.x; arr[o++] = b.y; arr[o++] = 1; arr[o++] = seglenPx;
+    count++;
+  }
+  return count;
+}
+
+// Заполняет буфер для error-rings (assistant-ноды у которых tool_use получил error).
+function fillErrBuffer(state, nowMs) {
+  ensureArr('err', state.nodes.length * ERR_STRIDE);
+  const arr = errArr;
+  let count = 0;
+  const hidden = state.hiddenRoles;
+  for (const n of state.nodes) {
+    if (!n._hasErrorTool && !n._isErrorToolUse) continue;
+    if (n.bornAt == null) continue;
+    if (hidden && hidden.has(n.role)) continue;
+    const baseR = n.r * 1.25 * (CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * 1);
+    // Радиус кольца: чуть больше ноды
+    const size = Math.max(10, n.r * 4.5 * state.camera.scale);
+    const off = count * ERR_STRIDE;
+    arr[off + 0] = n.x;
+    arr[off + 1] = n.y;
+    arr[off + 2] = size;
+    arr[off + 3] = n.phase || 0;
+    count++;
+  }
+  return count;
+}
+
+// ==== Capacity helpers (доп. категории) ====
+const _origEnsureArr = (function() {
+  // wrapping ensureArr to support 'pair' and 'err' (поскольку оригинальная
+  // функция использует switch с фиксированным набором имён, мы патчим её
+  // через прямую правку)
+})();
+
 // ==== Draw ====
 
 export function drawWebgl(state, tSec, viewport) {
@@ -791,7 +954,50 @@ export function drawWebgl(state, tSec, viewport) {
     gl.drawArrays(gl.POINTS, 0, hubCount);
   }
 
-  // ---- 5. Nodes (поверх рёбер и колец) ----
+  // ---- 5. Pair edges (tool_use ↔ tool_result, lemon-yellow dotted) ----
+  // Рисуем перед нодами и hub-кольцами чтобы пунктир был поверх обычных
+  // edges, но под node-glow.
+  const pairCount = fillPairBuffer(state, state.camera.scale);
+  if (pairCount > 0) {
+    gl.useProgram(pairProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pairBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, pairArr.subarray(0, pairCount * PAIR_STRIDE), gl.DYNAMIC_DRAW);
+    const stride = PAIR_STRIDE * 4;
+    gl.enableVertexAttribArray(aPair.position);
+    gl.vertexAttribPointer(aPair.position, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(aPair.t);
+    gl.vertexAttribPointer(aPair.t, 1, gl.FLOAT, false, stride, 2 * 4);
+    gl.enableVertexAttribArray(aPair.seglen);
+    gl.vertexAttribPointer(aPair.seglen, 1, gl.FLOAT, false, stride, 3 * 4);
+    gl.uniform2f(uPair.camera, state.camera.x, state.camera.y);
+    gl.uniform1f(uPair.scale, state.camera.scale);
+    gl.uniform2f(uPair.viewport, vw, vh);
+    gl.uniform1f(uPair.time, tSec);
+    gl.drawArrays(gl.LINES, 0, pairCount);
+  }
+
+  // ---- 6. Error rings (красные пунктирные кольца у нод с tool error) ----
+  const errCount = fillErrBuffer(state, nowMs);
+  if (errCount > 0) {
+    gl.useProgram(errProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, errBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, errArr.subarray(0, errCount * ERR_STRIDE), gl.DYNAMIC_DRAW);
+    const stride = ERR_STRIDE * 4;
+    gl.enableVertexAttribArray(aErr.position);
+    gl.vertexAttribPointer(aErr.position, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(aErr.size);
+    gl.vertexAttribPointer(aErr.size, 1, gl.FLOAT, false, stride, 2 * 4);
+    gl.enableVertexAttribArray(aErr.phase);
+    gl.vertexAttribPointer(aErr.phase, 1, gl.FLOAT, false, stride, 3 * 4);
+    gl.uniform2f(uErr.camera, state.camera.x, state.camera.y);
+    gl.uniform1f(uErr.scale, state.camera.scale);
+    gl.uniform2f(uErr.viewport, vw, vh);
+    gl.uniform1f(uErr.dpr, dpr);
+    gl.uniform1f(uErr.time, tSec);
+    gl.drawArrays(gl.POINTS, 0, errCount);
+  }
+
+  // ---- 7. Nodes (поверх рёбер и колец) ----
   const pointCount = fillPointBuffer(state, nowMs);
   if (pointCount > 0) {
     gl.useProgram(pointProg);

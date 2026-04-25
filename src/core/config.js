@@ -2,19 +2,22 @@ export const CFG = {
   maxMessages: 5000,
   excerptChars: 400,
   tooltipMaxChars: 80,
-  repulsion: 9000,
-  spring: 0.05,
-  springLen: 90,
+  // Tuned для лучшего разнесения (раньше графы 50+ нод схлопывались в кучу).
+  // Увеличил repulsion + springLen, ослабил centerPull. Маленькие графы
+  // (~30 нод) тоже становятся просторнее, но это к лучшему — больше воздуха.
+  repulsion: 14000,
+  spring: 0.04,
+  springLen: 140,
   damping: 0.85,
-  centerPull: 0.002,
+  centerPull: 0.0012,
   minR: 3,
   maxR: 20,
   pulseFreq: 2.0,
   clickTolerancePx: 4,
   hitPad: 4,
   toolNodeScale: 0.6,
-  fitPadding: 0.85,
-  prewarmIterations: 180,
+  fitPadding: 0.7,    // больше отступ от краёв при fitToView (было 0.85)
+  prewarmIterations: 260,  // больше итераций prewarm чтобы успевало разойтись
   zoomStep: 1.1,
   zoomMin: 0.1,
   zoomMax: 8,

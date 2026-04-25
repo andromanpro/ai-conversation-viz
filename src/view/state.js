@@ -1,6 +1,7 @@
 export const state = {
   nodes: [],
   edges: [],
+  pairEdges: [], // tool_use → tool_result связи (через tool_use_id), пунктиром
   byId: new Map(),
   selected: null,
   hover: null,

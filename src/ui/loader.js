@@ -1,7 +1,7 @@
 import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
 import { parseJSONL } from '../core/parser.js';
-import { buildGraph } from '../core/graph.js';
+import { buildGraph, detectTreeShape } from '../core/graph.js';
 import { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
@@ -173,6 +173,7 @@ export function loadText(text) {
     prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
     state.nodes = g.nodes;
     state.edges = g.edges;
+    state.pairEdges = g.pairEdges || [];
     state.byId = g.byId;
     state.selected = null;
     state.hover = null;
@@ -182,6 +183,15 @@ export function loadText(text) {
     state.searchActive = null;
     state.collapsed = new Set();
     state.stats = parsed.stats;
+    // Auto-detect tree-shape — если граф похож на дерево с 2+ fan-out
+    // точками и глубиной >=3, переключаемся в radial. Только при первом
+    // load (или если пользователь не закрепил выбор через localStorage).
+    const userPickedLayout = (() => {
+      try { return localStorage.getItem('viz:layoutMode'); } catch { return null; }
+    })();
+    if (!userPickedLayout && detectTreeShape(state.nodes, state.edges)) {
+      state.layoutMode = 'radial';
+    }
     // Если активен не-force layout — применяем его сразу к новым нодам
     if (state.layoutMode === 'swim') {
       const pos = computeSwimLanes(state.nodes, vp);

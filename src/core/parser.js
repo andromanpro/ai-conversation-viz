@@ -13,10 +13,11 @@ function extractToolResultText(content) {
 }
 
 function classifyContent(content) {
-  if (typeof content === 'string') return { text: content, toolUses: [] };
-  if (!Array.isArray(content)) return { text: '', toolUses: [] };
+  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [] };
+  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [] };
   const textParts = [];
   const toolUses = [];
+  const toolResults = []; // { toolUseId, isError }
   for (const block of content) {
     if (!block) continue;
     switch (block.type) {
@@ -39,6 +40,12 @@ function classifyContent(content) {
         const rt = extractToolResultText(block.content);
         const prefix = block.is_error ? '⚠ ' : '↩ ';
         if (rt) textParts.push(prefix + rt);
+        if (block.tool_use_id) {
+          toolResults.push({
+            toolUseId: block.tool_use_id,
+            isError: !!block.is_error,
+          });
+        }
         break;
       }
       case 'image':
@@ -49,7 +56,7 @@ function classifyContent(content) {
         break;
     }
   }
-  return { text: textParts.join('\n\n'), toolUses };
+  return { text: textParts.join('\n\n'), toolUses, toolResults };
 }
 
 export function extractText(message) {
@@ -82,7 +89,7 @@ export function parseJSONL(text) {
       continue;
     }
 
-    const { text: msgText, toolUses } = classifyContent(obj.message && obj.message.content);
+    const { text: msgText, toolUses, toolResults } = classifyContent(obj.message && obj.message.content);
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
@@ -91,14 +98,21 @@ export function parseJSONL(text) {
       ? buildAssistantSummary(toolUses)
       : msgText;
 
-    nodes.push({
+    // На user-нодах сохраняем массив tool_use_id из tool_result блоков и
+    // флаг наличия error — для visualization pair-edges и red error-ring.
+    const node = {
       id: baseId,
       parentId,
       role: t,
       ts,
       text: finalText,
       textLen: finalText.length,
-    });
+    };
+    if (t === 'user' && toolResults.length) {
+      node.toolResultIds = toolResults.map(r => r.toolUseId);
+      node.hasError = toolResults.some(r => r.isError);
+    }
+    nodes.push(node);
     kept++;
 
     if (t === 'assistant') {
@@ -114,6 +128,7 @@ export function parseJSONL(text) {
           text: subText,
           textLen: subText.length,
           toolName: tu.name,
+          toolUseId: tu.id, // Real API tool_use_id для pair-edges с tool_result
         });
         kept++;
       }
