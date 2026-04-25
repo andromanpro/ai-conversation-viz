@@ -13,11 +13,12 @@ function extractToolResultText(content) {
 }
 
 function classifyContent(content) {
-  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [] };
-  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [] };
+  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [], thinkings: [] };
+  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [], thinkings: [] };
   const textParts = [];
   const toolUses = [];
   const toolResults = []; // { toolUseId, isError }
+  const thinkings = [];   // string[] — для отдельных virtual thinking nodes
   for (const block of content) {
     if (!block) continue;
     switch (block.type) {
@@ -25,8 +26,10 @@ function classifyContent(content) {
         if (typeof block.text === 'string') textParts.push(block.text);
         break;
       case 'thinking':
-        if (typeof block.thinking === 'string') {
-          textParts.push('💭 ' + block.thinking);
+        // Сохраняем текст для отдельной virtual thinking ноды.
+        // В text родителя НЕ дублируем — иначе двойное отображение.
+        if (typeof block.thinking === 'string' && block.thinking.trim()) {
+          thinkings.push(block.thinking);
         }
         break;
       case 'tool_use':
@@ -56,7 +59,7 @@ function classifyContent(content) {
         break;
     }
   }
-  return { text: textParts.join('\n\n'), toolUses, toolResults };
+  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings };
 }
 
 export function extractText(message) {
@@ -89,17 +92,21 @@ export function parseJSONL(text) {
       continue;
     }
 
-    const { text: msgText, toolUses, toolResults } = classifyContent(obj.message && obj.message.content);
+    const { text: msgText, toolUses, toolResults, thinkings } = classifyContent(obj.message && obj.message.content);
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
-    // Если у ассистента нет текста, но есть tool_use — формируем summary из тулов
-    const finalText = (t === 'assistant' && !msgText && toolUses.length)
-      ? buildAssistantSummary(toolUses)
-      : msgText;
+    // Если у ассистента нет текста, но есть tool_use или thinking —
+    // формируем summary. Приоритет: tool_use → thinking-фраза.
+    let finalText = msgText;
+    if (t === 'assistant' && !finalText) {
+      if (toolUses.length) finalText = buildAssistantSummary(toolUses);
+      else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
+    }
 
     // На user-нодах сохраняем массив tool_use_id из tool_result блоков и
     // флаг наличия error — для visualization pair-edges и red error-ring.
+    // На assistant-нодах сохраняем usage (для метрик-бейджей).
     const node = {
       id: baseId,
       parentId,
@@ -112,10 +119,32 @@ export function parseJSONL(text) {
       node.toolResultIds = toolResults.map(r => r.toolUseId);
       node.hasError = toolResults.some(r => r.isError);
     }
+    if (t === 'assistant' && obj.message && obj.message.usage) {
+      const u = obj.message.usage;
+      const inT = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      const outT = u.output_tokens || 0;
+      node.tokensIn = inT;
+      node.tokensOut = outT;
+      node.tokensTotal = inT + outT;
+    }
     nodes.push(node);
     kept++;
 
     if (t === 'assistant') {
+      // Thinking ноды идут раньше tool_use (с малым шагом ts), чтобы в
+      // timeline они появлялись «между» mind ассистента и его действиями.
+      for (let i = 0; i < thinkings.length; i++) {
+        const tk = thinkings[i];
+        nodes.push({
+          id: `${baseId}#th${i}`,
+          parentId: baseId,
+          role: 'thinking',
+          ts: ts + (i + 1) * Math.max(50, Math.floor(CFG.toolUseTsStepMs / 4)),
+          text: tk,
+          textLen: tk.length,
+        });
+        kept++;
+      }
       for (let i = 0; i < toolUses.length; i++) {
         const tu = toolUses[i];
         const inputStr = safeStringify(tu.input);
@@ -124,7 +153,9 @@ export function parseJSONL(text) {
           id: `${baseId}#tu${i}`,
           parentId: baseId,
           role: 'tool_use',
-          ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+          // Сдвигаем после thinking-блоков, чтобы порядок был
+          // assistant → thinking* → tool_use*
+          ts: ts + (thinkings.length + i + 1) * CFG.toolUseTsStepMs,
           text: subText,
           textLen: subText.length,
           toolName: tu.name,
@@ -202,13 +233,15 @@ export function parseLine(line, seedCounter) {
   const t = obj.type;
   if (t !== 'user' && t !== 'assistant') return [];
 
-  const { text: msgText, toolUses } = classifyContent(obj.message && obj.message.content);
+  const { text: msgText, toolUses, thinkings } = classifyContent(obj.message && obj.message.content);
   const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
   const parentId = obj.parentUuid || null;
-  const finalText = (t === 'assistant' && !msgText && toolUses.length)
-    ? buildAssistantSummary(toolUses)
-    : msgText;
+  let finalText = msgText;
+  if (t === 'assistant' && !finalText) {
+    if (toolUses.length) finalText = buildAssistantSummary(toolUses);
+    else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
+  }
 
   const out = [{
     id: baseId,
@@ -219,6 +252,17 @@ export function parseLine(line, seedCounter) {
     textLen: finalText.length,
   }];
   if (t === 'assistant') {
+    for (let i = 0; i < thinkings.length; i++) {
+      const tk = thinkings[i];
+      out.push({
+        id: `${baseId}#th${i}`,
+        parentId: baseId,
+        role: 'thinking',
+        ts: ts + (i + 1) * Math.max(50, Math.floor(CFG.toolUseTsStepMs / 4)),
+        text: tk,
+        textLen: tk.length,
+      });
+    }
     for (let i = 0; i < toolUses.length; i++) {
       const tu = toolUses[i];
       const inputStr = safeStringify(tu.input);
@@ -227,7 +271,7 @@ export function parseLine(line, seedCounter) {
         id: `${baseId}#tu${i}`,
         parentId: baseId,
         role: 'tool_use',
-        ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+        ts: ts + (thinkings.length + i + 1) * CFG.toolUseTsStepMs,
         text: subText,
         textLen: subText.length,
         toolName: tu.name,

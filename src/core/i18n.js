@@ -35,8 +35,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.4 · force-directed',
-    'header.subtitle_standalone': 'v1.4 · standalone bundle',
+    'header.subtitle_force': 'v1.5 · force-directed',
+    'header.subtitle_standalone': 'v1.5 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -154,6 +154,8 @@ const DICT = {
     'settings.group.visual': 'Visual',
     'settings.group.playback': 'Playback',
     'settings.group.birth': 'Birth animation',
+    'settings.group.display': 'Display',
+    'settings.group.metrics': 'Metrics',
     'settings.header': '⚙ Settings',
     // Settings keys
     'settings.repulsion': 'Repulsion strength',
@@ -175,6 +177,14 @@ const DICT = {
     'settings.maxChars': 'Max chars per bubble',
     'settings.postGapMs': 'Min gap between bubbles',
     'settings.birthMs': 'Birth animation (ms)',
+    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showErrorRings': 'Error rings (red dashed)',
+    'settings.showThinking': 'Thinking blocks (purple)',
+    'settings.showMetrics': 'Token & duration badges',
+    // Theme
+    'tip.theme_light': 'Switch to light theme (T)',
+    'tip.theme_dark': 'Switch to dark theme (T)',
+    'aria.theme': 'Toggle theme',
 
     // Live status
     'live.idle': 'idle',
@@ -217,8 +227,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.4 · force-directed',
-    'header.subtitle_standalone': 'v1.4 · standalone-сборка',
+    'header.subtitle_force': 'v1.5 · force-directed',
+    'header.subtitle_standalone': 'v1.5 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -326,6 +336,8 @@ const DICT = {
     'settings.group.visual': 'Визуал',
     'settings.group.playback': 'Воспроизведение',
     'settings.group.birth': 'Анимация рождения',
+    'settings.group.display': 'Отображение',
+    'settings.group.metrics': 'Метрики',
     'settings.header': '⚙ Настройки',
     'settings.repulsion': 'Сила отталкивания',
     'settings.spring': 'Жёсткость пружины',
@@ -346,6 +358,13 @@ const DICT = {
     'settings.maxChars': 'Макс. символов в пузыре',
     'settings.postGapMs': 'Мин. пауза между пузырями',
     'settings.birthMs': 'Анимация рождения (мс)',
+    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showErrorRings': 'Кольца ошибок (красные пунктиры)',
+    'settings.showThinking': 'Thinking-блоки (фиолетовые)',
+    'settings.showMetrics': 'Бейджи токенов и времени',
+    'tip.theme_light': 'Светлая тема (T)',
+    'tip.theme_dark': 'Тёмная тема (T)',
+    'aria.theme': 'Переключить тему',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',

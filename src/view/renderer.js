@@ -4,6 +4,24 @@ import { controlPoint, bezierPoint } from './particles.js';
 import { toolIcon } from './tool-icons.js';
 import { hueToRgbaString } from './topics.js';
 
+// Простой helper: читает CSS-переменную с :root. Возвращает строку
+// (для прямого использования с ctx.fillStyle/strokeStyle), либо fallback.
+// Кеш-light: на каждый кадр читаем заново — но это всего 8 переменных.
+function cssVar(name, fallback) {
+  try {
+    const s = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return s || fallback;
+  } catch {
+    return fallback;
+  }
+}
+function cssVarNum(name, fallback) {
+  const v = cssVar(name, '');
+  if (!v) return fallback;
+  const n = parseFloat(v);
+  return isFinite(n) ? n : fallback;
+}
+
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
   let tsMin = Infinity, tsMax = -Infinity;
@@ -41,6 +59,7 @@ function glowRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
@@ -51,6 +70,7 @@ function coreRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
@@ -61,12 +81,20 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
+  if (role === 'thinking') return `rgba(95, 70, 160, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha, edge, diffMode) {
+function edgeRgba(childRole, alpha, edge, diffMode, light) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
+  if (light) {
+    // На светлой теме — тёмные насыщенные цвета вместо неоновых
+    if (childRole === 'tool_use') return `rgba(180, 90, 20, ${alpha * 1.5})`;
+    if (childRole === 'thinking') return `rgba(110, 70, 200, ${alpha * 1.3})`;
+    return `rgba(20, 70, 160, ${alpha * 1.3})`;
+  }
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
+  if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
 
@@ -114,6 +142,67 @@ function updateBirths(state, cutoff, nowMs, onBirth) {
   }
 }
 
+// Метрики: компактный бейдж "1.2k" (output tokens) и "⏱3s" (latency) под нодой.
+// Цвета адаптивные (light/dark theme). На больших latencies (>10s) — оранжевый.
+function formatTokensCompact(n) {
+  if (n >= 10000) return Math.round(n / 1000) + 'k';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+function formatLatencyCompact(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const sec = ms / 1000;
+  if (sec < 60) return sec.toFixed(sec < 10 ? 1 : 0) + 's';
+  const m = Math.floor(sec / 60);
+  return m + 'm' + Math.round(sec - m * 60) + 's';
+}
+function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
+  const tokens = n.tokensOut || 0;
+  const latency = n.responseLatencyMs || 0;
+  if (!tokens && latency < 1500) return;
+
+  const fs = 10;
+  ctx.save();
+  ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const padH = 4, padV = 2;
+  const bgFill = isLight ? `rgba(20, 30, 60, ${0.78 * ag})` : `rgba(20, 30, 60, ${0.82 * ag})`;
+  const fgText = `rgba(220, 235, 255, ${Math.min(1, ag * 0.95)})`;
+
+  // Tokens — справа-снизу
+  if (tokens > 0) {
+    const label = formatTokensCompact(tokens);
+    const w = ctx.measureText(label).width + padH * 2;
+    const h = fs + padV * 2;
+    const bx = s.x + r * 0.6;
+    const by = s.y + r + 1;
+    ctx.fillStyle = bgFill;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, w, h, 3); ctx.fill(); }
+    else ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = fgText;
+    ctx.fillText(label, bx + padH, by + h / 2);
+  }
+
+  // Latency — слева-снизу. Только если ≥ 1.5s (мелочь не показываем).
+  if (latency >= 1500) {
+    const label = '⏱' + formatLatencyCompact(latency);
+    const w = ctx.measureText(label).width + padH * 2;
+    const h = fs + padV * 2;
+    const bx = s.x - r * 0.6 - w;
+    const by = s.y + r + 1;
+    const isLong = latency > 10000;
+    ctx.fillStyle = isLong
+      ? `rgba(180, 80, 30, ${0.85 * ag})`
+      : bgFill;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, w, h, 3); ctx.fill(); }
+    else ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = isLong ? `rgba(255, 230, 200, ${Math.min(1, ag)})` : fgText;
+    ctx.fillText(label, bx + padH, by + h / 2);
+  }
+  ctx.restore();
+}
+
 function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.beginPath();
   ctx.moveTo(aScreen.x, aScreen.y);
@@ -150,14 +239,14 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 export function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмный cyberpunk-фон
+  // Radial vignette — читаем стопы из CSS vars (зависит от темы)
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  grad.addColorStop(0, cssVar('--canvas-vig-1', 'rgba(14, 22, 44, 1)'));
+  grad.addColorStop(0.6, cssVar('--canvas-vig-2', 'rgba(10, 14, 26, 1)'));
+  grad.addColorStop(1, cssVar('--canvas-vig-3', 'rgba(5, 8, 16, 1)'));
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -250,8 +339,10 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
   const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && state.collapsed && state.collapsed.has(n.parentId);
+  const thinkingHidden = state.showThinking === false;
   const visible = n => n.ts <= cutoff && n.bornAt != null
     && !(state.hiddenRoles && state.hiddenRoles.has(n.role))
+    && !(thinkingHidden && n.role === 'thinking')
     && !isCollapsedChild(n);
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
@@ -279,6 +370,7 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const N = state.nodes.length;
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
+  const isLight = state.theme === 'light';
   ctx.lineWidth = 0.8;
   const edgeCPs = new Map();
   for (const e of state.edges) {
@@ -297,7 +389,7 @@ export function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode, isLight);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
@@ -480,6 +572,37 @@ export function draw(ctx, state, tSec, viewport, extras) {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = `rgba(20, 14, 4, ${Math.min(1, ag * 0.92)})`;
       ctx.fillText(toolIcon(n.toolName), s.x, s.y + fs * 0.05);
+    }
+
+    // Metrics badges (только для assistant-нод, под showMetrics toggle).
+    // Размещаем под нодой: tokens справа-внизу, ⏱latency слева-внизу.
+    if (state.showMetrics && n.role === 'assistant' && perfMode !== 'minimal') {
+      drawMetricsBadges(ctx, n, s, r, ag, isLight);
+    }
+
+    // Thinking nodes: 💭 icon + soft pulsing dashed ring (как «облако мысли»)
+    if (n.role === 'thinking' && perfMode !== 'minimal') {
+      // Dashed cloud ring чуть дальше core
+      const cloudPulse = 0.6 + 0.25 * Math.sin(tSec * 1.6 + n.phase);
+      ctx.save();
+      const dashOff = -(tSec * 4) % 8;
+      ctx.lineDashOffset = dashOff;
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = `rgba(181, 140, 255, ${cloudPulse * 0.5 * ag})`;
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      // 💭 icon если хватает места
+      if (r >= 6) {
+        const fs = Math.max(9, Math.round(r * 1.0));
+        ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(245, 235, 255, ${Math.min(1, ag * 0.95)})`;
+        ctx.fillText('💭', s.x, s.y + fs * 0.05);
+      }
     }
   }
 

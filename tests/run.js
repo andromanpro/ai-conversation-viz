@@ -475,11 +475,27 @@ test('parseLine: user with tool_result array blocks', () => {
   assert(r[0].text.includes('line2'));
 });
 
-test('parseLine: assistant with thinking block shows it', () => {
+test('parseLine: assistant with thinking block creates virtual thinking node', () => {
   const r = parseLine('{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Hmm, let me think"},{"type":"text","text":"Answer"}]}}');
-  eq(r.length, 1);
-  assert(r[0].text.includes('Hmm, let me think'));
+  // assistant + 1 virtual thinking-нода
+  eq(r.length, 2);
+  // Текст assistant'а — только основной text, без префикса 💭
+  eq(r[0].role, 'assistant');
   assert(r[0].text.includes('Answer'));
+  assert(!r[0].text.includes('Hmm, let me think'), 'thinking не должно дублироваться в text родителя');
+  // Virtual thinking-нода
+  eq(r[1].role, 'thinking');
+  eq(r[1].parentId, 'a1');
+  eq(r[1].text, 'Hmm, let me think');
+});
+
+test('parseLine: assistant with ONLY thinking → text синтезируется из 💭', () => {
+  const r = parseLine('{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"deep cogitation"}]}}');
+  eq(r.length, 2);
+  eq(r[0].role, 'assistant');
+  assert(r[0].text.includes('💭'), 'fallback summary должен включать 💭 префикс');
+  assert(r[0].text.includes('deep cogitation'));
+  eq(r[1].role, 'thinking');
 });
 
 test('parseLine: image block replaced by placeholder', () => {

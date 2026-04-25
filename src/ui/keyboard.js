@@ -4,6 +4,7 @@ import { fitToView } from '../core/layout.js';
 import { syncChatToTimeline } from './story-mode.js';
 import { hideDetail, toggleStarOnCurrent } from './detail-panel.js';
 import { toggleFreeze } from './freeze-toggle.js';
+import { toggleTheme } from './theme-toggle.js';
 import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
 import { toggleSettings } from './settings-modal.js';
@@ -60,6 +61,9 @@ function onKey(ev) {
   } else if (ev.key === 'f' || ev.key === 'F') {
     ev.preventDefault();
     toggleFreeze();
+  } else if (ev.key === 't' || ev.key === 'T') {
+    ev.preventDefault();
+    toggleTheme();
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();

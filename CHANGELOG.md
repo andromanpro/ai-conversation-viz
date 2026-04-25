@@ -4,6 +4,73 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-04-25
+
+### Added
+
+- **💭 Thinking blocks visual** — парсер выделяет `thinking` content-блоки
+  ассистента в отдельные **virtual thinking nodes** (`<assistantId>#th<i>`,
+  role='thinking'), параллельно tool_use поднодам. Цвет фиолетовый
+  (#B58CFF), радиус 0.7× от parent, иконка 💭 внутри ноды + dashed
+  pulsing ring («облако мысли»). Отдельная ROLE_RGB запись в WebGL
+  renderer'е. Тогглится через Settings → Display → «Thinking blocks».
+  Текст thinking больше не дублируется в text родителя — у assistant с
+  thinking-only content text синтезируется как `💭 первые 80 символов`.
+- **☀ Light theme** — переключатель тем `dark ↔ light` через CSS-vars
+  на `:root[data-theme="light"]`. Все renderer-цвета (vignette stops,
+  edge palette, star alpha) читаются через `getComputedStyle`.
+  В светлой теме — мягкий warm-off-white фон, тёмно-синие edges
+  (rgba(20,70,160) вместо неонового cyan), звёздное поле выключено,
+  thinking фиолетовый темнее. Кнопка ☀/🌙 в HUD, hotkey **T**,
+  состояние сохраняется в `localStorage['viz:theme']`.
+- **💰⏱ Metrics badges** — Settings → Metrics → «Token & duration
+  badges». На assistant-нодах:
+  - Tokens: компактный бейдж справа-снизу, `formatTokensCompact` →
+    «1.2k» / «456». Считается `output_tokens` из `message.usage`.
+  - Latency: `⏱5.0s` слева-снизу, только если ≥1.5s. На больших
+    задержках (>10s) — оранжевый. Считается как `ts_assistant -
+    ts_parent` (proxy на «время ответа»).
+- **i18n для Settings modal** — все labels, group titles, header через
+  `t('settings.<key>')`. EN + RU словари обновлены. Settings modal
+  переключается вместе с lang-toggle без перезагрузки.
+
+### Files
+
+- `src/core/parser.js` — `classifyContent` возвращает `thinkings[]`,
+  `parseJSONL`/`parseLine` создают virtual thinking nodes; `usage`
+  сохраняется как `tokensIn/Out/Total` на assistant-нодах
+- `src/core/graph.js` — `computeRadius` добавляет thinking (0.7×),
+  `computeLatencies` вычисляет `responseLatencyMs`
+- `src/core/config.js` — `COLORS.thinking`, `COLORS.thinkingEdge`
+- `src/view/state.js` — `showThinking: true`, `showMetrics: false`,
+  `theme: 'dark'`
+- `src/view/renderer.js` — purple core/glow для thinking, 💭 icon +
+  dashed ring, `drawMetricsBadges`, `cssVar`/`cssVarNum` helpers,
+  vignette из CSS-vars, edge colors light-aware
+- `src/view/renderer-webgl.js` — `ROLE_RGB.thinking`, edgeColor
+  thinking branch, hide thinking when `state.showThinking===false`,
+  `readCssVarNum` для star alpha
+- `src/view/starfield.js` — skip when `--canvas-star-alpha === 0`
+- `src/ui/theme-toggle.js` — **новый** module
+- `src/ui/settings-modal.js` — `t(...)` для всех labels, новые toggles
+  (`showThinking`, `showMetrics`), Display + Metrics группы
+- `src/ui/keyboard.js` — hotkey `T` = toggle theme
+- `src/core/i18n.js` — keys `settings.show*`, `tip.theme_*`,
+  `settings.group.display/metrics`
+- `index.html` / `standalone.html` — `[data-theme="light"]` CSS-block,
+  `#btn-theme` в HUD
+- `build.cjs` — `theme-toggle.js` в MODULES
+- `tests/run.js` — обновлён `parseLine: thinking` тест + новый
+  `parseLine: assistant с ONLY thinking → 💭 fallback`
+
+### Why
+
+Юзер просил wow-эффект для thinking, светлую тему для слайдов и
+аналитический контур (tokens + latency). Все три — реализованы по
+минимально-инвазивному пути (без переработки render-pipeline).
+
+123 passed, bundle 344 KB / 50 modules.
+
 ## [1.4.0] — 2026-04-25
 
 ### Added

@@ -112,8 +112,10 @@ export const COLORS = {
   user: '#7BAAF0',
   assistant: '#50D4B5',
   tool: '#ECA040',
+  thinking: '#B58CFF',          // фиолетовый — «облако мысли»
   edge: 'rgba(0, 212, 255, 0.35)',
   toolEdge: 'rgba(236, 160, 64, 0.45)',
+  thinkingEdge: 'rgba(181, 140, 255, 0.45)',
   accent: '#ECA040',
   text: '#cfe6ff',
   muted: '#6a7c95',

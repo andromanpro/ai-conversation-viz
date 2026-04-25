@@ -6,16 +6,48 @@
 <title>AI Conversation Viz · v0.2</title>
 <style>
   :root {
+    /* === Dark (default) === */
     --bg: #0a0e1a;
     --user: #7BAAF0;
     --assistant: #50D4B5;
     --tool: #ECA040;
+    --thinking: #B58CFF;
     --edge: rgba(0, 212, 255, 0.35);
     --accent: #ECA040;
     --text: #cfe6ff;
     --muted: #6a7c95;
     --panel: rgba(10, 14, 26, 0.85);
     --border: rgba(123, 170, 240, 0.25);
+    /* Canvas-specific (читаются renderer.js + renderer-webgl.js) */
+    --canvas-vig-1: rgba(14, 22, 44, 1);
+    --canvas-vig-2: rgba(10, 14, 26, 1);
+    --canvas-vig-3: rgba(5, 8, 16, 1);
+    --canvas-edge: rgba(0, 212, 255, 0.6);
+    --canvas-edge-tool: rgba(236, 160, 64, 0.7);
+    --canvas-edge-thinking: rgba(181, 140, 255, 0.6);
+    --canvas-star-alpha: 1;
+    --canvas-text-on-bg: rgba(207, 230, 255, 0.85);
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f7fb;
+    --user: #2C5FB8;
+    --assistant: #1B9F7B;
+    --tool: #C46A11;
+    --thinking: #7B4FD9;
+    --edge: rgba(40, 90, 180, 0.55);
+    --accent: #C46A11;
+    --text: #1a2335;
+    --muted: #5a6580;
+    --panel: rgba(255, 255, 255, 0.94);
+    --border: rgba(60, 90, 170, 0.22);
+    --canvas-vig-1: rgba(248, 250, 254, 1);
+    --canvas-vig-2: rgba(234, 240, 250, 1);
+    --canvas-vig-3: rgba(220, 228, 244, 1);
+    --canvas-edge: rgba(20, 70, 160, 0.55);
+    --canvas-edge-tool: rgba(180, 90, 20, 0.7);
+    --canvas-edge-thinking: rgba(110, 70, 200, 0.65);
+    --canvas-star-alpha: 0;
+    --canvas-text-on-bg: rgba(26, 35, 53, 0.85);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
@@ -241,7 +273,7 @@
 
 <div class="hud" id="top-left">
   <div class="title" data-i18n="header.title">AI Conversation Viz</div>
-  <div class="subtitle" data-i18n="header.subtitle_force">v1.4 · force-directed</div>
+  <div class="subtitle" data-i18n="header.subtitle_force">v1.5 · force-directed</div>
   <!-- Primary row — основные действия с текстом -->
   <div class="controls controls-primary">
     <button class="btn primary" id="btn-sample" data-i18n="btn.sample" data-i18n-aria="aria.sample" aria-haspopup="menu" aria-expanded="false">Examples ▾</button>
@@ -267,6 +299,7 @@
     <button class="btn btn-icon" id="btn-bookmarks" data-i18n-title="tip.bookmarks_empty" data-i18n-aria="aria.bookmarks">⭐</button>
     <span class="toolbar-sep" aria-hidden="true"></span>
     <button class="btn btn-icon" id="btn-render" data-i18n-title="tip.render_webgl" data-i18n-aria="aria.render">🎨</button>
+    <button class="btn btn-icon" id="btn-theme" data-i18n-title="tip.theme_light" data-i18n-aria="aria.theme">☀</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang" data-i18n-aria="aria.lang">EN</button>
     <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">

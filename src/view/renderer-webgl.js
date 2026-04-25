@@ -492,6 +492,7 @@ const ROLE_RGB = {
   user: [0.482, 0.666, 0.941],
   assistant: [0.313, 0.831, 0.709],
   tool_use: [0.925, 0.627, 0.250],
+  thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
 
 const DIFF_RGB = {
@@ -536,6 +537,8 @@ function edgeColor(e, state, out) {
     r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
     r = 0.925; g = 0.627; b = 0.250;
+  } else if (e.b && e.b.role === 'thinking') {
+    r = 0.71; g = 0.55; b = 1.0;
   } else {
     r = 0.0; g = 0.831; b = 1.0;
   }
@@ -606,10 +609,12 @@ function fillPointBuffer(state, nowMs) {
   const rgb = [0, 0, 0];
   let count = 0;
 
+  const thinkingHidden = state.showThinking === false;
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.bornAt == null) continue;
     if (hidden && hidden.has(n.role)) continue;
+    if (thinkingHidden && n.role === 'thinking') continue;
     if (n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId)) continue;
     const bf = birthFactorLocal(n.bornAt, nowMs, CFG.birthDurationMs);
     const ag = CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bf);
@@ -688,10 +693,12 @@ function fillLineBuffer(state) {
   const p0 = [0, 0], p1 = [0, 0];
   let count = 0;
 
+  const thinkingHidden = state.showThinking === false;
   for (const e of edges) {
     if (!e.a || !e.b) continue;
     if (e.a.bornAt == null || e.b.bornAt == null) continue;
     if (hidden && (hidden.has(e.a.role) || hidden.has(e.b.role))) continue;
+    if (thinkingHidden && (e.a.role === 'thinking' || e.b.role === 'thinking')) continue;
     if (e.adopted && !connectOrphans) continue;
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
@@ -864,8 +871,9 @@ export function drawWebgl(state, tSec, viewport) {
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // ---- 1. Starfield ----
-  if (starsBuilt) {
+  // ---- 1. Starfield (только если --canvas-star-alpha > 0; на light theme = 0) ----
+  const starAlphaMul = readCssVarNum('--canvas-star-alpha', 1);
+  if (starsBuilt && starAlphaMul > 0) {
     gl.useProgram(starProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
     const stride = STAR_STRIDE * 4;
@@ -1041,6 +1049,17 @@ export function drawWebgl(state, tSec, viewport) {
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
     gl.drawArrays(gl.POINTS, 0, pointCount);
+  }
+}
+
+function readCssVarNum(cssVar, fallback) {
+  try {
+    const s = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+    if (!s) return fallback;
+    const n = parseFloat(s);
+    return isFinite(n) ? n : fallback;
+  } catch {
+    return fallback;
   }
 }
 

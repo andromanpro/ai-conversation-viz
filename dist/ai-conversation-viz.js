@@ -118,8 +118,10 @@ const COLORS = {
   user: '#7BAAF0',
   assistant: '#50D4B5',
   tool: '#ECA040',
+  thinking: '#B58CFF',          // фиолетовый — «облако мысли»
   edge: 'rgba(0, 212, 255, 0.35)',
   toolEdge: 'rgba(236, 160, 64, 0.45)',
+  thinkingEdge: 'rgba(181, 140, 255, 0.45)',
   accent: '#ECA040',
   text: '#cfe6ff',
   muted: '#6a7c95',
@@ -335,11 +337,12 @@ function extractToolResultText(content) {
 }
 
 function classifyContent(content) {
-  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [] };
-  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [] };
+  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [], thinkings: [] };
+  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [], thinkings: [] };
   const textParts = [];
   const toolUses = [];
   const toolResults = []; // { toolUseId, isError }
+  const thinkings = [];   // string[] — для отдельных virtual thinking nodes
   for (const block of content) {
     if (!block) continue;
     switch (block.type) {
@@ -347,8 +350,10 @@ function classifyContent(content) {
         if (typeof block.text === 'string') textParts.push(block.text);
         break;
       case 'thinking':
-        if (typeof block.thinking === 'string') {
-          textParts.push('💭 ' + block.thinking);
+        // Сохраняем текст для отдельной virtual thinking ноды.
+        // В text родителя НЕ дублируем — иначе двойное отображение.
+        if (typeof block.thinking === 'string' && block.thinking.trim()) {
+          thinkings.push(block.thinking);
         }
         break;
       case 'tool_use':
@@ -378,7 +383,7 @@ function classifyContent(content) {
         break;
     }
   }
-  return { text: textParts.join('\n\n'), toolUses, toolResults };
+  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings };
 }
 
 function extractText(message) {
@@ -411,17 +416,21 @@ function parseJSONL(text) {
       continue;
     }
 
-    const { text: msgText, toolUses, toolResults } = classifyContent(obj.message && obj.message.content);
+    const { text: msgText, toolUses, toolResults, thinkings } = classifyContent(obj.message && obj.message.content);
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
-    // Если у ассистента нет текста, но есть tool_use — формируем summary из тулов
-    const finalText = (t === 'assistant' && !msgText && toolUses.length)
-      ? buildAssistantSummary(toolUses)
-      : msgText;
+    // Если у ассистента нет текста, но есть tool_use или thinking —
+    // формируем summary. Приоритет: tool_use → thinking-фраза.
+    let finalText = msgText;
+    if (t === 'assistant' && !finalText) {
+      if (toolUses.length) finalText = buildAssistantSummary(toolUses);
+      else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
+    }
 
     // На user-нодах сохраняем массив tool_use_id из tool_result блоков и
     // флаг наличия error — для visualization pair-edges и red error-ring.
+    // На assistant-нодах сохраняем usage (для метрик-бейджей).
     const node = {
       id: baseId,
       parentId,
@@ -434,10 +443,32 @@ function parseJSONL(text) {
       node.toolResultIds = toolResults.map(r => r.toolUseId);
       node.hasError = toolResults.some(r => r.isError);
     }
+    if (t === 'assistant' && obj.message && obj.message.usage) {
+      const u = obj.message.usage;
+      const inT = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      const outT = u.output_tokens || 0;
+      node.tokensIn = inT;
+      node.tokensOut = outT;
+      node.tokensTotal = inT + outT;
+    }
     nodes.push(node);
     kept++;
 
     if (t === 'assistant') {
+      // Thinking ноды идут раньше tool_use (с малым шагом ts), чтобы в
+      // timeline они появлялись «между» mind ассистента и его действиями.
+      for (let i = 0; i < thinkings.length; i++) {
+        const tk = thinkings[i];
+        nodes.push({
+          id: `${baseId}#th${i}`,
+          parentId: baseId,
+          role: 'thinking',
+          ts: ts + (i + 1) * Math.max(50, Math.floor(CFG.toolUseTsStepMs / 4)),
+          text: tk,
+          textLen: tk.length,
+        });
+        kept++;
+      }
       for (let i = 0; i < toolUses.length; i++) {
         const tu = toolUses[i];
         const inputStr = safeStringify(tu.input);
@@ -446,7 +477,9 @@ function parseJSONL(text) {
           id: `${baseId}#tu${i}`,
           parentId: baseId,
           role: 'tool_use',
-          ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+          // Сдвигаем после thinking-блоков, чтобы порядок был
+          // assistant → thinking* → tool_use*
+          ts: ts + (thinkings.length + i + 1) * CFG.toolUseTsStepMs,
           text: subText,
           textLen: subText.length,
           toolName: tu.name,
@@ -524,13 +557,15 @@ function parseLine(line, seedCounter) {
   const t = obj.type;
   if (t !== 'user' && t !== 'assistant') return [];
 
-  const { text: msgText, toolUses } = classifyContent(obj.message && obj.message.content);
+  const { text: msgText, toolUses, thinkings } = classifyContent(obj.message && obj.message.content);
   const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
   const parentId = obj.parentUuid || null;
-  const finalText = (t === 'assistant' && !msgText && toolUses.length)
-    ? buildAssistantSummary(toolUses)
-    : msgText;
+  let finalText = msgText;
+  if (t === 'assistant' && !finalText) {
+    if (toolUses.length) finalText = buildAssistantSummary(toolUses);
+    else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
+  }
 
   const out = [{
     id: baseId,
@@ -541,6 +576,17 @@ function parseLine(line, seedCounter) {
     textLen: finalText.length,
   }];
   if (t === 'assistant') {
+    for (let i = 0; i < thinkings.length; i++) {
+      const tk = thinkings[i];
+      out.push({
+        id: `${baseId}#th${i}`,
+        parentId: baseId,
+        role: 'thinking',
+        ts: ts + (i + 1) * Math.max(50, Math.floor(CFG.toolUseTsStepMs / 4)),
+        text: tk,
+        textLen: tk.length,
+      });
+    }
     for (let i = 0; i < toolUses.length; i++) {
       const tu = toolUses[i];
       const inputStr = safeStringify(tu.input);
@@ -549,7 +595,7 @@ function parseLine(line, seedCounter) {
         id: `${baseId}#tu${i}`,
         parentId: baseId,
         role: 'tool_use',
-        ts: ts + (i + 1) * CFG.toolUseTsStepMs,
+        ts: ts + (thinkings.length + i + 1) * CFG.toolUseTsStepMs,
         text: subText,
         textLen: subText.length,
         toolName: tu.name,
@@ -1210,7 +1256,10 @@ function fitToView(nodes, viewport) {
 function computeRadius(n) {
   const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
   const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-  return n.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
+  if (n.role === 'tool_use') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
+  // Thinking-ноды чуть меньше assistant'а — полупрозрачное «облако мыслей»
+  if (n.role === 'thinking') return Math.max(CFG.minR, clamped * 0.7);
+  return clamped;
 }
 
 function recomputeRecency(nodes) {
@@ -1224,6 +1273,16 @@ function recomputeRecency(nodes) {
   for (const n of nodes) {
     n.recency = (n.ts - tMin) / dt;
     n.r = computeRadius(n);
+  }
+}
+
+// responseLatencyMs — время от parent-ноды до ассистента (proxy на «думал N сек»).
+// Для root-assistant без parent → 0. Для tool_use/thinking поднод → 0.
+function computeLatencies(nodes, byId) {
+  for (const n of nodes) {
+    if (n.role !== 'assistant') { n.responseLatencyMs = 0; continue; }
+    const parent = n.parentId ? byId.get(n.parentId) : null;
+    n.responseLatencyMs = parent ? Math.max(0, n.ts - parent.ts) : 0;
   }
 }
 
@@ -1422,6 +1481,7 @@ function buildGraph(parsed, viewport) {
   const pairEdges = buildPairEdges(nodes, byId);
   recomputeRecency(nodes);
   computeDegreesAndHubs(nodes, edges);
+  computeLatencies(nodes, byId);
 
   return { nodes, edges, byId, pairEdges };
 }
@@ -1608,8 +1668,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.4 · force-directed',
-    'header.subtitle_standalone': 'v1.4 · standalone bundle',
+    'header.subtitle_force': 'v1.5 · force-directed',
+    'header.subtitle_standalone': 'v1.5 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1727,6 +1787,8 @@ const DICT = {
     'settings.group.visual': 'Visual',
     'settings.group.playback': 'Playback',
     'settings.group.birth': 'Birth animation',
+    'settings.group.display': 'Display',
+    'settings.group.metrics': 'Metrics',
     'settings.header': '⚙ Settings',
     // Settings keys
     'settings.repulsion': 'Repulsion strength',
@@ -1748,6 +1810,14 @@ const DICT = {
     'settings.maxChars': 'Max chars per bubble',
     'settings.postGapMs': 'Min gap between bubbles',
     'settings.birthMs': 'Birth animation (ms)',
+    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showErrorRings': 'Error rings (red dashed)',
+    'settings.showThinking': 'Thinking blocks (purple)',
+    'settings.showMetrics': 'Token & duration badges',
+    // Theme
+    'tip.theme_light': 'Switch to light theme (T)',
+    'tip.theme_dark': 'Switch to dark theme (T)',
+    'aria.theme': 'Toggle theme',
 
     // Live status
     'live.idle': 'idle',
@@ -1790,8 +1860,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.4 · force-directed',
-    'header.subtitle_standalone': 'v1.4 · standalone-сборка',
+    'header.subtitle_force': 'v1.5 · force-directed',
+    'header.subtitle_standalone': 'v1.5 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -1899,6 +1969,8 @@ const DICT = {
     'settings.group.visual': 'Визуал',
     'settings.group.playback': 'Воспроизведение',
     'settings.group.birth': 'Анимация рождения',
+    'settings.group.display': 'Отображение',
+    'settings.group.metrics': 'Метрики',
     'settings.header': '⚙ Настройки',
     'settings.repulsion': 'Сила отталкивания',
     'settings.spring': 'Жёсткость пружины',
@@ -1919,6 +1991,13 @@ const DICT = {
     'settings.maxChars': 'Макс. символов в пузыре',
     'settings.postGapMs': 'Мин. пауза между пузырями',
     'settings.birthMs': 'Анимация рождения (мс)',
+    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showErrorRings': 'Кольца ошибок (красные пунктиры)',
+    'settings.showThinking': 'Thinking-блоки (фиолетовые)',
+    'settings.showMetrics': 'Бейджи токенов и времени',
+    'tip.theme_light': 'Светлая тема (T)',
+    'tip.theme_dark': 'Тёмная тема (T)',
+    'aria.theme': 'Переключить тему',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',
@@ -2056,6 +2135,9 @@ const state = {
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
   showPairEdges: true,    // лимонные пунктирные tool_use ↔ tool_result связи
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
+  showThinking: true,     // фиолетовые thinking-ноды как virtual children
+  showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
+  theme: 'dark',          // 'dark' | 'light'
 };
 
 function resetInteractionState() {
@@ -2338,13 +2420,28 @@ function starScreen(star, camera) {
   };
 }
 
+// На светлой теме звёзды не рисуем (--canvas-star-alpha=0).
+// Кешируем чтение CSS-var в каждом кадре через локальный helper.
+function readStarAlpha() {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--canvas-star-alpha').trim();
+    if (!v) return 1;
+    const n = parseFloat(v);
+    return isFinite(n) ? n : 1;
+  } catch {
+    return 1;
+  }
+}
+
 function drawStarfield(ctx, stars, camera, viewport, tSec) {
+  const starAlphaMul = readStarAlpha();
+  if (starAlphaMul <= 0) return;
   const W = viewport.width, H = viewport.height;
   for (const s of stars) {
     const p = starScreen(s, camera);
     if (p.x < -4 || p.x > W + 4 || p.y < -4 || p.y > H + 4) continue;
     const twinkle = 0.85 + 0.15 * Math.sin(tSec * 0.7 + s.phase);
-    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle})`;
+    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle * starAlphaMul})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, s.size, 0, Math.PI * 2);
     ctx.fill();
@@ -2562,6 +2659,24 @@ function hueToRgbaString(hue, saturation = 0.65, lightness = 0.6, alpha = 1) {
     const { toolIcon } = __M["src/view/tool-icons.js"];
     const { hueToRgbaString } = __M["src/view/topics.js"];
 
+// Простой helper: читает CSS-переменную с :root. Возвращает строку
+// (для прямого использования с ctx.fillStyle/strokeStyle), либо fallback.
+// Кеш-light: на каждый кадр читаем заново — но это всего 8 переменных.
+function cssVar(name, fallback) {
+  try {
+    const s = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return s || fallback;
+  } catch {
+    return fallback;
+  }
+}
+function cssVarNum(name, fallback) {
+  const v = cssVar(name, '');
+  if (!v) return fallback;
+  const n = parseFloat(v);
+  return isFinite(n) ? n : fallback;
+}
+
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
   let tsMin = Infinity, tsMax = -Infinity;
@@ -2599,6 +2714,7 @@ function glowRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
@@ -2609,6 +2725,7 @@ function coreRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
 
@@ -2619,12 +2736,20 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
   }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
+  if (role === 'thinking') return `rgba(95, 70, 160, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha, edge, diffMode) {
+function edgeRgba(childRole, alpha, edge, diffMode, light) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
+  if (light) {
+    // На светлой теме — тёмные насыщенные цвета вместо неоновых
+    if (childRole === 'tool_use') return `rgba(180, 90, 20, ${alpha * 1.5})`;
+    if (childRole === 'thinking') return `rgba(110, 70, 200, ${alpha * 1.3})`;
+    return `rgba(20, 70, 160, ${alpha * 1.3})`;
+  }
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
+  if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
 
@@ -2672,6 +2797,67 @@ function updateBirths(state, cutoff, nowMs, onBirth) {
   }
 }
 
+// Метрики: компактный бейдж "1.2k" (output tokens) и "⏱3s" (latency) под нодой.
+// Цвета адаптивные (light/dark theme). На больших latencies (>10s) — оранжевый.
+function formatTokensCompact(n) {
+  if (n >= 10000) return Math.round(n / 1000) + 'k';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+function formatLatencyCompact(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const sec = ms / 1000;
+  if (sec < 60) return sec.toFixed(sec < 10 ? 1 : 0) + 's';
+  const m = Math.floor(sec / 60);
+  return m + 'm' + Math.round(sec - m * 60) + 's';
+}
+function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
+  const tokens = n.tokensOut || 0;
+  const latency = n.responseLatencyMs || 0;
+  if (!tokens && latency < 1500) return;
+
+  const fs = 10;
+  ctx.save();
+  ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const padH = 4, padV = 2;
+  const bgFill = isLight ? `rgba(20, 30, 60, ${0.78 * ag})` : `rgba(20, 30, 60, ${0.82 * ag})`;
+  const fgText = `rgba(220, 235, 255, ${Math.min(1, ag * 0.95)})`;
+
+  // Tokens — справа-снизу
+  if (tokens > 0) {
+    const label = formatTokensCompact(tokens);
+    const w = ctx.measureText(label).width + padH * 2;
+    const h = fs + padV * 2;
+    const bx = s.x + r * 0.6;
+    const by = s.y + r + 1;
+    ctx.fillStyle = bgFill;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, w, h, 3); ctx.fill(); }
+    else ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = fgText;
+    ctx.fillText(label, bx + padH, by + h / 2);
+  }
+
+  // Latency — слева-снизу. Только если ≥ 1.5s (мелочь не показываем).
+  if (latency >= 1500) {
+    const label = '⏱' + formatLatencyCompact(latency);
+    const w = ctx.measureText(label).width + padH * 2;
+    const h = fs + padV * 2;
+    const bx = s.x - r * 0.6 - w;
+    const by = s.y + r + 1;
+    const isLong = latency > 10000;
+    ctx.fillStyle = isLong
+      ? `rgba(180, 80, 30, ${0.85 * ag})`
+      : bgFill;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, w, h, 3); ctx.fill(); }
+    else ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = isLong ? `rgba(255, 230, 200, ${Math.min(1, ag)})` : fgText;
+    ctx.fillText(label, bx + padH, by + h / 2);
+  }
+  ctx.restore();
+}
+
 function drawEdgeCurve(ctx, aScreen, bScreen, cpScreen) {
   ctx.beginPath();
   ctx.moveTo(aScreen.x, aScreen.y);
@@ -2708,14 +2894,14 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — тёмный cyberpunk-фон
+  // Radial vignette — читаем стопы из CSS vars (зависит от темы)
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
-  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
-  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
+  grad.addColorStop(0, cssVar('--canvas-vig-1', 'rgba(14, 22, 44, 1)'));
+  grad.addColorStop(0.6, cssVar('--canvas-vig-2', 'rgba(10, 14, 26, 1)'));
+  grad.addColorStop(1, cssVar('--canvas-vig-3', 'rgba(5, 8, 16, 1)'));
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -2808,8 +2994,10 @@ function draw(ctx, state, tSec, viewport, extras) {
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
   const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && state.collapsed && state.collapsed.has(n.parentId);
+  const thinkingHidden = state.showThinking === false;
   const visible = n => n.ts <= cutoff && n.bornAt != null
     && !(state.hiddenRoles && state.hiddenRoles.has(n.role))
+    && !(thinkingHidden && n.role === 'thinking')
     && !isCollapsedChild(n);
 
   const hasPath = state.pathSet && state.pathSet.size > 0;
@@ -2837,6 +3025,7 @@ function draw(ctx, state, tSec, viewport, extras) {
   const N = state.nodes.length;
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
+  const isLight = state.theme === 'light';
   ctx.lineWidth = 0.8;
   const edgeCPs = new Map();
   for (const e of state.edges) {
@@ -2855,7 +3044,7 @@ function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode, isLight);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
@@ -3038,6 +3227,37 @@ function draw(ctx, state, tSec, viewport, extras) {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = `rgba(20, 14, 4, ${Math.min(1, ag * 0.92)})`;
       ctx.fillText(toolIcon(n.toolName), s.x, s.y + fs * 0.05);
+    }
+
+    // Metrics badges (только для assistant-нод, под showMetrics toggle).
+    // Размещаем под нодой: tokens справа-внизу, ⏱latency слева-внизу.
+    if (state.showMetrics && n.role === 'assistant' && perfMode !== 'minimal') {
+      drawMetricsBadges(ctx, n, s, r, ag, isLight);
+    }
+
+    // Thinking nodes: 💭 icon + soft pulsing dashed ring (как «облако мысли»)
+    if (n.role === 'thinking' && perfMode !== 'minimal') {
+      // Dashed cloud ring чуть дальше core
+      const cloudPulse = 0.6 + 0.25 * Math.sin(tSec * 1.6 + n.phase);
+      ctx.save();
+      const dashOff = -(tSec * 4) % 8;
+      ctx.lineDashOffset = dashOff;
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = `rgba(181, 140, 255, ${cloudPulse * 0.5 * ag})`;
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      // 💭 icon если хватает места
+      if (r >= 6) {
+        const fs = Math.max(9, Math.round(r * 1.0));
+        ctx.font = `${fs}px ui-monospace, Consolas, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(245, 235, 255, ${Math.min(1, ag * 0.95)})`;
+        ctx.fillText('💭', s.x, s.y + fs * 0.05);
+      }
     }
   }
 
@@ -3579,6 +3799,7 @@ const ROLE_RGB = {
   user: [0.482, 0.666, 0.941],
   assistant: [0.313, 0.831, 0.709],
   tool_use: [0.925, 0.627, 0.250],
+  thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
 
 const DIFF_RGB = {
@@ -3623,6 +3844,8 @@ function edgeColor(e, state, out) {
     r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
     r = 0.925; g = 0.627; b = 0.250;
+  } else if (e.b && e.b.role === 'thinking') {
+    r = 0.71; g = 0.55; b = 1.0;
   } else {
     r = 0.0; g = 0.831; b = 1.0;
   }
@@ -3693,10 +3916,12 @@ function fillPointBuffer(state, nowMs) {
   const rgb = [0, 0, 0];
   let count = 0;
 
+  const thinkingHidden = state.showThinking === false;
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.bornAt == null) continue;
     if (hidden && hidden.has(n.role)) continue;
+    if (thinkingHidden && n.role === 'thinking') continue;
     if (n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId)) continue;
     const bf = birthFactorLocal(n.bornAt, nowMs, CFG.birthDurationMs);
     const ag = CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bf);
@@ -3775,10 +4000,12 @@ function fillLineBuffer(state) {
   const p0 = [0, 0], p1 = [0, 0];
   let count = 0;
 
+  const thinkingHidden = state.showThinking === false;
   for (const e of edges) {
     if (!e.a || !e.b) continue;
     if (e.a.bornAt == null || e.b.bornAt == null) continue;
     if (hidden && (hidden.has(e.a.role) || hidden.has(e.b.role))) continue;
+    if (thinkingHidden && (e.a.role === 'thinking' || e.b.role === 'thinking')) continue;
     if (e.adopted && !connectOrphans) continue;
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
@@ -3951,8 +4178,9 @@ function drawWebgl(state, tSec, viewport) {
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // ---- 1. Starfield ----
-  if (starsBuilt) {
+  // ---- 1. Starfield (только если --canvas-star-alpha > 0; на light theme = 0) ----
+  const starAlphaMul = readCssVarNum('--canvas-star-alpha', 1);
+  if (starsBuilt && starAlphaMul > 0) {
     gl.useProgram(starProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
     const stride = STAR_STRIDE * 4;
@@ -4128,6 +4356,17 @@ function drawWebgl(state, tSec, viewport) {
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
     gl.drawArrays(gl.POINTS, 0, pointCount);
+  }
+}
+
+function readCssVarNum(cssVar, fallback) {
+  try {
+    const s = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+    if (!s) return fallback;
+    const n = parseFloat(s);
+    return isFinite(n) ? n : fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -5368,6 +5607,59 @@ function updateFreezeBtn() {
     return { initFreezeToggle, toggleFreeze, updateFreezeBtn };
   })();
 
+  // --- src/ui/theme-toggle.js ---
+  __M["src/ui/theme-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { t } = __M["src/core/i18n.js"];
+// Theme toggle (dark ↔ light). CSS-vars в :root и :root[data-theme="light"]
+// в HTML определяют все цвета — JS просто переключает атрибут на <html>.
+//
+// Renderer (Canvas 2D + WebGL) читает --canvas-vig-*, --canvas-star-alpha
+// в каждом кадре через getComputedStyle, поэтому переключение мгновенное.
+
+
+const KEY = 'viz:theme';
+let _btn = null;
+
+function initThemeToggle() {
+  // Восстановим сохранённую тему
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch {}
+  if (saved === 'light' || saved === 'dark') state.theme = saved;
+  applyTheme(state.theme || 'dark');
+
+  _btn = document.getElementById('btn-theme');
+  if (_btn) _btn.addEventListener('click', toggleTheme);
+  window.addEventListener('languagechange', updateBtn);
+  updateBtn();
+}
+
+function toggleTheme() {
+  const next = state.theme === 'light' ? 'dark' : 'light';
+  state.theme = next;
+  applyTheme(next);
+  try { localStorage.setItem(KEY, next); } catch {}
+  updateBtn();
+}
+
+function applyTheme(theme) {
+  if (typeof document === 'undefined') return;
+  const html = document.documentElement;
+  if (theme === 'light') html.setAttribute('data-theme', 'light');
+  else html.removeAttribute('data-theme');
+}
+
+function updateBtn() {
+  if (!_btn) return;
+  const isLight = state.theme === 'light';
+  _btn.textContent = isLight ? '🌙' : '☀';
+  _btn.title = isLight ? t('tip.theme_dark') : t('tip.theme_light');
+  _btn.setAttribute('aria-label', t('aria.theme'));
+}
+
+    return { initThemeToggle, toggleTheme };
+  })();
+
   // --- src/ui/speed-control.js ---
   __M["src/ui/speed-control.js"] = (function () {
     const { state } = __M["src/view/state.js"];
@@ -5444,45 +5736,70 @@ function update() {
     const { CFG } = __M["src/core/config.js"];
     const { state } = __M["src/view/state.js"];
     const { reheat } = __M["src/core/layout.js"];
+    const { t } = __M["src/core/i18n.js"];
 // Settings modal — live-update для основных CFG параметров.
-// Сохранение в localStorage.
+// Сохранение в localStorage. Все labels — через t() для i18n.
 
 
 const KEY = 'viz-settings';
 
-// Описание регулируемых параметров (group, key, min, max, step, label)
+// Range params: [groupKey, key, min, max, step]. Label берётся через
+// labelOf(key) из i18n. Group title — t('settings.group.<groupKey>').
 const PARAMS = [
   // Physics
-  ['Physics', 'repulsion',       500,  30000, 100,  'Repulsion strength'],
-  ['Physics', 'spring',          0.01, 0.3,   0.01, 'Spring strength'],
-  ['Physics', 'springLen',       30,   300,   5,    'Spring rest length'],
-  ['Physics', 'centerPull',      0.0,  0.02,  0.0005, 'Center pull'],
-  ['Physics', 'velocityDecay',   0.1,  0.9,   0.02, 'Velocity decay (friction)'],
-  ['Physics', 'maxVelocity',     5,    200,   1,    'Max velocity clamp'],
-  ['Physics', 'alphaDecay',      0.005, 0.2,  0.002, 'Alpha decay rate'],
-  ['Physics', 'repulsionCutoff', 500,  6000,  100,  'Repulsion cutoff (px)'],
+  ['physics', 'repulsion',       500,  30000, 100],
+  ['physics', 'spring',          0.01, 0.3,   0.01],
+  ['physics', 'springLen',       30,   300,   5],
+  ['physics', 'centerPull',      0.0,  0.02,  0.0005],
+  ['physics', 'velocityDecay',   0.1,  0.9,   0.02],
+  ['physics', 'maxVelocity',     5,    200,   1],
+  ['physics', 'alphaDecay',      0.005, 0.2,  0.002],
+  ['physics', 'repulsionCutoff', 500,  6000,  100],
   // Visual
-  ['Visual',  'particlesPerEdge', 0,    3,    1,   'Particles per edge (0 = off)'],
-  ['Visual',  'particleSpeed',   0.1,  2,     0.05, 'Particle speed'],
-  ['Visual',  'particleJitterPx',0,    6,     0.1, 'Particle jitter'],
-  ['Visual',  'starfieldCount',  0,    1000,  50,  'Starfield density'],
-  ['Visual',  'nodeGlowRadiusMul', 1,  4,     0.1, 'Node glow radius'],
-  ['Visual',  'nodeGlowAlphaBase', 0,  0.3,   0.01, 'Node glow alpha'],
+  ['visual',  'particlesPerEdge', 0,    3,    1],
+  ['visual',  'particleSpeed',   0.1,  2,     0.05],
+  ['visual',  'particleJitterPx',0,    6,     0.1],
+  ['visual',  'starfieldCount',  0,    1000,  50],
+  ['visual',  'nodeGlowRadiusMul', 1,  4,     0.1],
+  ['visual',  'nodeGlowAlphaBase', 0,  0.3,   0.01],
   // Playback
-  ['Playback','storyDwellMs',    400,  5000,  100, 'Play step interval (ms)'],
-  ['Playback','storyCharMs',     5,    80,    1,   'Typewriter speed (ms/char)'],
-  ['Playback','storyMaxChars',   80,   1200,  20,  'Max chars per bubble'],
-  ['Playback','storyPostGapMs',  200,  3000,  50,  'Min gap between bubbles'],
+  ['playback','storyDwellMs',    400,  5000,  100],
+  ['playback','storyCharMs',     5,    80,    1],
+  ['playback','storyMaxChars',   80,   1200,  20],
+  ['playback','storyPostGapMs',  200,  3000,  50],
   // Birth
-  ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
+  ['birth',   'birthDurationMs', 100,  2500,  50],
 ];
 
-// Boolean toggles (group, key, label, scope) — scope='state' читает/пишет
-// в state.<key>, scope='CFG' — в CFG.<key>
+// Map from PARAMS key → i18n label key. Большинство один-в-один по
+// settings.<key>, но `particlesPerEdge` сокращается до `particles`,
+// `particleJitterPx` → `particleJitter`, `storyDwellMs` → `stepMs`,
+// `storyCharMs` → `charMs`, `storyMaxChars` → `maxChars`,
+// `storyPostGapMs` → `postGapMs`, `birthDurationMs` → `birthMs`.
+const LABEL_KEY = {
+  particlesPerEdge: 'settings.particles',
+  particleJitterPx: 'settings.particleJitter',
+  storyDwellMs:     'settings.stepMs',
+  storyCharMs:      'settings.charMs',
+  storyMaxChars:    'settings.maxChars',
+  storyPostGapMs:   'settings.postGapMs',
+  birthDurationMs:  'settings.birthMs',
+};
+function labelOf(key) {
+  return t(LABEL_KEY[key] || ('settings.' + key));
+}
+
+// Boolean toggles [groupKey, key, scope]. scope='state' → state.<key>,
+// 'CFG' → CFG.<key>. Label берётся из t('settings.<key>').
 const TOGGLES = [
-  ['Display', 'showPairEdges',  'Pair edges (tool_use ↔ result)', 'state'],
-  ['Display', 'showErrorRings', 'Error rings (red dashed)',       'state'],
+  ['display', 'showPairEdges',  'state'],
+  ['display', 'showErrorRings', 'state'],
+  ['display', 'showThinking',   'state'],
+  ['metrics', 'showMetrics',    'state'],
 ];
+
+// Группы в порядке отображения. Если в группе нет параметров — пропускается.
+const GROUP_ORDER = ['physics', 'visual', 'display', 'metrics', 'playback', 'birth'];
 
 let modalEl, btn;
 
@@ -5511,38 +5828,50 @@ function open() {
 
   const header = document.createElement('div');
   header.className = 'settings-header';
-  header.innerHTML = `<span>⚙ Settings</span>`;
+  const titleEl = document.createElement('span');
+  titleEl.textContent = t('settings.header');
+  header.appendChild(titleEl);
   const closeBtn = document.createElement('button');
   closeBtn.className = 'settings-close';
   closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', t('aria.close'));
   closeBtn.addEventListener('click', close);
   header.appendChild(closeBtn);
   inner.appendChild(header);
 
-  // Группируем range-параметры и toggle'ы вместе по группам, сохраняя порядок
+  // Группируем range-параметры и toggle'ы по группам
   const groups = new Map();
-  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
-  for (const [group] of TOGGLES) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
-  for (const p of PARAMS) groups.get(p[0]).ranges.push(p);
-  for (const t of TOGGLES) groups.get(t[0]).toggles.push(t);
+  for (const g of GROUP_ORDER) groups.set(g, { ranges: [], toggles: [] });
+  for (const p of PARAMS) {
+    if (!groups.has(p[0])) groups.set(p[0], { ranges: [], toggles: [] });
+    groups.get(p[0]).ranges.push(p);
+  }
+  for (const tg of TOGGLES) {
+    if (!groups.has(tg[0])) groups.set(tg[0], { ranges: [], toggles: [] });
+    groups.get(tg[0]).toggles.push(tg);
+  }
 
-  for (const [groupName, items] of groups) {
+  for (const [groupKey, items] of groups) {
+    if (!items.ranges.length && !items.toggles.length) continue;
     const gTitle = document.createElement('div');
     gTitle.className = 'settings-group-title';
-    gTitle.textContent = groupName.toUpperCase();
+    gTitle.textContent = t('settings.group.' + groupKey).toUpperCase();
     inner.appendChild(gTitle);
+
     // Toggles идут первыми (компактные чекбоксы наверху группы)
-    for (const [, key, label, scope] of items.toggles) {
+    for (const tg of items.toggles) {
+      const key = tg[1];
+      const scope = tg[2];
       const row = document.createElement('div');
       row.className = 'settings-row settings-row-toggle';
       const lbl = document.createElement('label');
-      lbl.textContent = label;
+      lbl.textContent = labelOf(key);
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      input.checked = target[key] !== false; // default ON если не задано
+      input.checked = target[key] !== false; // default ON
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
         save();
@@ -5551,11 +5880,13 @@ function open() {
       row.appendChild(input);
       inner.appendChild(row);
     }
-    for (const [, key, min, max, step, label] of items.ranges) {
+
+    for (const p of items.ranges) {
+      const key = p[1], min = p[2], max = p[3], step = p[4];
       const row = document.createElement('div');
       row.className = 'settings-row';
       const lbl = document.createElement('label');
-      lbl.textContent = label;
+      lbl.textContent = labelOf(key);
       const val = document.createElement('span');
       val.className = 'settings-val';
       val.textContent = formatValue(CFG[key]);
@@ -5584,7 +5915,7 @@ function open() {
   footer.className = 'settings-footer';
   const resetBtn = document.createElement('button');
   resetBtn.className = 'btn';
-  resetBtn.textContent = 'Reset to defaults';
+  resetBtn.textContent = t('btn.reset_defaults');
   resetBtn.addEventListener('click', () => {
     localStorage.removeItem(KEY);
     location.reload();
@@ -5613,8 +5944,9 @@ function formatValue(v) {
 
 function save() {
   const obj = {};
-  for (const [, key] of PARAMS) obj[key] = CFG[key];
-  for (const [, key, , scope] of TOGGLES) {
+  for (const p of PARAMS) obj[p[1]] = CFG[p[1]];
+  for (const tg of TOGGLES) {
+    const key = tg[1], scope = tg[2];
     obj[key] = (scope === 'state' ? state : CFG)[key];
   }
   try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
@@ -5625,10 +5957,12 @@ function loadSaved() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return;
     const obj = JSON.parse(raw);
-    for (const [, key] of PARAMS) {
+    for (const p of PARAMS) {
+      const key = p[1];
       if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
     }
-    for (const [, key, , scope] of TOGGLES) {
+    for (const tg of TOGGLES) {
+      const key = tg[1], scope = tg[2];
       if (typeof obj[key] === 'boolean') {
         (scope === 'state' ? state : CFG)[key] = obj[key];
       }
@@ -5965,6 +6299,7 @@ function focusOnNode(n) {
     const { syncChatToTimeline } = __M["src/ui/story-mode.js"];
     const { hideDetail, toggleStarOnCurrent } = __M["src/ui/detail-panel.js"];
     const { toggleFreeze } = __M["src/ui/freeze-toggle.js"];
+    const { toggleTheme } = __M["src/ui/theme-toggle.js"];
     const { setSpeed } = __M["src/ui/speed-control.js"];
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
@@ -6020,6 +6355,9 @@ function onKey(ev) {
   } else if (ev.key === 'f' || ev.key === 'F') {
     ev.preventDefault();
     toggleFreeze();
+  } else if (ev.key === 't' || ev.key === 'T') {
+    ev.preventDefault();
+    toggleTheme();
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
@@ -8069,6 +8407,7 @@ async function applyUrlParamsLate() {
     const { drawWebgl } = __M["src/view/renderer-webgl.js"];
     const { initI18n } = __M["src/core/i18n.js"];
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
+    const { initThemeToggle } = __M["src/ui/theme-toggle.js"];
 
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -8129,6 +8468,7 @@ initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
 initRenderToggle();
+initThemeToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

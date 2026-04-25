@@ -4,7 +4,10 @@ import { seedJitter } from './layout.js';
 function computeRadius(n) {
   const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
   const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-  return n.role === 'tool_use' ? Math.max(CFG.minR, clamped * CFG.toolNodeScale) : clamped;
+  if (n.role === 'tool_use') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
+  // Thinking-ноды чуть меньше assistant'а — полупрозрачное «облако мыслей»
+  if (n.role === 'thinking') return Math.max(CFG.minR, clamped * 0.7);
+  return clamped;
 }
 
 function recomputeRecency(nodes) {
@@ -18,6 +21,16 @@ function recomputeRecency(nodes) {
   for (const n of nodes) {
     n.recency = (n.ts - tMin) / dt;
     n.r = computeRadius(n);
+  }
+}
+
+// responseLatencyMs — время от parent-ноды до ассистента (proxy на «думал N сек»).
+// Для root-assistant без parent → 0. Для tool_use/thinking поднод → 0.
+function computeLatencies(nodes, byId) {
+  for (const n of nodes) {
+    if (n.role !== 'assistant') { n.responseLatencyMs = 0; continue; }
+    const parent = n.parentId ? byId.get(n.parentId) : null;
+    n.responseLatencyMs = parent ? Math.max(0, n.ts - parent.ts) : 0;
   }
 }
 
@@ -216,6 +229,7 @@ export function buildGraph(parsed, viewport) {
   const pairEdges = buildPairEdges(nodes, byId);
   recomputeRecency(nodes);
   computeDegreesAndHubs(nodes, edges);
+  computeLatencies(nodes, byId);
 
   return { nodes, edges, byId, pairEdges };
 }

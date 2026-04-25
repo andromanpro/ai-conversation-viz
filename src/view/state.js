@@ -32,6 +32,9 @@ export const state = {
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
   showPairEdges: true,    // лимонные пунктирные tool_use ↔ tool_result связи
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
+  showThinking: true,     // фиолетовые thinking-ноды как virtual children
+  showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
+  theme: 'dark',          // 'dark' | 'light'
 };
 
 export function resetInteractionState() {
