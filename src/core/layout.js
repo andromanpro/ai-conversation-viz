@@ -181,6 +181,128 @@ export function stepPhysics(nodes, edges, viewport, sim) {
   }
 }
 
+// 3D вариант stepPhysics — все три оси (x, y, z) полноценно участвуют
+// в физике. Для < ~300 нод — O(N²) repulsion (octree пока не делаем).
+// Используется только в 3D-режиме (src/3d/main.js); 2D остаётся на 2D.
+export function stepPhysics3D(nodes, edges, viewport, sim) {
+  const _sim = sim || createSim();
+  _sim.alpha += (_sim.alphaTarget - _sim.alpha) * _sim.alphaDecay;
+  if (_sim.manualFrozen) { _sim.frozen = true; return; }
+  if (_sim.alpha < _sim.alphaMin && _sim.alphaTarget === 0) {
+    _sim.frozen = true;
+    return;
+  }
+  _sim.frozen = false;
+  if (!nodes.length) return;
+
+  const alpha = _sim.alpha;
+  const N = nodes.length;
+  // 3D-сцена центрируется в (0, 0, 0) — viewport.cx/cy не используем.
+  const cx = 0, cy = 0, cz = 0;
+
+  for (const n of nodes) { n.fxAcc = 0; n.fyAcc = 0; n.fzAcc = 0; }
+
+  // Repulsion — O(N²), 3D-distance. На <300 nodes за <2ms на средней
+  // машине; для бóльших графов нужен 3D Octree (TODO).
+  const kRep = CFG.repulsion * (1 + Math.log(Math.max(1, N / 100))) * alpha;
+  const cutoff2 = CFG.repulsionCutoff * CFG.repulsionCutoff;
+  for (let i = 0; i < N; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < N; j++) {
+      const b = nodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0);
+      let d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > cutoff2) continue;
+      if (d2 < 0.01) {
+        // deterministic mini-jitter если ноды совпадают
+        const sa = a._seedDx != null ? a._seedDx : 0.01;
+        const sb = b._seedDx != null ? b._seedDx : -0.01;
+        dx = (sa - sb) || 0.01;
+        dy = ((a._seedDy || 0) - (b._seedDy || 0)) || 0.01;
+        dz = ((sa * 0.7) - (sb * 0.7)) || 0.01;
+        d2 = dx * dx + dy * dy + dz * dz + 0.01;
+      }
+      const d = Math.sqrt(d2);
+      const f = kRep / d2;
+      const fx = (dx / d) * f, fy = (dy / d) * f, fz = (dz / d) * f;
+      a.fxAcc += fx; a.fyAcc += fy; a.fzAcc += fz;
+      b.fxAcc -= fx; b.fyAcc -= fy; b.fzAcc -= fz;
+    }
+  }
+
+  // Spring — pulls connected nodes к springLen. 3D-distance.
+  const connectOrphans = !!(sim && sim.connectOrphans);
+  for (const e of edges) {
+    if (e.adopted && !connectOrphans) continue;
+    const a = e.a, b = e.b;
+    const dx = b.x - a.x, dy = b.y - a.y, dz = (b.z || 0) - (a.z || 0);
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.01;
+    const disp = d - CFG.springLen;
+    const degMin = Math.max(1, Math.min(a.degree || 1, b.degree || 1));
+    const leafBoost = (degMin === 1) ? CFG.leafSpringBoost : 1;
+    const adoptedMul = e.adopted ? 0.4 : 1;
+    const kLink = (CFG.spring * leafBoost * adoptedMul / Math.sqrt(degMin)) * alpha;
+    const f = kLink * disp;
+    const fx = (dx / d) * f, fy = (dy / d) * f, fz = (dz / d) * f;
+    a.fxAcc += fx; a.fyAcc += fy; a.fzAcc += fz;
+    b.fxAcc -= fx; b.fyAcc -= fy; b.fzAcc -= fz;
+  }
+
+  // Central pull в (0, 0, 0). Полный 3D — все три оси.
+  const centerScale = Math.sqrt(Math.max(1, N / CFG.centerPullScaleN));
+  const kCenter = CFG.centerPull * centerScale * alpha;
+  for (const n of nodes) {
+    n.fxAcc += (cx - n.x) * kCenter;
+    n.fyAcc += (cy - n.y) * kCenter;
+    n.fzAcc += (cz - (n.z || 0)) * kCenter;
+  }
+
+  // Bounds soft-wall — кубическая. Размер берём симметричным от
+  // viewport.safeW (как proxy для 3D-куба).
+  const pad = CFG.wallPaddingMul;
+  const half = (viewport.safeW != null ? viewport.safeW : viewport.width || 1600) * pad / 2;
+  const kWall = CFG.wallStiffness;
+  for (const n of nodes) {
+    if (n.x < -half) n.fxAcc += (-half - n.x) * kWall;
+    else if (n.x > half) n.fxAcc += (half - n.x) * kWall;
+    if (n.y < -half) n.fyAcc += (-half - n.y) * kWall;
+    else if (n.y > half) n.fyAcc += (half - n.y) * kWall;
+    const z = n.z || 0;
+    if (z < -half) n.fzAcc += (-half - z) * kWall;
+    else if (z > half) n.fzAcc += (half - z) * kWall;
+  }
+
+  // Velocity Verlet — 3D
+  const friction = 1 - _sim.velocityDecay;
+  const maxV = CFG.maxVelocity;
+  const maxV2 = maxV * maxV;
+  for (const n of nodes) {
+    if (n.vz == null) n.vz = 0;
+    if (n.z == null) n.z = 0;
+    n.vx = (n.vx + n.fxAcc) * friction;
+    n.vy = (n.vy + n.fyAcc) * friction;
+    n.vz = (n.vz + n.fzAcc) * friction;
+    const sp2 = n.vx * n.vx + n.vy * n.vy + n.vz * n.vz;
+    if (sp2 > maxV2) {
+      const k = maxV / Math.sqrt(sp2);
+      n.vx *= k; n.vy *= k; n.vz *= k;
+    }
+    n.x += n.vx;
+    n.y += n.vy;
+    n.z += n.vz;
+  }
+}
+
+// 3D prewarm — то же что обычный prewarm, но stepPhysics3D
+export function prewarm3D(nodes, edges, viewport, sim, iters) {
+  const _sim = sim || createSim();
+  const _iters = iters != null ? iters : CFG.prewarmIterations;
+  const savedTarget = _sim.alphaTarget;
+  _sim.alphaTarget = 0;
+  for (let i = 0; i < _iters; i++) stepPhysics3D(nodes, edges, viewport, _sim);
+  _sim.alphaTarget = savedTarget;
+}
+
 export function prewarm(nodes, edges, viewport, simOrIters, maybeIters) {
   // Backward-compat: prewarm(nodes, edges, vp) или (nodes, edges, vp, sim) или (nodes, edges, vp, sim, iters)
   // Старый вызов: prewarm(nodes, edges, vp) — используется в 3d/main.js

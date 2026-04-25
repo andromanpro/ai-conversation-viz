@@ -13,7 +13,7 @@ import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
 import { parseJSONL } from '../core/parser.js';
 import { buildGraph } from '../core/graph.js';
-import { prewarm, stepPhysics, createSim } from '../core/layout.js';
+import { prewarm3D, stepPhysics3D, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
@@ -522,38 +522,6 @@ function applySphericalScatter(nodes) {
   }
 }
 
-// КЛЮЧЕВОЙ FIX для «pancake»-проблемы.
-//
-// stepPhysics 2D — обновляет vx/vy/x/y но не z. После prewarm xy
-// растягиваются repulsion'ом до ~1500-3000 px (для 40 nodes), а z
-// остаётся в начальном диапазоне ~250 px. Соотношение 6:1 = плоский
-// pancake, выглядит как сжатая колбаса под углом, а не 3D-облако.
-//
-// Решение: после physics измеряем xy-spread и rescale z пропорционально.
-// targetZ = xySpread × 0.6 — куб слегка приплюснут (60% толщины),
-// чтобы 3D читалось но не доминировало над plane (где physics реально
-// работает).
-function rescaleZToMatchXY(nodes) {
-  if (!nodes.length) return;
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
-  let minZ = Infinity, maxZ = -Infinity;
-  for (const n of nodes) {
-    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
-    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
-    if (n.z < minZ) minZ = n.z; if (n.z > maxZ) maxZ = n.z;
-  }
-  const xySpread = Math.max(maxX - minX, maxY - minY);
-  const zSpread = maxZ - minZ;
-  if (zSpread < 1 || xySpread < 1) return;
-  const targetZ = xySpread * 0.6;
-  const k = targetZ / zSpread;
-  const zCenter = (minZ + maxZ) / 2;
-  for (const n of nodes) {
-    n.z = (n.z - zCenter) * k;
-  }
-}
-
 // ---- Loader ----
 function loadText(text) {
   const norm = normalizeToClaudeJsonl(text);
@@ -567,13 +535,12 @@ function loadText(text) {
   // юзер наблюдал при ручном клике "🔗 соединить сиротки".
   state.connectOrphans = true;
   state.sim = createSim({ connectOrphans: true });
-  // Spherical Fibonacci scatter для initial positions
+  // Spherical Fibonacci scatter для initial positions — даёт нодам
+  // начальные неперекрытые координаты в 3D
   applySphericalScatter(g.nodes);
-  // Prewarm — 2D physics разнесёт x/y, z не тронет
-  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations);
-  // Post-physics z rescale — без этого получается плоский pancake
-  // потому что physics 2D раздвигает x/y, но z остаётся initial-малым
-  rescaleZToMatchXY(g.nodes);
+  // Полное 3D physics — vx, vy, vz, fxAcc/fyAcc/fzAcc, repulsion и
+  // spring в 3D-distance. Куб, не плоскость.
+  prewarm3D(g.nodes, g.edges, { safeW: 2000 }, state.sim, CFG.prewarmIterations);
   state.nodes = g.nodes;
   state.edges = g.edges;
   state.byId = g.byId;
@@ -989,9 +956,11 @@ function tick() {
   tickLayoutTransition3D();
 
   // Physics — только в force-layout. В radial/swim ноды стоят на target.
+  // CRITICAL: используем stepPhysics3D (а не 2D-шный stepPhysics).
+  // 2D-physics не двигал z, отчего graph скатывался в плоский pancake
+  // на каждом кадре несмотря на правильный 3D-prewarm.
   if (state.layoutMode === 'force' && state.sim && !state.sim.frozen && state.nodes.length) {
-    const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0, safeW: 1600, safeH: 1000 };
-    stepPhysics(state.nodes, state.edges, vp, state.sim);
+    stepPhysics3D(state.nodes, state.edges, { safeW: 2000 }, state.sim);
   }
 
   const t = nowMs / 1000;

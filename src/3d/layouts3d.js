@@ -45,6 +45,14 @@ function buildParentChildIndex(nodes, byId) {
 // При полном sphere (когда coneAxis=null): покрытие всей сферы.
 // При наличии coneAxis: ограничиваем точки в cone вокруг axis с углом
 // halfAngle. Используется при размещении детей вокруг направления parent.
+//
+// Special case для count ∈ {1, 2, 3}: при простой Fibonacci с малым count
+// точки выходят строго вдоль cone-axis (count=1 — на середине, count=2 —
+// на yMin/yMax, count=3 — на yMin/mid/yMax). Для линейного графа (basic
+// sample) каждый узел имеет 1-2 детей → все ноды цепляются по одной оси →
+// плоская линия. Решение: для count ≤ 3 фиксируем y на «экваторе» cone'а
+// (cos(halfAngle/2)) и распределяем точки по азимуту вокруг axis. Это
+// гарантирует разворот по 3D даже на цепочечных графах.
 function fibonacciOnSphere(count, radius, coneAxis, halfAngle) {
   const points = [];
   if (count === 0) return points;
@@ -53,14 +61,35 @@ function fibonacciOnSphere(count, radius, coneAxis, halfAngle) {
   // y ∈ [cos(halfAngle), 1]. Мы потом повернём к coneAxis.
   const yMin = coneAxis ? Math.cos(halfAngle) : -1;
   const yMax = 1;
+
+  // Готовим pre-computed (x, y, z) точки в локальной системе (y-вверх).
+  // Затем (если coneAxis) повернём в систему coneAxis.
+  const localPoints = [];
+  if (coneAxis && count <= 3) {
+    // Special case — азимутальное распределение на «экваторе» cone'а
+    const yEq = Math.cos(halfAngle * 0.5); // cos(halfAngle/2) — середина высоты cone
+    const rEq = Math.sqrt(Math.max(0, 1 - yEq * yEq));
+    const azimuths = count === 1 ? [0]
+                   : count === 2 ? [0, Math.PI]
+                   : [0, 2 * Math.PI / 3, 4 * Math.PI / 3];
+    for (const az of azimuths) {
+      localPoints.push({ x: Math.cos(az) * rEq, y: yEq, z: Math.sin(az) * rEq });
+    }
+  } else {
+    // Стандартный Fibonacci spiral
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0.5 : i / (count - 1);
+      const y = yMin + t * (yMax - yMin);
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const theta = goldenAngle * i;
+      localPoints.push({ x: Math.cos(theta) * r, y, z: Math.sin(theta) * r });
+    }
+  }
+
   for (let i = 0; i < count; i++) {
-    const t = count === 1 ? 0.5 : i / (count - 1);
-    const y = yMin + t * (yMax - yMin);
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const theta = goldenAngle * i;
-    let x = Math.cos(theta) * r;
-    let z = Math.sin(theta) * r;
-    let yy = y;
+    let x = localPoints[i].x;
+    let yy = localPoints[i].y;
+    let z = localPoints[i].z;
     // Если есть coneAxis — поворачиваем (0,1,0) → coneAxis
     if (coneAxis) {
       // Композиция: rotate from (0, 0, 1) to coneAxis. Нам нужно (0, 1, 0)
@@ -104,7 +133,11 @@ function placeChildren3D(parentId, parentPos, parentAxis, depth, ctx) {
   // Радиус следующей оболочки. Дети parent'а лежат на dirsphere сдвинутой
   // от parent в сторону parentAxis (вокруг направления «наружу» от центра).
   const r = ringR;
-  const halfAngle = Math.PI / 3; // ~60° cone
+  // halfAngle 120° — почти полусфера. Узкий 60° cone давал линию для
+  // count ≤ 3 (a в большинстве деревьев именно такие fan-outs). 120° +
+  // small-count special case в fibonacciOnSphere дают объёмное
+  // распределение даже для линейных графов.
+  const halfAngle = (2 * Math.PI) / 3;
   const points = fibonacciOnSphere(kids.length, r, parentAxis, halfAngle);
   for (let i = 0; i < kids.length; i++) {
     const id = kids[i];
