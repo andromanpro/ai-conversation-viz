@@ -65,24 +65,30 @@ export function recomputeStats() {
   const s = computeStats(state.nodes);
   if (!s) { panelEl.style.display = 'none'; return; }
   panelEl.style.display = '';
-  tokensEl.textContent = '~' + formatTokens(s.tokens);
-  durationEl.textContent = formatDuration(s.durationSec);
-  if (s.topTools.length) {
-    topToolsEl.innerHTML = s.topTools.map(([name, count]) =>
-      `<span class="tool-chip"><span class="tool-chip-icon">${escapeHtml(toolIcon(name))}</span>${escapeHtml(name)} <b>×${count}</b></span>`
-    ).join(' ');
-  } else {
-    topToolsEl.innerHTML = '<span class="muted">—</span>';
+  // Не все вызывающие страницы (например 3d.html) имеют все элементы;
+  // null-check на каждый — иначе TypeError ломает render-loop.
+  if (tokensEl) tokensEl.textContent = '~' + formatTokens(s.tokens);
+  if (durationEl) durationEl.textContent = formatDuration(s.durationSec);
+  if (topToolsEl) {
+    if (s.topTools.length) {
+      topToolsEl.innerHTML = s.topTools.map(([name, count]) =>
+        `<span class="tool-chip"><span class="tool-chip-icon">${escapeHtml(toolIcon(name))}</span>${escapeHtml(name)} <b>×${count}</b></span>`
+      ).join(' ');
+    } else {
+      topToolsEl.innerHTML = '<span class="muted">—</span>';
+    }
   }
   // Hubs
   const hubsLabel = document.getElementById('stat-hubs');
   if (hubsLabel) hubsLabel.textContent = s.hubs > 0 ? String(s.hubs) : '—';
-  if (s.longest) {
-    const preview = (s.longest.text || '').slice(0, 36).replace(/\n/g, ' ');
-    const ellipsis = (s.longest.text || '').length > 36 ? '…' : '';
-    longestEl.innerHTML = `<span class="longest-role ${s.longest.role}">${s.longest.role}</span> <span class="longest-len">${s.longest.textLen}</span> <span class="longest-preview">${escapeHtml(preview)}${ellipsis}</span>`;
-  } else {
-    longestEl.textContent = '—';
+  if (longestEl) {
+    if (s.longest) {
+      const preview = (s.longest.text || '').slice(0, 36).replace(/\n/g, ' ');
+      const ellipsis = (s.longest.text || '').length > 36 ? '…' : '';
+      longestEl.innerHTML = `<span class="longest-role ${s.longest.role}">${s.longest.role}</span> <span class="longest-len">${s.longest.textLen}</span> <span class="longest-preview">${escapeHtml(preview)}${ellipsis}</span>`;
+    } else {
+      longestEl.textContent = '—';
+    }
   }
 }
 
