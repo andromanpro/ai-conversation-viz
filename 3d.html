@@ -157,6 +157,26 @@
 
 <div id="toast">—</div>
 
+<!-- Fallback overlay для file:// — Firefox блокирует ES modules.
+     Показывается через 1.5с, если canvas <three-container> остался пустым. -->
+<div id="file-fallback" style="display:none; position:fixed; inset:0; background:rgba(5,8,16,0.96); z-index:1000; padding:40px; overflow:auto;">
+  <div style="max-width:680px; margin:40px auto; padding:24px; border:1px solid var(--border); border-radius:6px; background:var(--panel);">
+    <h2 style="margin:0 0 12px 0; font-size:16px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent);">3D mode requires HTTP</h2>
+    <p style="margin:0 0 14px 0; line-height:1.55;">
+      Three.js загружается как ES module через CDN.
+      Firefox <b>file://</b> блокирует cross-origin модули из соображений безопасности.
+    </p>
+    <p style="margin:0 0 8px 0;"><b>Запусти локальный HTTP-сервер</b> (любой):</p>
+    <pre style="background:rgba(0,0,0,0.4); padding:10px 12px; border-radius:3px; font-size:11px; overflow-x:auto; margin:0 0 8px 0;">cd F:/WorkAI/visual/ai-conversation-viz
+python -m http.server 8000</pre>
+    <p style="margin:0 0 14px 0; color:var(--muted); font-size:11px;">или <code>npx serve</code> · <code>caddy file-server</code> · <code>php -S localhost:8000</code></p>
+    <p style="margin:0 0 4px 0;">Открой:</p>
+    <p><a href="http://localhost:8000/3d.html" style="color:var(--assistant); font-size:13px;">http://localhost:8000/3d.html</a></p>
+    <p style="margin-top:18px; font-size:11px; color:var(--muted);">2D режим (<code>index.html</code>, <code>standalone.html</code>) работает по file:// — там используется bundled JS без модулей.</p>
+    <p style="margin-top:14px;"><a href="./index.html" style="color:var(--user);">← Вернуться к 2D режиму</a></p>
+  </div>
+</div>
+
 <script type="importmap">
 {
   "imports": {
@@ -166,5 +186,18 @@
 }
 </script>
 <script type="module" src="./src/3d/main.js"></script>
+
+<script>
+  // Если через 1.5с canvas Three.js так и не появился — показываем fallback
+  // (это значит что ES module не загрузился, обычно из-за file:// CORS).
+  setTimeout(function () {
+    var container = document.getElementById('three-container');
+    var hasCanvas = container && container.querySelector('canvas');
+    if (!hasCanvas && location.protocol === 'file:') {
+      var fb = document.getElementById('file-fallback');
+      if (fb) fb.style.display = 'block';
+    }
+  }, 1500);
+</script>
 </body>
 </html>
