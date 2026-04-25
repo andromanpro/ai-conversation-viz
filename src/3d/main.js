@@ -432,10 +432,14 @@ function buildFromState() {
   camera.position.set(cx + dist * 0.55, cy - dist * 0.45, cz + dist * 0.75);
   controls.target.set(cx, cy, cz);
   controls.update();
-  // Запускаем intro auto-rotate; через 4с — выключим
+  // Запускаем intro auto-rotate; через 4с — выключим (если пользователь
+  // не включил постоянное вращение явно через кнопку 🎥)
   controls.autoRotate = true;
   if (_introRotateTimer) clearTimeout(_introRotateTimer);
-  _introRotateTimer = setTimeout(() => { controls.autoRotate = false; }, 4000);
+  _introRotateTimer = setTimeout(() => {
+    if (!_cameraRotateUserOn) controls.autoRotate = false;
+    _introRotateTimer = null;
+  }, 4000);
   updateStats();
 }
 
@@ -597,6 +601,90 @@ function startExplodeIntro(nodes) {
   // Замораживаем physics на время explode чтобы repulsion не дёргал ноды
   // одновременно с интерполяцией
   if (state.sim) state.sim.frozen = true;
+}
+
+// === Drift mode ===
+//
+// Лёгкое sinusoidal-движение каждой ноды вокруг своей settled-позиции.
+// Включается кнопкой 🌊 в HUD. Когда drift on:
+//   1. Запоминаем _driftCenterX/Y/Z = текущие x/y/z (settled position)
+//   2. sim.frozen = true (физика не работает параллельно с drift)
+//   3. Каждый кадр в tickDrift(): n.x = _driftCenterX + sin(t × ω + φ × k) × A
+//      разные frequencies/phases на разных осях → 3D-blob-like дыхание
+//   4. При выкл — восстанавливаем positions = _driftCenterX/Y/Z, размораживаем sim
+//
+// Edges и meshes автоматически следуют за n.x/y/z (они обновляются в общем
+// tick'е), поэтому drift работает консистентно с остальной сценой.
+const DRIFT_AMP = 8;          // px max offset вокруг settled-позиции
+const DRIFT_FREQ = 0.30;      // основная частота движения rad/sec
+let _driftActive = false;
+let _btnDrift = null;
+
+function setDrift(on) {
+  if (on === _driftActive) return;
+  if (on) {
+    for (const n of state.nodes) {
+      n._driftCenterX = n.x;
+      n._driftCenterY = n.y;
+      n._driftCenterZ = n.z || 0;
+    }
+    if (state.sim) state.sim.frozen = true;
+  } else {
+    for (const n of state.nodes) {
+      if (n._driftCenterX != null) {
+        n.x = n._driftCenterX;
+        n.y = n._driftCenterY;
+        n.z = n._driftCenterZ;
+        delete n._driftCenterX;
+        delete n._driftCenterY;
+        delete n._driftCenterZ;
+      }
+    }
+    // physics НЕ unfreezeим — пользователь явно её frozen или на drift
+  }
+  _driftActive = on;
+  state.drift = on;
+  try { localStorage.setItem('viz:drift-3d', on ? '1' : '0'); } catch {}
+  updateDriftBtn();
+}
+
+function tickDrift(tSec) {
+  if (!_driftActive) return;
+  for (const n of state.nodes) {
+    if (n._driftCenterX == null) continue;
+    n.x = n._driftCenterX + Math.sin(tSec * DRIFT_FREQ + n.phase * 1.7) * DRIFT_AMP;
+    n.y = n._driftCenterY + Math.sin(tSec * DRIFT_FREQ * 1.13 + n.phase * 2.3) * DRIFT_AMP;
+    n.z = n._driftCenterZ + Math.sin(tSec * DRIFT_FREQ * 0.91 + n.phase * 3.1) * DRIFT_AMP;
+  }
+}
+
+function updateDriftBtn() {
+  if (!_btnDrift) return;
+  _btnDrift.classList.toggle('active-orphans', _driftActive); // переиспользуем стиль
+  _btnDrift.title = _driftActive ? 'Drift OFF' : 'Drift ON — лёгкое движение нод';
+}
+
+// === Camera auto-rotate toggle (постоянное вращение, не intro) ===
+let _btnCameraRotate = null;
+let _cameraRotateUserOn = false;
+
+function setCameraRotate(on) {
+  _cameraRotateUserOn = on;
+  controls.autoRotate = on;
+  // Если пользователь включил вручную — отменяем intro-timer чтобы он не
+  // выключил autoRotate через 4 секунды
+  if (on && _introRotateTimer) {
+    clearTimeout(_introRotateTimer);
+    _introRotateTimer = null;
+  }
+  try { localStorage.setItem('viz:camera-rotate-3d', on ? '1' : '0'); } catch {}
+  updateCameraRotateBtn();
+}
+
+function updateCameraRotateBtn() {
+  if (!_btnCameraRotate) return;
+  _btnCameraRotate.classList.toggle('active-render', _cameraRotateUserOn); // pink-ish style
+  _btnCameraRotate.title = _cameraRotateUserOn ? 'Camera rotate OFF' : 'Camera rotate ON';
 }
 
 function tickExplode(nowMs) {
@@ -949,6 +1037,25 @@ initTopicsToggle();
 initOrphansToggle();
 initSettingsModal();
 init3DLayoutSwitch();
+init3DDriftAndCameraButtons();
+
+function init3DDriftAndCameraButtons() {
+  _btnDrift = document.getElementById('btn-drift');
+  _btnCameraRotate = document.getElementById('btn-camera-rotate');
+  if (_btnDrift) _btnDrift.addEventListener('click', () => setDrift(!_driftActive));
+  if (_btnCameraRotate) _btnCameraRotate.addEventListener('click', () => setCameraRotate(!_cameraRotateUserOn));
+  // Restore persisted settings
+  try {
+    if (localStorage.getItem('viz:camera-rotate-3d') === '1') setCameraRotate(true);
+    if (localStorage.getItem('viz:drift-3d') === '1') {
+      // Drift включаем чуть позже — после загрузки графа, иначе _driftCenter
+      // запишется на initial empty positions
+      setTimeout(() => setDrift(true), 2500);
+    }
+  } catch {}
+  updateDriftBtn();
+  updateCameraRotateBtn();
+}
 
 function init3DLayoutSwitch() {
   // Восстанавливаем сохранённый выбор из localStorage (отдельный ключ
@@ -1108,6 +1215,7 @@ function tick() {
   updateBirths3D(nowMs);
   tickLayoutTransition3D();
   tickExplode(nowMs);  // intro animation — приоритет над physics
+  tickDrift(nowMs / 1000);  // лёгкое sin-movement (если drift on)
 
   // Physics — только в force-layout. В radial/swim ноды стоят на target.
   // CRITICAL: используем stepPhysics3D (а не 2D-шный stepPhysics).
