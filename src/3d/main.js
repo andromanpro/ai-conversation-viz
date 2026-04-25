@@ -17,7 +17,6 @@ import { prewarm, stepPhysics, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
-import { computeDepths } from '../core/tree.js';
 import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
@@ -267,14 +266,13 @@ function buildFromState() {
   clearGroups();
   if (!state.nodes.length) return;
 
-  // Присваиваем z по глубине parent-tree + seed-jitter чтобы ноды на одном
-  // уровне не попадали в одну плоскость (тогда граф плоский и не «3D»-шный).
-  const depths = computeDepths(state.nodes, state.byId);
-  const ringZ = 140;
+  // z уже задан в applySphericalScatter() при load — оставляем его как есть.
+  // Если по какой-то причине z отсутствует (например, nodes пришли из
+  // другого пути) — fallback на depth-based, но это backup.
   for (const n of state.nodes) {
-    const d = depths.get(n.id) || 0;
-    const jitter = ((n._seedDx || 0) - 0.5) * 100 + ((n._seedDy || 0) - 0.5) * 80;
-    n.z = d * ringZ + jitter;
+    if (typeof n.z !== 'number' || !isFinite(n.z)) {
+      n.z = ((n._seedDx || 0) - 0.5) * 200;
+    }
   }
 
   // Nodes — sphere + halo + (hub/orphan rings)
@@ -484,6 +482,30 @@ function updateStats() {
   statsEl.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; ${s.parsed} lines`;
 }
 
+// Раскидываем ноды по сферической Fibonacci-spirale — получается
+// плотное 3D-облако с самого начала. Radius пропорционален sqrt(N) —
+// даёт постоянную плотность независимо от размера графа.
+// Затем physics tick будет двигать x/y, но z остаётся как initial scatter
+// (3D-physics в 2D-движке всё равно нет, так что z должен задаваться руками).
+function applySphericalScatter(nodes) {
+  const N = nodes.length;
+  if (!N) return;
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const radius = Math.max(180, Math.sqrt(N) * 80);
+  for (let i = 0; i < N; i++) {
+    const n = nodes[i];
+    // Используем seedDx/Dy если есть — стабильно при ре-loadText
+    const idx = i + 0.5;
+    const y = 1 - (idx / N) * 2;        // y ∈ [-1, 1]
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = golden * i + (n._seedDx || 0) * 0.5;
+    n.x = Math.cos(theta) * r * radius;
+    n.y = y * radius;
+    n.z = Math.sin(theta) * r * radius;
+    n.vx = 0; n.vy = 0;
+  }
+}
+
 // ---- Loader ----
 function loadText(text) {
   const norm = normalizeToClaudeJsonl(text);
@@ -491,8 +513,19 @@ function loadText(text) {
   if (!parsed.nodes.length) return;
   const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 };
   const g = buildGraph(parsed, vp);
-  state.sim = createSim();
-  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations);
+  // В 3D по умолчанию подключаем orphan-edges к физике — иначе на
+  // линейных графах ноды вытягиваются в «верёвку», sibling-orphan'ы
+  // не имеют притяжения друг к другу. Это та самая разница которую
+  // юзер наблюдал при ручном клике "🔗 соединить сиротки".
+  state.connectOrphans = true;
+  state.sim = createSim({ connectOrphans: true });
+  // Spherical Fibonacci scatter для initial positions — даёт 3D-облако
+  // с самого начала, а не плоскую раскладку. Physics дальше может
+  // натянуть кластеры в 2D плоскость, но z остаётся естественным.
+  applySphericalScatter(g.nodes);
+  // Prewarm в 3 раза больше итераций — пока physics 2D, нужно
+  // разнести x/y чтобы не было «верёвки»
+  prewarm(g.nodes, g.edges, vp, state.sim, CFG.prewarmIterations * 2);
   state.nodes = g.nodes;
   state.edges = g.edges;
   state.byId = g.byId;
