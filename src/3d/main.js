@@ -178,6 +178,14 @@ let birthCometPoints = null;
 let birthCometPositions = null; // Float32Array — позиция кометы каждой ноды
 let birthCometColors = null;    // Float32Array — RGB кометы (color per node)
 
+// Forward signal particles — частицы вдоль обычных edges (parent → child).
+// Аналог 2D edge-particles. Цвет = edge color. Каждое ребро имеет PARTICLES_PER_EDGE
+// частиц, разнесённых по фазе.
+let forwardSignalPoints = null;
+let forwardSignalPositions = null;
+let forwardSignalColors = null;
+const FWD_PARTICLES_PER_EDGE = 1;
+
 // Глобальный LineSegments для всех рёбер — один draw call, обновляемый
 // каждый кадр из текущих позиций нод. Гарантирует что рёбра не «отрываются»
 // от нод при физическом движении.
@@ -311,6 +319,50 @@ function makeHaloMaterial(color) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.BackSide, // снаружи view → fresnel правильный
+  });
+}
+
+// Round particle material — для birth-comet и reverse-signal частиц.
+// THREE.PointsMaterial рендерит квадраты (gl_PointCoord без discard);
+// здесь добавляем круглую soft-alpha форму через ShaderMaterial.
+// vertexColors=true → каждая частица берёт цвет из BufferAttribute.
+const ROUND_PARTICLE_VS = `
+  attribute vec3 color;
+  varying vec3 vColor;
+  uniform float uSize;
+  void main() {
+    vColor = color;
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+    // Size с attenuation по distance — дальше частица меньше
+    gl_PointSize = uSize * (300.0 / -mvPos.z);
+  }
+`;
+const ROUND_PARTICLE_FS = `
+  precision mediump float;
+  varying vec3 vColor;
+  uniform float uOpacity;
+  void main() {
+    vec2 c = gl_PointCoord - vec2(0.5);
+    float d = length(c);
+    if (d > 0.5) discard;
+    // Smooth soft falloff к краю — не резкий circle, а glowy blob
+    float a = pow(1.0 - d * 2.0, 1.6) * uOpacity;
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+function makeRoundParticleMaterial(size, opacity) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uSize: { value: size },
+      uOpacity: { value: opacity },
+    },
+    vertexShader: ROUND_PARTICLE_VS,
+    fragmentShader: ROUND_PARTICLE_FS,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
   });
 }
 
@@ -469,22 +521,23 @@ function buildFromState() {
   birthCometPoints = null;
   birthCometPositions = null;
   birthCometColors = null;
+  forwardSignalPoints = null;
+  forwardSignalPositions = null;
+  forwardSignalColors = null;
   const pairCount = (state.pairEdges || []).length;
   if (pairCount > 0) {
     reverseSignalPositions = new Float32Array(pairCount * 3);
+    // Все reverse-signal частицы лимонно-жёлтые — заполняем colors сразу
+    const rsColors = new Float32Array(pairCount * 3);
+    for (let i = 0; i < pairCount; i++) {
+      rsColors[i * 3]     = 1.0;
+      rsColors[i * 3 + 1] = 0.94;
+      rsColors[i * 3 + 2] = 0.36;
+    }
     const rsGeom = new THREE.BufferGeometry();
     rsGeom.setAttribute('position', new THREE.BufferAttribute(reverseSignalPositions, 3));
-    const rsMat = new THREE.PointsMaterial({
-      color: 0xfff05c,             // lemon yellow
-      size: 14,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: false,
-    });
-    reverseSignalPoints = new THREE.Points(rsGeom, rsMat);
+    rsGeom.setAttribute('color', new THREE.BufferAttribute(rsColors, 3));
+    reverseSignalPoints = new THREE.Points(rsGeom, makeRoundParticleMaterial(14, 0.95));
     reverseSignalPoints.frustumCulled = false;
     reverseSignalGroup.add(reverseSignalPoints);
   }
@@ -497,19 +550,23 @@ function buildFromState() {
     const bcGeom = new THREE.BufferGeometry();
     bcGeom.setAttribute('position', new THREE.BufferAttribute(birthCometPositions, 3));
     bcGeom.setAttribute('color', new THREE.BufferAttribute(birthCometColors, 3));
-    const bcMat = new THREE.PointsMaterial({
-      size: 22,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 1.0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: false,
-      vertexColors: true,
-    });
-    birthCometPoints = new THREE.Points(bcGeom, bcMat);
+    birthCometPoints = new THREE.Points(bcGeom, makeRoundParticleMaterial(22, 1.0));
     birthCometPoints.frustumCulled = false;
     reverseSignalGroup.add(birthCometPoints);
+  }
+
+  // Forward signal particles — частицы вдоль обычных edges. Каждое
+  // ребро имеет FWD_PARTICLES_PER_EDGE частиц с разной фазой.
+  const fwdCount = state.edges.length * FWD_PARTICLES_PER_EDGE;
+  if (fwdCount > 0) {
+    forwardSignalPositions = new Float32Array(fwdCount * 3);
+    forwardSignalColors = new Float32Array(fwdCount * 3);
+    const fGeom = new THREE.BufferGeometry();
+    fGeom.setAttribute('position', new THREE.BufferAttribute(forwardSignalPositions, 3));
+    fGeom.setAttribute('color', new THREE.BufferAttribute(forwardSignalColors, 3));
+    forwardSignalPoints = new THREE.Points(fGeom, makeRoundParticleMaterial(10, 0.85));
+    forwardSignalPoints.frustumCulled = false;
+    reverseSignalGroup.add(forwardSignalPoints);
   }
 
   // Инициализируем buffer первым кадром
@@ -796,6 +853,61 @@ function updateBirthComets(nowMs) {
   }
   birthCometPoints.geometry.attributes.position.needsUpdate = true;
   birthCometPoints.geometry.attributes.color.needsUpdate = true;
+}
+
+// Forward signal particles — частицы движутся вдоль обычных parent→child
+// edges (как в 2D edge-particles). Цвет = edge color. Phase = (t × ω + seed) % 1.
+// Если ребро невидимо (одна из нод не родилась / hidden / collapsed / adopted
+// без connectOrphans) — частица скрыта за -1e6.
+const _fwdEdgeColor = new THREE.Color();
+function updateForwardSignalBuffer(tSec) {
+  if (!forwardSignalPoints || !forwardSignalPositions || !forwardSignalColors) return;
+  const FAR = -1e6;
+  const hidden = state.hiddenRoles;
+  const collapsed = state.collapsed;
+  const connectOrphans = !!state.connectOrphans;
+  let i = 0;
+  for (const e of state.edges) {
+    for (let p = 0; p < FWD_PARTICLES_PER_EDGE; p++) {
+      const off3 = i * 3;
+      i++;
+      const a = e.a, b = e.b;
+      const invisible = !a || !b
+        || a.bornAt == null || b.bornAt == null
+        || (hidden && (hidden.has(a.role) || hidden.has(b.role)))
+        || (e.adopted && !connectOrphans)
+        || (a.role === 'tool_use' && a.parentId && collapsed && collapsed.has(a.parentId))
+        || (b.role === 'tool_use' && b.parentId && collapsed && collapsed.has(b.parentId));
+      if (invisible) {
+        forwardSignalPositions[off3] = FAR;
+        forwardSignalPositions[off3 + 1] = FAR;
+        forwardSignalPositions[off3 + 2] = FAR;
+        continue;
+      }
+      const ax = a.x, ay = -a.y, az = a.z || 0;
+      const bx = b.x, by = -b.y, bz = b.z || 0;
+      const dx = bx - ax, dy = by - ay, dz = bz - az;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      // Control point чуть отнесён по +Y для arc'a (как edges)
+      const cx = (ax + bx) / 2;
+      const cy = (ay + by) / 2 + len * 0.10;
+      const cz = (az + bz) / 2;
+      // Phase: уникальная для каждой частицы (по edge index + p)
+      const seed = ((a.phase || 0) + (b.phase || 0)) * 0.13 + p * 0.5;
+      const tt = ((tSec * 0.55 + seed) % 1.0 + 1.0) % 1.0;
+      const u = 1 - tt;
+      forwardSignalPositions[off3]     = u * u * ax + 2 * u * tt * cx + tt * tt * bx;
+      forwardSignalPositions[off3 + 1] = u * u * ay + 2 * u * tt * cy + tt * tt * by;
+      forwardSignalPositions[off3 + 2] = u * u * az + 2 * u * tt * cz + tt * tt * bz;
+      // Цвет — color of edge (edgeColorHex даёт hex)
+      _fwdEdgeColor.setHex(edgeColorHex(e));
+      forwardSignalColors[off3]     = _fwdEdgeColor.r;
+      forwardSignalColors[off3 + 1] = _fwdEdgeColor.g;
+      forwardSignalColors[off3 + 2] = _fwdEdgeColor.b;
+    }
+  }
+  forwardSignalPoints.geometry.attributes.position.needsUpdate = true;
+  forwardSignalPoints.geometry.attributes.color.needsUpdate = true;
 }
 
 // === Drift mode ===
@@ -1535,6 +1647,7 @@ function tick() {
   // Обновить reverse-signal частицы (lemon comets вдоль pair-edges)
   updateReverseSignalBuffer(t);
   updateBirthComets(nowMs);
+  updateForwardSignalBuffer(t);
 
   tickStory(nowMs, state);
   tickStats();
