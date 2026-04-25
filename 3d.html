@@ -50,6 +50,8 @@
   .dot.t { background: var(--tool); }
   .btn.active-freeze { border-color: #7fd2ff; color: #7fd2ff; }
   .btn.active-orphans { border-color: var(--tool); color: var(--tool); }
+  .btn.active-camera { border-color: #ff8ed4; color: #ff8ed4; box-shadow: 0 0 10px rgba(255,142,212,0.3); }
+  .btn.active-drift { border-color: #88e8d4; color: #88e8d4; box-shadow: 0 0 10px rgba(136,232,212,0.3); }
   .btn.active-topics { border-color: #c27dd6; color: #c27dd6; }
   .samples-menu { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; min-width: 360px; box-shadow: 0 4px 18px rgba(0,0,0,0.5); overflow: hidden; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   .samples-menu-item { background: transparent; border: 0; color: var(--text); padding: 10px 14px; font-family: inherit; font-size: 11px; letter-spacing: 0.06em; text-align: left; cursor: pointer; line-height: 1.4; }
@@ -138,6 +140,7 @@
     <button class="btn" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
     <button class="btn btn-icon" id="btn-camera-rotate" data-i18n-title="tip.camera_rotate_on">🎥</button>
     <button class="btn btn-icon" id="btn-drift" data-i18n-title="tip.drift_on">🌊</button>
+    <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio" data-i18n-aria="aria.audio">♪</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
     <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">

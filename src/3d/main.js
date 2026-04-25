@@ -21,7 +21,7 @@ import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
 import { safeFetch } from '../core/url-safety.js';
-import { initI18n } from '../core/i18n.js';
+import { initI18n, t as _t } from '../core/i18n.js';
 import { initLangToggle } from '../ui/lang-toggle.js';
 
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
@@ -33,6 +33,7 @@ import { initStats, tickStats, recomputeStats } from '../ui/stats-hud.js';
 import { initSearch, matchNodes } from '../ui/search.js';
 import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
+import { initAudio } from '../ui/audio.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
@@ -488,29 +489,37 @@ function updateEdgeBuffer() {
     _tmpB.set(b.x, -b.y, bz);
     _tmpM.set(mx, my, mz);
 
+    // Edge growth: пока b «рождается», ребро не идёт до b — оно растёт
+    // от parent (a) к (a + (b-a) × growT). Когда b полностью born — ребро
+    // достигает target. Нода появляется на конце растущего ребра (после
+    // bf > 0.4 в node birth animation выше). Получается «отросток
+    // вырастает → нода появляется на конце».
+    const childBf = birthFactor(b.bornAt, performance.now(), CFG.birthDurationMs);
+    const growT = Math.min(1, childBf * 1.6); // ребро растёт быстрее ноды (полный рост к bf=0.625)
+
     const hex = edgeColorHex(e);
     _edgeColor.setHex(hex);
     const r = _edgeColor.r, g = _edgeColor.g, bl = _edgeColor.b;
-    // Dim ребра если активен topic-filter и endpoint-ы ему не соответствуют
     const tf = state.topicFilter;
     const topicDim = tf ? ((a._topicWord === tf && b._topicWord === tf) ? 1 : 0.2) : 1;
     const alpha = (e.adopted ? 0.4 : 0.85) * topicDim;
-    // Рисуем EDGE_SEGMENTS последовательных отрезков вдоль quadratic Bezier
+    // Рисуем EDGE_SEGMENTS отрезков; если growT < 1, ребро доходит только
+    // до t = growT, оставшиеся сегменты схлопываются в endpoint.
     for (let s = 0; s < EDGE_SEGMENTS; s++) {
-      const t0 = s / EDGE_SEGMENTS;
-      const t1 = (s + 1) / EDGE_SEGMENTS;
+      const t0raw = s / EDGE_SEGMENTS;
+      const t1raw = (s + 1) / EDGE_SEGMENTS;
+      const t0 = Math.min(growT, t0raw);
+      const t1 = Math.min(growT, t1raw);
       bezierPoint3(_tmpA, _tmpM, _tmpB, t0, _p0);
       bezierPoint3(_tmpA, _tmpM, _tmpB, t1, _p1);
       pos[pIdx++] = _p0.x; pos[pIdx++] = _p0.y; pos[pIdx++] = _p0.z;
       pos[pIdx++] = _p1.x; pos[pIdx++] = _p1.y; pos[pIdx++] = _p1.z;
-      // Градиент опасности — крайние сегменты тусклее, середина ярче
       const fade = Math.min(1, 1 - Math.abs((s + 0.5) / EDGE_SEGMENTS - 0.5) * 0.6);
-      col[cIdx++] = r * alpha * fade;
-      col[cIdx++] = g * alpha * fade;
-      col[cIdx++] = bl * alpha * fade;
-      col[cIdx++] = r * alpha * fade;
-      col[cIdx++] = g * alpha * fade;
-      col[cIdx++] = bl * alpha * fade;
+      // Скрываем сегменты которые дальше growT: alpha=0
+      const segVisible = (t1raw <= growT + 1e-3) ? 1 : 0;
+      const a2 = alpha * fade * segVisible;
+      col[cIdx++] = r * a2; col[cIdx++] = g * a2; col[cIdx++] = bl * a2;
+      col[cIdx++] = r * a2; col[cIdx++] = g * a2; col[cIdx++] = bl * a2;
     }
   }
   edgesMesh.geometry.attributes.position.needsUpdate = true;
@@ -660,8 +669,8 @@ function tickDrift(tSec) {
 
 function updateDriftBtn() {
   if (!_btnDrift) return;
-  _btnDrift.classList.toggle('active-orphans', _driftActive); // переиспользуем стиль
-  _btnDrift.title = _driftActive ? 'Drift OFF' : 'Drift ON — лёгкое движение нод';
+  _btnDrift.classList.toggle('active-drift', _driftActive);
+  _btnDrift.title = _driftActive ? _t('tip.drift_off') : _t('tip.drift_on');
 }
 
 // === Camera auto-rotate toggle (постоянное вращение, не intro) ===
@@ -683,8 +692,8 @@ function setCameraRotate(on) {
 
 function updateCameraRotateBtn() {
   if (!_btnCameraRotate) return;
-  _btnCameraRotate.classList.toggle('active-render', _cameraRotateUserOn); // pink-ish style
-  _btnCameraRotate.title = _cameraRotateUserOn ? 'Camera rotate OFF' : 'Camera rotate ON';
+  _btnCameraRotate.classList.toggle('active-camera', _cameraRotateUserOn);
+  _btnCameraRotate.title = _cameraRotateUserOn ? _t('tip.camera_rotate_off') : _t('tip.camera_rotate_on');
 }
 
 function tickExplode(nowMs) {
@@ -1036,6 +1045,7 @@ initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0,
 initTopicsToggle();
 initOrphansToggle();
 initSettingsModal();
+initAudio();
 init3DLayoutSwitch();
 init3DDriftAndCameraButtons();
 
@@ -1100,6 +1110,9 @@ function updateLayoutBtns3D() {
 function switchLayout3D(toMode) {
   if (_layoutTransition) return;
   if (toMode === state.layoutMode) return;
+  // Drift замораживает sim и переписывает n.x/y/z в каждом кадре —
+  // несовместим с layout switch. Выключаем перед применением target'ов.
+  if (_driftActive) setDrift(false);
   try { localStorage.setItem('viz:layoutMode-3d', toMode); } catch {}
   applyLayoutTargets3D(toMode, /*animate=*/ true);
 }
@@ -1244,13 +1257,19 @@ function tick() {
     if (n._hubRing) n._hubRing.visible = visible;
     if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
+    // Birth animation: нода появляется НА КОНЦЕ растущего отростка от parent.
+    // 0.0 → 0.4: только ребро растёт от parent; нода невидима (alpha 0, scale 0)
+    // 0.4 → 1.0: нода появляется на target-позиции и расцветает в полный размер
+    // Edge growth обрабатывается отдельно в updateEdgeBuffer (см. ниже).
+    const bfRaw = bf; // 0..1 raw
+    const nodeBf = Math.max(0, (bfRaw - 0.4) / 0.6); // 0 пока bf<0.4, потом растёт
+    const ag = easeOutCubic(nodeBf);
     mesh.position.set(n.x, -n.y, n.z || 0);
-    const ag = easeOutCubic(bf);
     const baseR = n.r * 1.25;
     const hubPulse = n.isHub ? (1 + 0.3 * Math.sin(t * 1.8 + n.phase)) : 1;
-    // Все ноды лёгко «дышат» — небольшая пульсация размера, разная для каждой
     const breathPulse = 1 + 0.06 * Math.sin(t * 1.6 + n.phase * 1.7);
-    const scale = baseR * (0.5 + 0.5 * ag) * hubPulse * breathPulse;
+    // Scale 0 → 1 (а не 0.5 → 1) — чтобы появление было плавным
+    const scale = baseR * ag * hubPulse * breathPulse;
     mesh.scale.set(scale, scale, scale);
     // Dim при активном search/path если не матч
     let dimMul = 1;
@@ -1260,7 +1279,8 @@ function tick() {
     if (mesh.material && mesh.material.uniforms) {
       const u = mesh.material.uniforms;
       u.uTime.value = t;
-      u.uAlpha.value = (0.3 + 0.7 * ag) * dimMul;
+      // alpha от 0 (невидимо) до 1.0 пропорционально nodeBf
+      u.uAlpha.value = ag * dimMul;
       // Динамический цвет (topics/diff/role переключаются на лету)
       const { color } = colorForNode(n);
       u.uColor.value.setHex(color);
