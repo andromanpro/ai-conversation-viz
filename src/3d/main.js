@@ -805,11 +805,21 @@ function loadText(text) {
   if (state.layoutMode === 'radial' || state.layoutMode === 'swim') {
     applyLayoutTargets3D(state.layoutMode, /*animate=*/ false);
   }
+  // При initial load (timeline в конце = все ноды должны быть видны)
+  // выставляем bornAt далеко в прошлое — birth animation не запускается,
+  // ноды и edges сразу полные. Birth animation останется только для
+  // play-mode когда ноды рождаются по таймлайну.
+  // Иначе все 60 нод стартуют birth-анимацию синхронно — и одновременный
+  // рост 60 отростков выглядит хаотично.
+  if (state.timelineMax >= 0.999) {
+    const longAgo = performance.now() - CFG.birthDurationMs * 3;
+    for (const n of state.nodes) {
+      if (n.ts <= Infinity) n.bornAt = longAgo;
+    }
+  }
   // Explode intro — ноды коллапсируются в центр и взрываются на target за 1.5s.
-  // Вызывается ПОСЛЕ финальных positions (prewarm + опц. layout3D apply),
-  // запоминает их как target и переставляет current в (0,0,0)+jitter.
+  // Это INDEPENDENT от birth animation — позиция animateётся, scale полный.
   startExplodeIntro(state.nodes);
-  // Mesh positions обновятся в animation tick (через mesh.position.set)
   for (const n of state.nodes) {
     if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
   }
