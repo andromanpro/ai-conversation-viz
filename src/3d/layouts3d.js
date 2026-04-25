@@ -53,7 +53,7 @@ function buildParentChildIndex(nodes, byId) {
 // плоская линия. Решение: для count ≤ 3 фиксируем y на «экваторе» cone'а
 // (cos(halfAngle/2)) и распределяем точки по азимуту вокруг axis. Это
 // гарантирует разворот по 3D даже на цепочечных графах.
-function fibonacciOnSphere(count, radius, coneAxis, halfAngle) {
+export function fibonacciOnSphere(count, radius, coneAxis, halfAngle) {
   const points = [];
   if (count === 0) return points;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));

@@ -2,7 +2,9 @@ import { parseJSONL, extractText, parseLine } from '../src/core/parser.js';
 import { detectFormat, chatgptToClaudeJsonl, anthropicMessagesToClaudeJsonl, normalizeToClaudeJsonl } from '../src/core/adapters.js';
 import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph, appendRawNodes } from '../src/core/graph.js';
-import { computeBBox, fitToView, stepPhysics, computeRadialLayout, easeInOutQuad, createSim, reheat, freeze, unfreeze, isSettled, seedJitter } from '../src/core/layout.js';
+import { computeBBox, fitToView, stepPhysics, stepPhysics3D, computeRadialLayout, easeInOutQuad, createSim, reheat, freeze, unfreeze, isSettled, seedJitter } from '../src/core/layout.js';
+import { compute3DRadialLayout, compute3DSwimLanes, fibonacciOnSphere } from '../src/3d/layouts3d.js';
+import { applySphericalScatter } from '../src/3d/scatter.js';
 import { buildQuadtree, computeRepulsion } from '../src/core/quadtree.js';
 import { computeSwimLanes } from '../src/core/layout.js';
 import { computeDepths } from '../src/core/tree.js';
@@ -936,6 +938,129 @@ test('sim: bounds soft-wall pulls outlier back', () => {
   const a = { id: 'a', x: 10000, y: 300, vx: 0, vy: 0, r: 5, fxAcc: 0, fyAcc: 0 };
   stepPhysics([a], [], { width: 800, height: 600, cx: 400, cy: 300, safeW: 800, safeH: 600 }, sim);
   assert(a.vx < 0, 'нода за стеной должна получить толчок внутрь');
+});
+
+// ==== 3D PURE FUNCTIONS ====
+// Регрессия: pancake-баг был бы пойман если бы тут было «z evolves under
+// repulsion». TDZ-баг и flatness в radial — то же самое.
+
+test('stepPhysics3D: z evolves under repulsion (pancake-regression)', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 0, y: 0, z: 50, vx: 0, vy: 0, vz: 0, r: 5, degree: 0 };
+  const b = { id: 'b', x: 0, y: 0, z: -50, vx: 0, vy: 0, vz: 0, r: 5, degree: 0 };
+  const before = Math.abs(a.z - b.z);
+  for (let i = 0; i < 30; i++) stepPhysics3D([a, b], [], { safeW: 2000 }, sim);
+  const after = Math.abs(a.z - b.z);
+  assert(after > before, '3D repulsion должен раздвигать ноды по z');
+});
+
+test('stepPhysics3D: spring pulls in 3D distance', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 5, degree: 1 };
+  const b = { id: 'b', x: 500, y: 500, z: 500, vx: 0, vy: 0, vz: 0, r: 5, degree: 1 };
+  const e = { source: 'a', target: 'b', a, b };
+  const beforeD = Math.sqrt(500*500 + 500*500 + 500*500); // ≈866
+  for (let i = 0; i < 80; i++) stepPhysics3D([a, b], [e], { safeW: 2000 }, sim);
+  const afterD = Math.sqrt((b.x-a.x)**2 + (b.y-a.y)**2 + (b.z-a.z)**2);
+  assert(afterD < beforeD, 'spring должен сближать ноды в 3D');
+});
+
+test('stepPhysics3D: velocity clamp в 3D', () => {
+  const sim = createSim();
+  const a = { id: 'a', x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 5, degree: 0, _seedDx: 0.1, _seedDy: -0.1 };
+  const b = { id: 'b', x: 0.001, y: 0.001, z: 0.001, vx: 0, vy: 0, vz: 0, r: 5, degree: 0, _seedDx: -0.1, _seedDy: 0.1 };
+  stepPhysics3D([a, b], [], { safeW: 2000 }, sim);
+  const speedA = Math.sqrt(a.vx*a.vx + a.vy*a.vy + a.vz*a.vz);
+  assert(speedA <= 40 + 1e-6, 'velocity clamped до maxVelocity (40) в 3D');
+});
+
+test('compute3DRadialLayout: count=1 child выводит из cone-axis (flatness-regression)', () => {
+  // Линейная цепочка root → child. Раньше child лежал ровно вдоль axis
+  // от centра, что давало плоский radial.
+  const nodes = [
+    { id: 'r', parentId: null, ts: 0 },
+    { id: 'c', parentId: 'r', ts: 1 },
+  ];
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const positions = compute3DRadialLayout(nodes, byId);
+  const c = positions.get('c');
+  assert(c, 'child должен иметь position');
+  // child не должен быть в плоскости root'а (z=0 или y=0). После special-
+  // case fix child ставится на «экватор» cone'а, а не на ось.
+  const dist = Math.sqrt(c.x*c.x + c.y*c.y + c.z*c.z);
+  assert(dist > 100, 'child должен быть удалён от root');
+});
+
+test('compute3DRadialLayout: 3 children разнесены по азимуту', () => {
+  const nodes = [
+    { id: 'r', parentId: null, ts: 0 },
+    { id: 'a', parentId: 'r', ts: 1 },
+    { id: 'b', parentId: 'r', ts: 2 },
+    { id: 'c', parentId: 'r', ts: 3 },
+  ];
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const positions = compute3DRadialLayout(nodes, byId);
+  const a = positions.get('a'), b = positions.get('b'), c = positions.get('c');
+  // 3 children на одинаковом расстоянии от root
+  const dA = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+  const dB = Math.sqrt(b.x*b.x + b.y*b.y + b.z*b.z);
+  const dC = Math.sqrt(c.x*c.x + c.y*c.y + c.z*c.z);
+  approx(dA, dB, dA * 0.05, 'A,B на одинаковом радиусе');
+  approx(dB, dC, dB * 0.05, 'B,C на одинаковом радиусе');
+  // Все 3 не лежат на одной прямой → spread по 3D
+  // (проверка через мин-макс координат: должно быть spread минимум по 2 осям)
+  const xs = [a.x, b.x, c.x], ys = [a.y, b.y, c.y], zs = [a.z, b.z, c.z];
+  const xSpread = Math.max(...xs) - Math.min(...xs);
+  const ySpread = Math.max(...ys) - Math.min(...ys);
+  const zSpread = Math.max(...zs) - Math.min(...zs);
+  let nonZero = 0;
+  if (xSpread > 1) nonZero++;
+  if (ySpread > 1) nonZero++;
+  if (zSpread > 1) nonZero++;
+  assert(nonZero >= 2, '3 children разнесены минимум по 2 осям (3D разворот)');
+});
+
+test('compute3DSwimLanes: разные роли разнесены по Y', () => {
+  const nodes = [
+    { id: 'u1', role: 'user', ts: 100 },
+    { id: 'a1', role: 'assistant', ts: 200 },
+    { id: 't1', role: 'tool_use', ts: 300 },
+  ];
+  const positions = compute3DSwimLanes(nodes);
+  const u = positions.get('u1'), a = positions.get('a1'), t = positions.get('t1');
+  assert(Math.abs(u.y - a.y) > 100, 'user/assistant lane разнесены по Y');
+  assert(Math.abs(a.y - t.y) > 100, 'assistant/tool_use lane разнесены по Y');
+});
+
+test('compute3DSwimLanes: ts → X monotonic', () => {
+  const nodes = [
+    { id: 'a', role: 'user', ts: 1000 },
+    { id: 'b', role: 'user', ts: 2000 },
+    { id: 'c', role: 'user', ts: 3000 },
+  ];
+  const positions = compute3DSwimLanes(nodes);
+  const a = positions.get('a'), b = positions.get('b'), c = positions.get('c');
+  assert(a.x < b.x && b.x < c.x, 'X растёт по ts');
+});
+
+test('applySphericalScatter: spread по всем 3 осям', () => {
+  const nodes = Array.from({ length: 30 }, (_, i) => ({ id: 'n' + i, x: 0, y: 0, z: 0, vx: 0, vy: 0 }));
+  applySphericalScatter(nodes);
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y), zs = nodes.map(n => n.z);
+  const xSpread = Math.max(...xs) - Math.min(...xs);
+  const ySpread = Math.max(...ys) - Math.min(...ys);
+  const zSpread = Math.max(...zs) - Math.min(...zs);
+  assert(xSpread > 100 && ySpread > 100 && zSpread > 100,
+    'scatter даёт ненулевой spread по x/y/z (не плоскость)');
+});
+
+test('fibonacciOnSphere: count=10 даёт точки на сфере radius', () => {
+  const points = fibonacciOnSphere(10, 100, null, Math.PI);
+  eq(points.length, 10);
+  for (const p of points) {
+    const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+    approx(r, 100, 1, 'точка на сфере radius=100');
+  }
 });
 
 // ==== ADAPTERS ====

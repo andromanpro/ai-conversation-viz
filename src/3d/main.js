@@ -37,6 +37,7 @@ import { initAudio } from '../ui/audio.js';
 import { initFpsCounter, tickFps } from '../ui/fps-counter.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
+import { applySphericalScatter } from './scatter.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
 
 const ROLE_COLORS = {
@@ -100,6 +101,12 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = CFG.cameraRotateSpeed;
 let _introRotateTimer = null;
 
+// Флаг: пользователь руками двигал камеру → fitCameraToBBox не должна
+// перезаписывать его ракурс при click 🎥. OrbitControls 'start' срабатывает
+// только при pointerdown пользователя, не при programmatic .set().
+let _userMovedCamera = false;
+controls.addEventListener('start', () => { _userMovedCamera = true; });
+
 // Post-processing — EffectComposer с RenderPass + UnrealBloomPass.
 // Bloom даёт естественное свечение вокруг ярких объектов (орбов + колец),
 // но с умеренными параметрами — иначе сцена «выгорает» и теряются детали.
@@ -113,6 +120,22 @@ const bloomPass = new UnrealBloomPass(
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
+
+// Адаптивное качество рендера — при включённом autoRotate снижаем
+// bloomPass strength/radius (UnrealBloomPass scaling ≈ radius², поэтому
+// 0.40 → 0.30 даёт ~1.5× ускорение) и pixelRatio (1.5 вместо 2 на retina —
+// в движении разница не видна). При выкл — возвращаем wow-настройки.
+function applyRenderQuality(autoRotateActive) {
+  if (autoRotateActive) {
+    bloomPass.strength = 0.25;
+    bloomPass.radius = 0.30;
+    renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+  } else {
+    bloomPass.strength = 0.45;
+    bloomPass.radius = 0.40;
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  }
+}
 
 // Освещение — минимальное. Орбы сами светятся через custom shader
 // (fresnel + пульсирующее ядро), поэтому Lambert/PBR лайтинг не нужен
@@ -225,6 +248,13 @@ const ORB_FS = `
     // Slight rim shimmer — добавляет «живость» силуэту
     float shimmer = 0.85 + 0.15 * sin(uTime * 3.0 + uPhase * 2.0 + N.x * 4.0);
     vec3 finalCol = coreCol * center * breath + rimCol * fresnel * 1.1 * shimmer;
+
+    // Specular highlight — белый «зеркальный» блик где normal направлен
+    // в камеру (head-light setup). pow(ndv, 24) даёт компактное пятно
+    // близко к видимому центру; pulse'ом «дышит» как живой блеск.
+    // Это превращает плоский светящийся диск в 3D-сферу с поверхностью.
+    float spec = pow(max(0.0, ndv), 24.0);
+    finalCol += vec3(1.0, 1.0, 1.0) * spec * 0.45 * (0.7 + 0.3 * pulse);
 
     // Selected — повышенная яркость + добавка золотого
     if (uSelected > 0.5) {
@@ -496,15 +526,23 @@ function buildFromState() {
   updateStats();
 }
 
-// Bounding box fit камеры по всем нодам сцены. Изометрический ракурс
-// ~30° сверху-сбоку. Реюзается: при load (buildFromState), при ручном
-// центрировании (btn-reset-3d), при включении camera rotate (btn-camera-rotate).
-function fitCameraToBBox() {
+// Bounding box fit камеры. Изометрический ракурс ~30° сверху-сбоку.
+// opts.onlyVisible=true — берём только ноды с bornAt != null (для play
+// mode, где остальные ноды пред-размещены prewarm3D но ещё не видны).
+// Если onlyVisible не нашёл ни одной → fallback на все.
+//
+// После programmatic camera.set() сбрасывается _userMovedCamera, чтобы
+// последующие auto-fit'ы продолжали работать пока пользователь не начнёт
+// pan вручную.
+function fitCameraToBBox(opts) {
   if (!state.nodes.length) return;
+  const onlyVisible = !!(opts && opts.onlyVisible);
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
+  let count = 0;
   for (const n of state.nodes) {
+    if (onlyVisible && n.bornAt == null) continue;
     if (n.x < minX) minX = n.x;
     if (n.x > maxX) maxX = n.x;
     const ny = -n.y;
@@ -513,7 +551,11 @@ function fitCameraToBBox() {
     const nz = n.z || 0;
     if (nz < minZ) minZ = nz;
     if (nz > maxZ) maxZ = nz;
+    count++;
   }
+  // Fallback на все ноды если onlyVisible не нашёл ничего (очень в начале play)
+  if (count === 0) return fitCameraToBBox({ onlyVisible: false });
+
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
   const cz = (minZ + maxZ) / 2;
@@ -525,6 +567,8 @@ function fitCameraToBBox() {
   camera.position.set(cx + dist * 0.55, cy - dist * 0.45, cz + dist * 0.75);
   controls.target.set(cx, cy, cz);
   controls.update();
+  // Программный fit — сбрасываем флаг manual pan
+  _userMovedCamera = false;
 }
 
 // Цвет ребра: учитываем diff-режим (edge.diffSide), tool_use, adopted, role
@@ -826,17 +870,21 @@ function setCameraRotate(on) {
     clearTimeout(_introRotateTimer);
     _introRotateTimer = null;
   }
-  // При включении rotate — сразу центруем камеру на bbox чтобы вращение
-  // было вокруг центра графа, а не вокруг старого target'а
-  if (on) fitCameraToBBox();
+  // При включении rotate — центруем НА видимые ноды если пользователь
+  // не настраивал камеру вручную. Если настраивал — сохраняем его ракурс.
+  if (on && !_userMovedCamera) fitCameraToBBox({ onlyVisible: true });
+  // Уровень пост-обработки — при autoRotate уменьшаем bloom для FPS.
+  applyRenderQuality(on);
   try { localStorage.setItem('viz:camera-rotate-3d', on ? '1' : '0'); } catch {}
   updateCameraRotateBtn();
 }
 
-// Ручное центрирование камеры — кнопка 🎯 — без autoRotate.
-// Полезно когда пользователь увлёкся pan'ом и потерял граф из виду.
+// Ручное центрирование камеры — кнопка 🎯. Всегда фит на видимые ноды
+// (или все, если play не запущен). Явно сбрасывает manual-pan флаг —
+// пользователь хочет «начать заново», что бы он там ни делал.
 function resetCamera3D() {
-  fitCameraToBBox();
+  _userMovedCamera = false;
+  fitCameraToBBox({ onlyVisible: true });
 }
 
 function updateCameraRotateBtn() {
@@ -888,27 +936,8 @@ function updateStats() {
   statsEl.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; ${s.parsed} lines`;
 }
 
-// Initial scatter — ноды на сферической Fibonacci-spirale. Это даёт
-// устойчивое 3D-распределение для z (физика z не трогает, так что
-// z после physics остаётся как initial). x/y physics будет раздвигать,
-// но это нормально — главное чтобы nodes стартовали неперекрытыми.
-function applySphericalScatter(nodes) {
-  const N = nodes.length;
-  if (!N) return;
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const radius = Math.max(120, Math.sqrt(N) * 30);
-  for (let i = 0; i < N; i++) {
-    const n = nodes[i];
-    const idx = i + 0.5;
-    const y = 1 - (idx / N) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const theta = golden * i + (n._seedDx || 0) * 0.5;
-    n.x = Math.cos(theta) * r * radius;
-    n.y = y * radius;
-    n.z = Math.sin(theta) * r * radius;
-    n.vx = 0; n.vy = 0;
-  }
-}
+// applySphericalScatter — вынесен в src/3d/scatter.js для тестирования
+// (pure JS, без Three.js dep).
 
 // ---- Loader ----
 function loadText(text) {
@@ -1365,13 +1394,17 @@ function updateBirths3D(nowMs) {
   for (const n of state.nodes) {
     const alive = n.ts <= cutoff;
     if (alive && n.bornAt == null) {
-      n.bornAt = nowMs;
-      // НЕ перетираем n.x/y/z на parent позицию — нода стартует на
-      // её final position (от prewarm3D или applyLayoutTargets3D).
-      // Birth animation сама показывает «откуда прилетела» через
-      // birth-comet (она бежит от parent к target). Раньше код ставил
-      // ноду на parent + 2D jitter, что схлопывало 3D layout в плоскость
-      // parent'а в play-режиме (z от physics терялся под parent.z).
+      // Если parent отсутствует (root) или ещё не родился — комета
+      // лететь неоткуда. Пропускаем birth-animation: ставим bornAt
+      // далеко в прошлое, нода появляется мгновенно на target.
+      // Иначе классическая 2-фазная birth animation (комета 0→0.7,
+      // расцветание орба 0.7→1.0).
+      const parent = n.parentId ? state.byId.get(n.parentId) : null;
+      if (!parent || parent.bornAt == null) {
+        n.bornAt = nowMs - CFG.birthDurationMs * 3;
+      } else {
+        n.bornAt = nowMs;
+      }
       if (n._mesh) n._mesh.position.set(n.x, -n.y, n.z || 0);
     } else if (!alive && n.bornAt != null) {
       n.bornAt = null;
@@ -1422,8 +1455,13 @@ function tick() {
     // когда комета достигла target и сама нода появилась. Раньше halo
     // зажигался при bornAt!=null — то есть до того как mesh появился.
     if (n._halo) n._halo.visible = visible && bf >= BIRTH_COMET_END;
-    if (n._hubRing) n._hubRing.visible = visible;
-    if (n._orphRing) n._orphRing.visible = visible && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
+    // Hub/orphan rings — как halo, появляются только в phase 2 (после
+    // того как комета прилетела и mesh ноды начал расцветать). Раньше
+    // загорались сразу при bornAt → кольца висели в воздухе пока орб
+    // ещё не появился.
+    const inPhase2 = bf >= BIRTH_COMET_END;
+    if (n._hubRing) n._hubRing.visible = visible && inPhase2;
+    if (n._orphRing) n._orphRing.visible = visible && inPhase2 && (!n._adoptedParentId || !!state.connectOrphans || n._isOrphanRoot);
     if (!visible) continue;
     // Birth animation: яркая комета бежит от parent к target по bezier.
     // 0.0 → 0.7 (BIRTH_COMET_END): комета видна, ребро растёт за ней.
