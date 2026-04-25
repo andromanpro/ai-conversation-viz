@@ -558,9 +558,10 @@ function loadText(text) {
   const slider = document.getElementById('timeline');
   if (slider) slider.value = 100;
   if (infoEl) infoEl.textContent = `${state.nodes.length} nodes · ${state.edges.length} edges · ${norm.format}`;
-  // Сохраним для возможного возврата в 2D. Sample не передаём —
-  // при первом открытии 2D пусть показывает свой sample.
-  if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
+  // Сохраним для возможного возврата в 2D. Sample-ы не передаём —
+  // 2D при первом открытии пусть показывает свой default sample.
+  const isSample = text === SAMPLE_JSONL || text === MULTI_AGENT_ORCHESTRATION_JSONL || text === DEEP_ORCHESTRATION_JSONL;
+  if (!isSample) saveSessionForHandoff(text);
   // Если активный layout не 'force' — мгновенно применяем target-координаты
   if (state.layoutMode === 'radial' || state.layoutMode === 'swim') {
     applyLayoutTargets3D(state.layoutMode, /*animate=*/ false);
@@ -1052,18 +1053,23 @@ function pulseFor(n, t) {
 }
 
 // ---- Boot ----
+// Default sample для первого открытия — deep orchestration: 60 нод,
+// двухуровневый subagent spawn, реальное ветвление. На basic linear
+// sample (40 нод) ни 3D-объёма, ни структуры графа не видно.
+const DEFAULT_SAMPLE = DEEP_ORCHESTRATION_JSONL;
+
 const qJsonl = new URLSearchParams(location.search).get('jsonl');
 if (qJsonl) {
   safeFetch(qJsonl, { cache: 'no-store' })
     .then(r => r.ok ? r.text() : Promise.reject())
     .then(loadText)
-    .catch(() => loadText(SAMPLE_JSONL));
+    .catch(() => loadText(DEFAULT_SAMPLE));
 } else {
   // Если пришли из 2D с уже загруженным файлом — восстановим его
   const handoff = loadSessionForHandoff();
   if (handoff && handoff.text) {
     loadText(handoff.text);
   } else {
-    loadText(SAMPLE_JSONL);
+    loadText(DEFAULT_SAMPLE);
   }
 }

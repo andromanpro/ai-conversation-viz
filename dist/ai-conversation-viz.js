@@ -8255,6 +8255,12 @@ function onKey(ev) {
     const { loadAnnotationsForSession } = __M["src/ui/annotations.js"];
     const { updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
 
+// Sample, который грузится по умолчанию при первом открытии страницы.
+// Раньше был SAMPLE_JSONL (basic, ~40 линейных нод) — он не показывает
+// ни ветвление графа, ни 3D-объём. Deep orchestration с 60 нодами и
+// 2-уровневым subagent spawn — самый наглядный для wow-эффекта.
+const DEFAULT_SAMPLE = DEEP_ORCHESTRATION_JSONL;
+
 let _getViewport;
 let _onReady = () => {};
 
@@ -8347,7 +8353,7 @@ function initLoader(getViewportFn, onReady) {
   if (handoff && handoff.text) {
     loadText(handoff.text);
   } else {
-    loadText(SAMPLE_JSONL);
+    loadText(DEFAULT_SAMPLE);
   }
 }
 
@@ -8458,9 +8464,10 @@ function loadText(text) {
     loadAnnotationsForSession();
     updateBookmarksBadge();
     _onReady();
-    // Запомним текст для возможного перехода в 3D. Sample не сохраняем —
-    // пусть 3D при первом открытии тоже покажет sample.
-    if (text !== SAMPLE_JSONL) saveSessionForHandoff(text);
+    // Запомним текст для возможного перехода в 3D. Sample-ы не сохраняем —
+    // пусть 3D при первом открытии тоже покажет default sample.
+    const isSample = text === SAMPLE_JSONL || text === MULTI_AGENT_ORCHESTRATION_JSONL || text === DEEP_ORCHESTRATION_JSONL;
+    if (!isSample) saveSessionForHandoff(text);
   } catch (e) {
     showError('Parse error: ' + e.message);
     console.error(e);
