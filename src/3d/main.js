@@ -36,6 +36,7 @@ import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
+import { initSettingsModal } from '../ui/settings-modal.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
@@ -86,23 +87,28 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 0.85; // снижено с 1.1 — общая яркость поскромнее
 container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+// Auto-rotate intro: первые 4 секунды камера медленно вращается чтобы
+// сразу было видно что это 3D, а не плоский граф.
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.6;
+let _introRotateTimer = null;
 
 // Post-processing — EffectComposer с RenderPass + UnrealBloomPass.
 // Bloom даёт естественное свечение вокруг ярких объектов (орбов + колец),
-// что и создаёт «живой» объём вместо плоских кружков.
+// но с умеренными параметрами — иначе сцена «выгорает» и теряются детали.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.85,   // strength — насыщенность bloom
-  0.55,   // radius — размер ореола
-  0.15    // threshold — всё ярче чем 0.15 bloom'ится
+  0.45,   // strength — насыщенность bloom (было 0.85)
+  0.40,   // radius — размер ореола (было 0.55)
+  0.30    // threshold — bloom только для очень ярких объектов (было 0.15)
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
@@ -190,15 +196,18 @@ const ORB_FS = `
     // «Lambert-центр»: ярко там где surface смотрит в камеру
     float center = pow(ndv, 1.3);
 
-    // Пульс
-    float pulse = 0.5 + 0.5 * sin(uTime * 1.8 + uPhase);
-    float breath = 0.7 + 0.3 * pulse;
+    // Пульс — два слоя: основной (faster) + slow modulation для «дыхания»
+    float pulse = 0.5 + 0.5 * sin(uTime * 2.4 + uPhase);
+    float slow = 0.5 + 0.5 * sin(uTime * 0.7 + uPhase * 1.3);
+    float breath = 0.55 + 0.45 * pulse * (0.7 + 0.3 * slow);
 
     // Цветовые слои
     vec3 coreCol = mix(uColor, vec3(1.0), 0.55 + 0.3 * pulse);
     vec3 rimCol = uColor * 2.0;
 
-    vec3 finalCol = coreCol * center * breath + rimCol * fresnel * 1.1;
+    // Slight rim shimmer — добавляет «живость» силуэту
+    float shimmer = 0.85 + 0.15 * sin(uTime * 3.0 + uPhase * 2.0 + N.x * 4.0);
+    vec3 finalCol = coreCol * center * breath + rimCol * fresnel * 1.1 * shimmer;
 
     // Selected — повышенная яркость + добавка золотого
     if (uSelected > 0.5) {
@@ -360,15 +369,21 @@ function buildFromState() {
   // Инициализируем buffer первым кадром
   updateEdgeBuffer();
 
-  // Fit camera — ближе чем раньше, без большого offset
+  // Fit camera — изометрический ракурс (под углом ~30° сверху-сбоку)
+  // даёт сразу видимое 3D даже для мелких/плоских графов.
   let maxD = 0;
   for (const n of state.nodes) {
     const d = Math.hypot(n.x, n.y, n.z || 0);
     if (d > maxD) maxD = d;
   }
-  camera.position.set(0, -maxD * 0.25, maxD * 1.25 + 250);
+  const r = Math.max(maxD, 400);
+  camera.position.set(r * 0.7, -r * 0.55, r * 0.95 + 200);
   controls.target.set(0, 0, 0);
   controls.update();
+  // Запускаем intro auto-rotate; через 4с — выключим
+  controls.autoRotate = true;
+  if (_introRotateTimer) clearTimeout(_introRotateTimer);
+  _introRotateTimer = setTimeout(() => { controls.autoRotate = false; }, 4000);
   updateStats();
 }
 
@@ -733,6 +748,7 @@ initStats();
 initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 }));
 initTopicsToggle();
 initOrphansToggle();
+initSettingsModal();
 init3DLayoutSwitch();
 
 function init3DLayoutSwitch() {
@@ -919,7 +935,9 @@ function tick() {
     const ag = easeOutCubic(bf);
     const baseR = n.r * 1.25;
     const hubPulse = n.isHub ? (1 + 0.3 * Math.sin(t * 1.8 + n.phase)) : 1;
-    const scale = baseR * (0.5 + 0.5 * ag) * hubPulse;
+    // Все ноды лёгко «дышат» — небольшая пульсация размера, разная для каждой
+    const breathPulse = 1 + 0.06 * Math.sin(t * 1.6 + n.phase * 1.7);
+    const scale = baseR * (0.5 + 0.5 * ag) * hubPulse * breathPulse;
     mesh.scale.set(scale, scale, scale);
     // Dim при активном search/path если не матч
     let dimMul = 1;

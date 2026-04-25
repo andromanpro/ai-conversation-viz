@@ -5735,10 +5735,13 @@ function toggleRenderBackend() {
   setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
 }
 
-/** Программное переключение backend'а — для Settings modal toggle. */
+/** Программное переключение backend'а — для Settings modal toggle.
+ * В 3D-режиме canvas-elements не существуют, попытка init'а WebGL
+ * упадёт — поэтому tihely no-op если canvas DOM не подключен. */
 function setRenderBackend(backend) {
   if (backend !== 'webgl' && backend !== 'canvas2d') return;
   if (state.renderBackend === backend) return;
+  if (!_canvas2d || !_webglCanvas) return; // 3D-режим — toggle no-op
   setBackend(backend);
 }
 

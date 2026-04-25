@@ -61,6 +61,20 @@
   .btn-layout-chip:hover { color: var(--text); background: rgba(123,170,240,0.06); }
   .btn-layout-chip.active { color: var(--assistant); background: rgba(80,212,181,0.12); }
   .btn.btn-icon { width: 30px; height: 30px; padding: 0; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; letter-spacing: 0; text-transform: none; line-height: 1; }
+  /* Settings modal — те же стили что в 2D, чтобы открывалось консистентно */
+  .settings-modal { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.5); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
+  .settings-body { max-width: 540px; width: 90vw; max-height: 85vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 14px; letter-spacing: 0.08em; color: var(--text); }
+  .settings-close { background: transparent; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
+  .settings-close:hover { color: var(--accent); }
+  .settings-group-title { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); margin-top: 14px; margin-bottom: 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .settings-row { display: grid; grid-template-columns: 180px 1fr 70px; gap: 10px; align-items: center; padding: 4px 0; font-size: 11px; }
+  .settings-row label { color: var(--text); }
+  .settings-row input[type=range] { accent-color: var(--assistant); width: 100%; }
+  .settings-row-toggle { grid-template-columns: 1fr auto; }
+  .settings-row-toggle input[type=checkbox] { accent-color: var(--assistant); width: 16px; height: 16px; cursor: pointer; }
+  .settings-val { font-variant-numeric: tabular-nums; color: var(--assistant); text-align: right; font-size: 11px; }
+  .settings-footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); text-align: right; }
   .btn.btn-back-2d { border-color: #7b69ff; color: #a59bff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; padding: 8px 16px; background: rgba(123,105,255,0.12); font-size: 12px; letter-spacing: 0.06em; }
   .btn.btn-back-2d:hover { background: rgba(123,105,255,0.25); border-color: #a59bff; color: #ffffff; box-shadow: 0 0 18px rgba(123,105,255,0.5); }
 
@@ -123,6 +137,7 @@
     <button class="btn" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
     <button class="btn" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
+    <button class="btn btn-icon" id="btn-settings" data-i18n-title="tip.settings" data-i18n-aria="aria.settings">⚙</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>
   <div class="stats" id="stats">—</div>
