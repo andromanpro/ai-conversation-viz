@@ -302,6 +302,29 @@ export function draw(ctx, state, tSec, viewport, extras) {
     }
   }
 
+  // ---- PAIR EDGES (tool_use ↔ tool_result, lemon-yellow dotted) ----
+  // Animated dash offset чтобы линии "текли" от source к target — то же
+  // поведение что в WebGL renderer для паритета.
+  if (state.showPairEdges !== false && state.pairEdges && state.pairEdges.length) {
+    ctx.save();
+    ctx.lineWidth = 1.4;
+    const dashOffset = -(tSec * 12) % 14;
+    ctx.lineDashOffset = dashOffset;
+    ctx.setLineDash([8, 6]);
+    for (const p of state.pairEdges) {
+      if (!visible(p.a) || !visible(p.b)) continue;
+      const aS = worldToScreen(p.a.x, p.a.y, cam);
+      const bS = worldToScreen(p.b.x, p.b.y, cam);
+      const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
+      ctx.strokeStyle = `rgba(255, 235, 92, ${0.85 * ag})`;
+      ctx.beginPath();
+      ctx.moveTo(aS.x, aS.y);
+      ctx.lineTo(bS.x, bS.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ---- PARTICLES (по кривым рёбер)
   if (extras && extras.particles) {
     extras.particles(ctx, (edge) => {
@@ -365,6 +388,23 @@ export function draw(ctx, state, tSec, viewport, extras) {
       ctx.beginPath();
       ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Error ring: красное пунктирное кольцо у нод с tool error (assistant
+    // которая дала tool_use получивший is_error в matching tool_result, или
+    // сама virtual tool_use нода).
+    if (state.showErrorRings !== false && (n._hasErrorTool || n._isErrorToolUse) && perfMode !== 'minimal') {
+      const errPulse = 0.55 + 0.25 * Math.sin(tSec * 2.2 + n.phase);
+      ctx.save();
+      const dashOff = -(tSec * 8) % 10;
+      ctx.lineDashOffset = dashOff;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = `rgba(255, 90, 90, ${errPulse * ag})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // Orphan-root marker: пунктирное кольцо

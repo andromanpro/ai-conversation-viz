@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-04-25
+
+### Added
+
+- **Display toggles в Settings modal** (`,`) — два чекбокса в новой группе
+  Display: «Pair edges (tool_use ↔ result)» и «Error rings (red dashed)».
+  Сохраняются в localStorage вместе с остальными settings. Default: оба ON.
+  Реализовано через расширение settings-modal.js — добавлен второй массив
+  `TOGGLES` с scope ('state'|'CFG') рядом с `PARAMS` (range sliders).
+- **Canvas 2D рендеринг pair edges + error rings** — раньше эти эффекты
+  были только в WebGL renderer. Теперь Canvas 2D отрисовывает их тем же
+  стилем (lemon-yellow dashed [8,6] с animated dashOffset для pair;
+  красное пульсирующее кольцо [4,3] для error). Рендер-паритет между
+  backend'ами восстановлен.
+
+### Why
+
+Пользователь сообщил что пунктирные линии не отображались в play-режиме.
+Главная причина — в Canvas 2D рендере pair edges не было вообще. Если
+переключиться на 2D через render-toggle, никаких пунктиров. В WebGL они
+работают, но при play-mode + camera-follow ноды могут стоять очень близко
+→ короткий segment → паттерн почти невидим. Toggle позволяет полностью
+отключить если визуальный шум мешает.
+
+### Files
+
+- `src/view/state.js` — `showPairEdges: true`, `showErrorRings: true`
+- `src/view/renderer-webgl.js` — early return в fillPairBuffer/fillErrBuffer
+- `src/view/renderer.js` — новые проходы PAIR EDGES и Error ring (после
+  edges, перед particles)
+- `src/ui/settings-modal.js` — TOGGLES массив + checkbox UI + save/load
+- `index.html`, `standalone.html` — CSS `.settings-row-toggle`
+
+Bundle 331 KB (+4 KB за Canvas 2D pair/err passes), 49 modules, 122 passed.
+
 ## [1.3.0] — 2026-04-25
 
 ### Added (по плану A4 + B + C1)

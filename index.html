@@ -119,6 +119,8 @@
   .settings-row { display: grid; grid-template-columns: 180px 1fr 70px; gap: 10px; align-items: center; padding: 4px 0; font-size: 11px; }
   .settings-row label { color: var(--text); }
   .settings-row input[type=range] { accent-color: var(--assistant); width: 100%; }
+  .settings-row-toggle { grid-template-columns: 1fr auto; }
+  .settings-row-toggle input[type=checkbox] { accent-color: var(--assistant); width: 16px; height: 16px; cursor: pointer; }
   .settings-val { font-variant-numeric: tabular-nums; color: var(--assistant); text-align: right; font-size: 11px; }
   .settings-footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); text-align: right; }
   #layout-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
@@ -239,7 +241,7 @@
 
 <div class="hud" id="top-left">
   <div class="title" data-i18n="header.title">AI Conversation Viz</div>
-  <div class="subtitle" data-i18n="header.subtitle_force">v1.3 · force-directed</div>
+  <div class="subtitle" data-i18n="header.subtitle_force">v1.4 · force-directed</div>
   <!-- Primary row — основные действия с текстом -->
   <div class="controls controls-primary">
     <button class="btn primary" id="btn-sample" data-i18n="btn.sample" data-i18n-aria="aria.sample" aria-haspopup="menu" aria-expanded="false">Examples ▾</button>

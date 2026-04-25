@@ -1608,8 +1608,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.3 · force-directed',
-    'header.subtitle_standalone': 'v1.3 · standalone bundle',
+    'header.subtitle_force': 'v1.4 · force-directed',
+    'header.subtitle_standalone': 'v1.4 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1790,8 +1790,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.3 · force-directed',
-    'header.subtitle_standalone': 'v1.3 · standalone-сборка',
+    'header.subtitle_force': 'v1.4 · force-directed',
+    'header.subtitle_standalone': 'v1.4 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -2054,6 +2054,8 @@ const state = {
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
+  showPairEdges: true,    // лимонные пунктирные tool_use ↔ tool_result связи
+  showErrorRings: true,   // красные пунктирные кольца у нод с tool error
 };
 
 function resetInteractionState() {
@@ -2858,6 +2860,29 @@ function draw(ctx, state, tSec, viewport, extras) {
     }
   }
 
+  // ---- PAIR EDGES (tool_use ↔ tool_result, lemon-yellow dotted) ----
+  // Animated dash offset чтобы линии "текли" от source к target — то же
+  // поведение что в WebGL renderer для паритета.
+  if (state.showPairEdges !== false && state.pairEdges && state.pairEdges.length) {
+    ctx.save();
+    ctx.lineWidth = 1.4;
+    const dashOffset = -(tSec * 12) % 14;
+    ctx.lineDashOffset = dashOffset;
+    ctx.setLineDash([8, 6]);
+    for (const p of state.pairEdges) {
+      if (!visible(p.a) || !visible(p.b)) continue;
+      const aS = worldToScreen(p.a.x, p.a.y, cam);
+      const bS = worldToScreen(p.b.x, p.b.y, cam);
+      const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
+      ctx.strokeStyle = `rgba(255, 235, 92, ${0.85 * ag})`;
+      ctx.beginPath();
+      ctx.moveTo(aS.x, aS.y);
+      ctx.lineTo(bS.x, bS.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ---- PARTICLES (по кривым рёбер)
   if (extras && extras.particles) {
     extras.particles(ctx, (edge) => {
@@ -2921,6 +2946,23 @@ function draw(ctx, state, tSec, viewport, extras) {
       ctx.beginPath();
       ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Error ring: красное пунктирное кольцо у нод с tool error (assistant
+    // которая дала tool_use получивший is_error в matching tool_result, или
+    // сама virtual tool_use нода).
+    if (state.showErrorRings !== false && (n._hasErrorTool || n._isErrorToolUse) && perfMode !== 'minimal') {
+      const errPulse = 0.55 + 0.25 * Math.sin(tSec * 2.2 + n.phase);
+      ctx.save();
+      const dashOff = -(tSec * 8) % 10;
+      ctx.lineDashOffset = dashOff;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = `rgba(255, 90, 90, ${errPulse * ag})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // Orphan-root marker: пунктирное кольцо
@@ -3837,6 +3879,7 @@ function fillParticleBuffer(state) {
 // Каждое pair → одна gl.LINES линия от source.{x,y} к target.{x,y}.
 // Per-vertex данные: t (0 у source, 1 у target), seglen (полная длина сегмента в screen px).
 function fillPairBuffer(state, scale) {
+  if (state.showPairEdges === false) return 0;
   const pairs = state.pairEdges || [];
   if (!pairs.length) return 0;
   ensureArr('pair', pairs.length * 2 * PAIR_STRIDE);
@@ -3867,6 +3910,7 @@ function fillPairBuffer(state, scale) {
 
 // Заполняет буфер для error-rings (assistant-ноды у которых tool_use получил error).
 function fillErrBuffer(state) {
+  if (state.showErrorRings === false) return 0;
   if (!state.nodes || !state.nodes.length) return 0;
   // Сначала посчитаем сколько нод с error — чтобы не аллоцировать на весь массив
   let errCount = 0;
@@ -5433,6 +5477,13 @@ const PARAMS = [
   ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
 ];
 
+// Boolean toggles (group, key, label, scope) — scope='state' читает/пишет
+// в state.<key>, scope='CFG' — в CFG.<key>
+const TOGGLES = [
+  ['Display', 'showPairEdges',  'Pair edges (tool_use ↔ result)', 'state'],
+  ['Display', 'showErrorRings', 'Error rings (red dashed)',       'state'],
+];
+
 let modalEl, btn;
 
 function initSettingsModal() {
@@ -5468,16 +5519,39 @@ function open() {
   header.appendChild(closeBtn);
   inner.appendChild(header);
 
+  // Группируем range-параметры и toggle'ы вместе по группам, сохраняя порядок
   const groups = new Map();
-  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, []);
-  for (const p of PARAMS) groups.get(p[0]).push(p);
+  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
+  for (const [group] of TOGGLES) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
+  for (const p of PARAMS) groups.get(p[0]).ranges.push(p);
+  for (const t of TOGGLES) groups.get(t[0]).toggles.push(t);
 
   for (const [groupName, items] of groups) {
     const gTitle = document.createElement('div');
     gTitle.className = 'settings-group-title';
     gTitle.textContent = groupName.toUpperCase();
     inner.appendChild(gTitle);
-    for (const [, key, min, max, step, label] of items) {
+    // Toggles идут первыми (компактные чекбоксы наверху группы)
+    for (const [, key, label, scope] of items.toggles) {
+      const row = document.createElement('div');
+      row.className = 'settings-row settings-row-toggle';
+      const lbl = document.createElement('label');
+      lbl.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.key = key;
+      input.dataset.scope = scope;
+      const target = scope === 'state' ? state : CFG;
+      input.checked = target[key] !== false; // default ON если не задано
+      input.addEventListener('change', () => {
+        target[key] = !!input.checked;
+        save();
+      });
+      row.appendChild(lbl);
+      row.appendChild(input);
+      inner.appendChild(row);
+    }
+    for (const [, key, min, max, step, label] of items.ranges) {
       const row = document.createElement('div');
       row.className = 'settings-row';
       const lbl = document.createElement('label');
@@ -5540,6 +5614,9 @@ function formatValue(v) {
 function save() {
   const obj = {};
   for (const [, key] of PARAMS) obj[key] = CFG[key];
+  for (const [, key, , scope] of TOGGLES) {
+    obj[key] = (scope === 'state' ? state : CFG)[key];
+  }
   try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
 }
 
@@ -5550,6 +5627,11 @@ function loadSaved() {
     const obj = JSON.parse(raw);
     for (const [, key] of PARAMS) {
       if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
+    }
+    for (const [, key, , scope] of TOGGLES) {
+      if (typeof obj[key] === 'boolean') {
+        (scope === 'state' ? state : CFG)[key] = obj[key];
+      }
     }
   } catch {}
 }

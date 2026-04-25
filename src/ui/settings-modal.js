@@ -34,6 +34,13 @@ const PARAMS = [
   ['Birth',   'birthDurationMs', 100,  2500,  50,  'Birth animation (ms)'],
 ];
 
+// Boolean toggles (group, key, label, scope) — scope='state' читает/пишет
+// в state.<key>, scope='CFG' — в CFG.<key>
+const TOGGLES = [
+  ['Display', 'showPairEdges',  'Pair edges (tool_use ↔ result)', 'state'],
+  ['Display', 'showErrorRings', 'Error rings (red dashed)',       'state'],
+];
+
 let modalEl, btn;
 
 export function initSettingsModal() {
@@ -69,16 +76,39 @@ function open() {
   header.appendChild(closeBtn);
   inner.appendChild(header);
 
+  // Группируем range-параметры и toggle'ы вместе по группам, сохраняя порядок
   const groups = new Map();
-  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, []);
-  for (const p of PARAMS) groups.get(p[0]).push(p);
+  for (const [group] of PARAMS) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
+  for (const [group] of TOGGLES) if (!groups.has(group)) groups.set(group, { ranges: [], toggles: [] });
+  for (const p of PARAMS) groups.get(p[0]).ranges.push(p);
+  for (const t of TOGGLES) groups.get(t[0]).toggles.push(t);
 
   for (const [groupName, items] of groups) {
     const gTitle = document.createElement('div');
     gTitle.className = 'settings-group-title';
     gTitle.textContent = groupName.toUpperCase();
     inner.appendChild(gTitle);
-    for (const [, key, min, max, step, label] of items) {
+    // Toggles идут первыми (компактные чекбоксы наверху группы)
+    for (const [, key, label, scope] of items.toggles) {
+      const row = document.createElement('div');
+      row.className = 'settings-row settings-row-toggle';
+      const lbl = document.createElement('label');
+      lbl.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.key = key;
+      input.dataset.scope = scope;
+      const target = scope === 'state' ? state : CFG;
+      input.checked = target[key] !== false; // default ON если не задано
+      input.addEventListener('change', () => {
+        target[key] = !!input.checked;
+        save();
+      });
+      row.appendChild(lbl);
+      row.appendChild(input);
+      inner.appendChild(row);
+    }
+    for (const [, key, min, max, step, label] of items.ranges) {
       const row = document.createElement('div');
       row.className = 'settings-row';
       const lbl = document.createElement('label');
@@ -141,6 +171,9 @@ function formatValue(v) {
 function save() {
   const obj = {};
   for (const [, key] of PARAMS) obj[key] = CFG[key];
+  for (const [, key, , scope] of TOGGLES) {
+    obj[key] = (scope === 'state' ? state : CFG)[key];
+  }
   try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch {}
 }
 
@@ -151,6 +184,11 @@ function loadSaved() {
     const obj = JSON.parse(raw);
     for (const [, key] of PARAMS) {
       if (typeof obj[key] === 'number' && isFinite(obj[key])) CFG[key] = obj[key];
+    }
+    for (const [, key, , scope] of TOGGLES) {
+      if (typeof obj[key] === 'boolean') {
+        (scope === 'state' ? state : CFG)[key] = obj[key];
+      }
     }
   } catch {}
 }

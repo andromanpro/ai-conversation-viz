@@ -35,8 +35,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.3 · force-directed',
-    'header.subtitle_standalone': 'v1.3 · standalone bundle',
+    'header.subtitle_force': 'v1.4 · force-directed',
+    'header.subtitle_standalone': 'v1.4 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -217,8 +217,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.3 · force-directed',
-    'header.subtitle_standalone': 'v1.3 · standalone-сборка',
+    'header.subtitle_force': 'v1.4 · force-directed',
+    'header.subtitle_standalone': 'v1.4 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',

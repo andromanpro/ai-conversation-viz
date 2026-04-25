@@ -792,6 +792,7 @@ function fillParticleBuffer(state) {
 // Каждое pair → одна gl.LINES линия от source.{x,y} к target.{x,y}.
 // Per-vertex данные: t (0 у source, 1 у target), seglen (полная длина сегмента в screen px).
 function fillPairBuffer(state, scale) {
+  if (state.showPairEdges === false) return 0;
   const pairs = state.pairEdges || [];
   if (!pairs.length) return 0;
   ensureArr('pair', pairs.length * 2 * PAIR_STRIDE);
@@ -822,6 +823,7 @@ function fillPairBuffer(state, scale) {
 
 // Заполняет буфер для error-rings (assistant-ноды у которых tool_use получил error).
 function fillErrBuffer(state) {
+  if (state.showErrorRings === false) return 0;
   if (!state.nodes || !state.nodes.length) return 0;
   // Сначала посчитаем сколько нод с error — чтобы не аллоцировать на весь массив
   let errCount = 0;
