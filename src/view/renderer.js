@@ -4,24 +4,6 @@ import { controlPoint, bezierPoint } from './particles.js';
 import { toolIcon } from './tool-icons.js';
 import { hueToRgbaString } from './topics.js';
 
-// Простой helper: читает CSS-переменную с :root. Возвращает строку
-// (для прямого использования с ctx.fillStyle/strokeStyle), либо fallback.
-// Кеш-light: на каждый кадр читаем заново — но это всего 8 переменных.
-function cssVar(name, fallback) {
-  try {
-    const s = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return s || fallback;
-  } catch {
-    return fallback;
-  }
-}
-function cssVarNum(name, fallback) {
-  const v = cssVar(name, '');
-  if (!v) return fallback;
-  const n = parseFloat(v);
-  return isFinite(n) ? n : fallback;
-}
-
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
   let tsMin = Infinity, tsMax = -Infinity;
@@ -85,14 +67,8 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha, edge, diffMode, light) {
+function edgeRgba(childRole, alpha, edge, diffMode) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
-  if (light) {
-    // На светлой теме — тёмные насыщенные цвета вместо неоновых
-    if (childRole === 'tool_use') return `rgba(180, 90, 20, ${alpha * 1.5})`;
-    if (childRole === 'thinking') return `rgba(110, 70, 200, ${alpha * 1.3})`;
-    return `rgba(20, 70, 160, ${alpha * 1.3})`;
-  }
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
   if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
   return `rgba(0, 212, 255, ${alpha})`;
@@ -156,7 +132,7 @@ function formatLatencyCompact(ms) {
   const m = Math.floor(sec / 60);
   return m + 'm' + Math.round(sec - m * 60) + 's';
 }
-function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
+function drawMetricsBadges(ctx, n, s, r, ag) {
   const tokens = n.tokensOut || 0;
   const latency = n.responseLatencyMs || 0;
   if (!tokens && latency < 1500) return;
@@ -167,7 +143,7 @@ function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const padH = 4, padV = 2;
-  const bgFill = isLight ? `rgba(20, 30, 60, ${0.78 * ag})` : `rgba(20, 30, 60, ${0.82 * ag})`;
+  const bgFill = `rgba(20, 30, 60, ${0.82 * ag})`;
   const fgText = `rgba(220, 235, 255, ${Math.min(1, ag * 0.95)})`;
 
   // Tokens — справа-снизу
@@ -239,14 +215,14 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 export function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — читаем стопы из CSS vars (зависит от темы)
+  // Radial vignette — тёмный cyberpunk-фон
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, cssVar('--canvas-vig-1', 'rgba(14, 22, 44, 1)'));
-  grad.addColorStop(0.6, cssVar('--canvas-vig-2', 'rgba(10, 14, 26, 1)'));
-  grad.addColorStop(1, cssVar('--canvas-vig-3', 'rgba(5, 8, 16, 1)'));
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -338,6 +314,10 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const bfOf = n => birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
+  // Edge birth — длительнее ноды (чтобы линия не «вспыхивала», а росла)
+  const edgeBirthMs = CFG.birthDurationMs * 1.6;
+  const edgeBfOf = n => birthFactor(n.bornAt, nowMs, edgeBirthMs);
+  const edgeAlphaOf = n => easeOutCubic(edgeBfOf(n)); // от 0 до 1, без начального birthAlphaStart
   const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && state.collapsed && state.collapsed.has(n.parentId);
   const thinkingHidden = state.showThinking === false;
   const visible = n => n.ts <= cutoff && n.bornAt != null
@@ -370,13 +350,14 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const N = state.nodes.length;
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
-  const isLight = state.theme === 'light';
   ctx.lineWidth = 0.8;
   const edgeCPs = new Map();
   for (const e of state.edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     if (e.adopted && !connectOrphans) continue; // скрываем adopted-edges при forest mode
-    const ag = alpha(e.b) * edgeDim(e);
+    // Edge alpha — растёт по самой младшей ноде с удлинённым duration
+    const youngerEdgeAlpha = Math.min(edgeAlphaOf(e.a), edgeAlphaOf(e.b));
+    const ag = youngerEdgeAlpha * edgeDim(e);
     const aS = worldToScreen(e.a.x, e.a.y, cam);
     const bS = worldToScreen(e.b.x, e.b.y, cam);
     const cpWorld = controlPoint({ x: e.a.x, y: e.a.y }, { x: e.b.x, y: e.b.y }, CFG.edgeCurveStrength);
@@ -389,30 +370,55 @@ export function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode, isLight);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
 
-  // ---- PAIR EDGES (tool_use ↔ tool_result, lemon-yellow dotted) ----
-  // Animated dash offset чтобы линии "текли" от source к target — то же
-  // поведение что в WebGL renderer для паритета.
-  if (state.showPairEdges !== false && state.pairEdges && state.pairEdges.length) {
+  // ---- REVERSE SIGNAL (tool_result → tool_use, animated lemon comet) ----
+  // Аналог WebGL pass'а: «комета» бежит от tool_result обратно к tool_use,
+  // визуализируя возврат ответа от инструмента к ассистенту.
+  // На Canvas 2D рисуем 1 частицу на pair с pulsing position по quadratic
+  // Bezier (B → A) и затухающим следом.
+  if (state.showReverseSignal !== false && state.pairEdges && state.pairEdges.length) {
     ctx.save();
-    ctx.lineWidth = 1.4;
-    const dashOffset = -(tSec * 12) % 14;
-    ctx.lineDashOffset = dashOffset;
-    ctx.setLineDash([8, 6]);
     for (const p of state.pairEdges) {
       if (!visible(p.a) || !visible(p.b)) continue;
-      const aS = worldToScreen(p.a.x, p.a.y, cam);
-      const bS = worldToScreen(p.b.x, p.b.y, cam);
+      // SWAP направление: комета летит от B (tool_result) к A (tool_use)
+      const ax = p.b.x, ay = p.b.y;
+      const bx = p.a.x, by = p.a.y;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const off = len * 0.10;
+      const ccx = mx - (dy / len) * off;
+      const ccy = my + (dx / len) * off;
+      // t — фаза кометы 0..1, бежит со скоростью ~1 цикл/сек, разный seed на pair
+      const seed = ((p.a.phase || 0) + (p.b.phase || 0)) * 0.15;
+      const tt = (tSec * 1.0 + seed) % 1.0;
+      // Quadratic Bezier point
+      const u = 1 - tt;
+      const wx = u * u * ax + 2 * u * tt * ccx + tt * tt * bx;
+      const wy = u * u * ay + 2 * u * tt * ccy + tt * tt * by;
+      const sH = worldToScreen(wx, wy, cam);
       const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
-      ctx.strokeStyle = `rgba(255, 235, 92, ${0.85 * ag})`;
+      // head — bell-curve размер вдоль пути (ярче в середине)
+      const head = Math.sin(Math.PI * tt);
+      const r = (3 + 3 * head) * Math.max(0.6, cam.scale);
+      // Halo
+      const halo = ctx.createRadialGradient(sH.x, sH.y, 0, sH.x, sH.y, r * 3);
+      halo.addColorStop(0, `rgba(255, 235, 92, ${0.85 * ag * head})`);
+      halo.addColorStop(1, `rgba(255, 235, 92, 0)`);
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.moveTo(aS.x, aS.y);
-      ctx.lineTo(bS.x, bS.y);
-      ctx.stroke();
+      ctx.arc(sH.x, sH.y, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.fillStyle = `rgba(255, 250, 200, ${0.95 * ag * head})`;
+      ctx.beginPath();
+      ctx.arc(sH.x, sH.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -473,14 +479,6 @@ export function draw(ctx, state, tSec, viewport, extras) {
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Тёмный outline на светлой теме — чтобы ноды не сливались с фоном
-    if (isLight && r >= 2) {
-      ctx.strokeStyle = `rgba(20, 28, 48, ${0.55 * ag})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
 
     // Hub ring (yellow-gold outline для нод с high degree)
     if (n.isHub && perfMode !== 'minimal') {
@@ -586,7 +584,7 @@ export function draw(ctx, state, tSec, viewport, extras) {
     // Metrics badges (только для assistant-нод, под showMetrics toggle).
     // Размещаем под нодой: tokens справа-внизу, ⏱latency слева-внизу.
     if (state.showMetrics && n.role === 'assistant' && perfMode !== 'minimal') {
-      drawMetricsBadges(ctx, n, s, r, ag, isLight);
+      drawMetricsBadges(ctx, n, s, r, ag);
     }
 
     // Thinking nodes: 💭 icon + soft pulsing dashed ring (как «облако мысли»)

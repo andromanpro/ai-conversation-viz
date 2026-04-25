@@ -32,6 +32,7 @@ export function initRenderToggle() {
   try { saved = localStorage.getItem(LS_KEY); } catch {}
   const initialBackend = saved === 'canvas2d' ? 'canvas2d' : 'webgl';
   setBackend(initialBackend, { silent: true });
+  state.useCanvas2D = (state.renderBackend === 'canvas2d');
 
   if (_btn) _btn.addEventListener('click', () => {
     setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
@@ -44,6 +45,13 @@ export function initRenderToggle() {
 
 export function toggleRenderBackend() {
   setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
+}
+
+/** Программное переключение backend'а — для Settings modal toggle. */
+export function setRenderBackend(backend) {
+  if (backend !== 'webgl' && backend !== 'canvas2d') return;
+  if (state.renderBackend === backend) return;
+  setBackend(backend);
 }
 
 function setBackend(backend, opts) {
@@ -60,12 +68,14 @@ function setBackend(backend, opts) {
       }
     }
     state.renderBackend = 'webgl';
+    state.useCanvas2D = false;
     if (_webglCanvas) _webglCanvas.style.display = 'block';
     if (_canvas2d) _canvas2d.style.display = 'none';
     if (_webglCanvas) resizeWebgl(_webglCanvas);
     if (!silent) toast('WebGL режим включён');
   } else {
     state.renderBackend = 'canvas2d';
+    state.useCanvas2D = true;
     if (_webglCanvas) _webglCanvas.style.display = 'none';
     if (_canvas2d) _canvas2d.style.display = 'block';
     if (!silent) toast('Canvas 2D режим');

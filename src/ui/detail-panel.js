@@ -1,6 +1,7 @@
 import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
 import { getAnnotation, setAnnotation, toggleStar } from './annotations.js';
+import { t } from '../core/i18n.js';
 
 let detailEl, detailRoleEl, detailTsEl, detailBodyEl;
 let starBtn, noteTextarea, noteHint;
@@ -36,8 +37,8 @@ function ensureAnnotationUI() {
   starBtn = document.createElement('button');
   starBtn.className = 'detail-star';
   starBtn.type = 'button';
-  starBtn.textContent = '☆ Star';
-  starBtn.title = 'Отметить (S)';
+  starBtn.textContent = t('detail.star');
+  starBtn.title = t('tip.star');
   starBtn.addEventListener('click', () => {
     if (!_currentNode) return;
     toggleStar(_currentNode.id);
@@ -47,7 +48,7 @@ function ensureAnnotationUI() {
 
   noteHint = document.createElement('span');
   noteHint.className = 'detail-note-hint';
-  noteHint.textContent = 'Note (сохраняется в localStorage):';
+  noteHint.textContent = t('hint.detail_note');
   row.appendChild(noteHint);
 
   wrap.appendChild(row);
@@ -55,7 +56,7 @@ function ensureAnnotationUI() {
   noteTextarea = document.createElement('textarea');
   noteTextarea.className = 'detail-note';
   noteTextarea.rows = 3;
-  noteTextarea.placeholder = 'Ваша заметка к этой ноде…';
+  noteTextarea.placeholder = t('placeholder.note');
   noteTextarea.addEventListener('input', () => {
     // Debounce — сохраняем через 400мс после остановки ввода
     if (_saveTimer) clearTimeout(_saveTimer);
@@ -103,8 +104,21 @@ function updateAnnotUI() {
   const ann = getAnnotation(_currentNode.id);
   const starred = !!(ann && ann.starred);
   starBtn.classList.toggle('starred', starred);
-  starBtn.textContent = starred ? '★ Starred' : '☆ Star';
+  starBtn.textContent = starred ? t('detail.starred') : t('detail.star');
   noteTextarea.value = (ann && ann.text) || '';
+}
+
+// Перерисовываем тексты в detail panel при смене языка
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (starBtn) {
+      const ann = _currentNode ? getAnnotation(_currentNode.id) : null;
+      starBtn.textContent = (ann && ann.starred) ? t('detail.starred') : t('detail.star');
+      starBtn.title = t('tip.star');
+    }
+    if (noteHint) noteHint.textContent = t('hint.detail_note');
+    if (noteTextarea) noteTextarea.placeholder = t('placeholder.note');
+  });
 }
 
 export function showDetail(n) {
@@ -114,7 +128,7 @@ export function showDetail(n) {
   detailRoleEl.textContent = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
   detailRoleEl.className = 'role ' + n.role;
   detailTsEl.textContent = new Date(n.ts).toISOString().replace('T', ' ').slice(0, 19);
-  const txt = n.text || '(empty)';
+  const txt = n.text || t('detail.empty');
   detailBodyEl.textContent = txt.length > CFG.excerptChars ? txt.slice(0, CFG.excerptChars) + '…' : txt;
   updateAnnotUI();
   detailEl.classList.add('show');

@@ -78,7 +78,6 @@ const MODULES = [
   'src/ui/bookmarks.js',
   'src/ui/render-toggle.js',
   'src/ui/lang-toggle.js',
-  'src/ui/theme-toggle.js',
   'src/ui/metrics-overlay.js',
   'src/ui/interaction.js',
   'src/ui/loader.js',

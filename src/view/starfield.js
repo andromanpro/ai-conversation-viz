@@ -34,28 +34,13 @@ export function starScreen(star, camera) {
   };
 }
 
-// На светлой теме звёзды не рисуем (--canvas-star-alpha=0).
-// Кешируем чтение CSS-var в каждом кадре через локальный helper.
-function readStarAlpha() {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue('--canvas-star-alpha').trim();
-    if (!v) return 1;
-    const n = parseFloat(v);
-    return isFinite(n) ? n : 1;
-  } catch {
-    return 1;
-  }
-}
-
 export function drawStarfield(ctx, stars, camera, viewport, tSec) {
-  const starAlphaMul = readStarAlpha();
-  if (starAlphaMul <= 0) return;
   const W = viewport.width, H = viewport.height;
   for (const s of stars) {
     const p = starScreen(s, camera);
     if (p.x < -4 || p.x > W + 4 || p.y < -4 || p.y > H + 4) continue;
     const twinkle = 0.85 + 0.15 * Math.sin(tSec * 0.7 + s.phase);
-    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle * starAlphaMul})`;
+    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, s.size, 0, Math.PI * 2);
     ctx.fill();

@@ -5,6 +5,7 @@ import { CFG } from '../core/config.js';
 import { state } from '../view/state.js';
 import { reheat } from '../core/layout.js';
 import { t } from '../core/i18n.js';
+import { setRenderBackend } from './render-toggle.js';
 
 const KEY = 'viz-settings';
 
@@ -54,17 +55,19 @@ function labelOf(key) {
   return t(LABEL_KEY[key] || ('settings.' + key));
 }
 
-// Boolean toggles [groupKey, key, scope]. scope='state' → state.<key>,
-// 'CFG' → CFG.<key>. Label берётся из t('settings.<key>').
+// Boolean toggles [groupKey, key, scope, customApply?]. scope='state' →
+// state.<key>, 'CFG' → CFG.<key>. customApply вызывается после set value.
 const TOGGLES = [
-  ['display', 'showPairEdges',  'state'],
-  ['display', 'showErrorRings', 'state'],
-  ['display', 'showThinking',   'state'],
-  ['metrics', 'showMetrics',    'state'],
+  ['display', 'showReverseSignal', 'state'],
+  ['display', 'showErrorRings',    'state'],
+  ['display', 'showThinking',      'state'],
+  ['metrics', 'showMetrics',       'state'],
+  // useCanvas2D — boolean fallback вместо WebGL (продвинутая опция)
+  ['advanced', 'useCanvas2D',      'state', (val) => setRenderBackend(val ? 'canvas2d' : 'webgl')],
 ];
 
 // Группы в порядке отображения. Если в группе нет параметров — пропускается.
-const GROUP_ORDER = ['physics', 'visual', 'display', 'metrics', 'playback', 'birth'];
+const GROUP_ORDER = ['physics', 'visual', 'display', 'metrics', 'playback', 'birth', 'advanced'];
 
 let modalEl, btn;
 
@@ -127,6 +130,7 @@ function open() {
     for (const tg of items.toggles) {
       const key = tg[1];
       const scope = tg[2];
+      const customApply = tg[3];
       const row = document.createElement('div');
       row.className = 'settings-row settings-row-toggle';
       const lbl = document.createElement('label');
@@ -136,10 +140,13 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      input.checked = target[key] !== false; // default ON
+      // Для useCanvas2D default = false (WebGL по умолчанию). Для остальных
+      // toggle'ов — default ON (если поле не задано — считаем true).
+      input.checked = key === 'useCanvas2D' ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
         save();
+        if (customApply) customApply(target[key]);
       });
       row.appendChild(lbl);
       row.appendChild(input);

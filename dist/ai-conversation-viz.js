@@ -1668,8 +1668,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.2 · force-directed',
-    'header.subtitle_standalone': 'v1.5.2 · standalone bundle',
+    'header.subtitle_force': 'v1.5.3 · force-directed',
+    'header.subtitle_standalone': 'v1.5.3 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1772,6 +1772,13 @@ const DICT = {
     'stats.hubs': 'hubs',
     'stats.longest': 'longest',
     'stats.timeline': 'timeline',
+    'stats.nodes': 'nodes',
+    'stats.edges': 'edges',
+    'stats.lines': 'lines',
+    'stats.parsed': 'parsed',
+    'stats.kept': 'kept',
+    'stats.skipped': 'skipped',
+    'stats.errors': 'errors',
 
     // Detail panel
     'detail.empty': '(empty)',
@@ -1789,6 +1796,7 @@ const DICT = {
     'settings.group.birth': 'Birth animation',
     'settings.group.display': 'Display',
     'settings.group.metrics': 'Metrics',
+    'settings.group.advanced': 'Advanced',
     'settings.header': '⚙ Settings',
     // Settings keys
     'settings.repulsion': 'Repulsion strength',
@@ -1810,14 +1818,11 @@ const DICT = {
     'settings.maxChars': 'Max chars per bubble',
     'settings.postGapMs': 'Min gap between bubbles',
     'settings.birthMs': 'Birth animation (ms)',
-    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showReverseSignal': 'Reverse signal (tool_result → tool_use)',
     'settings.showErrorRings': 'Error rings (red dashed)',
     'settings.showThinking': 'Thinking blocks (purple)',
     'settings.showMetrics': 'Token & duration badges',
-    // Theme
-    'tip.theme_light': 'Switch to light theme (T)',
-    'tip.theme_dark': 'Switch to dark theme (T)',
-    'aria.theme': 'Toggle theme',
+    'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
 
     // Live status
     'live.idle': 'idle',
@@ -1860,8 +1865,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.2 · force-directed',
-    'header.subtitle_standalone': 'v1.5.2 · standalone-сборка',
+    'header.subtitle_force': 'v1.5.3 · force-directed',
+    'header.subtitle_standalone': 'v1.5.3 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -1954,9 +1959,16 @@ const DICT = {
     'stats.tokens': 'токены',
     'stats.duration': 'длительность',
     'stats.top_tools': 'топ-инструменты',
-    'stats.hubs': 'hubs',
+    'stats.hubs': 'хабы',
     'stats.longest': 'самое длинное',
     'stats.timeline': 'шкала',
+    'stats.nodes': 'нод',
+    'stats.edges': 'связей',
+    'stats.lines': 'строк',
+    'stats.parsed': 'разобрано',
+    'stats.kept': 'оставлено',
+    'stats.skipped': 'пропущено',
+    'stats.errors': 'ошибок',
 
     'detail.empty': '(пусто)',
     'detail.star': '☆ Звезда',
@@ -1971,6 +1983,7 @@ const DICT = {
     'settings.group.birth': 'Анимация рождения',
     'settings.group.display': 'Отображение',
     'settings.group.metrics': 'Метрики',
+    'settings.group.advanced': 'Продвинутые',
     'settings.header': '⚙ Настройки',
     'settings.repulsion': 'Сила отталкивания',
     'settings.spring': 'Жёсткость пружины',
@@ -1991,13 +2004,11 @@ const DICT = {
     'settings.maxChars': 'Макс. символов в пузыре',
     'settings.postGapMs': 'Мин. пауза между пузырями',
     'settings.birthMs': 'Анимация рождения (мс)',
-    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showReverseSignal': 'Обратный сигнал (tool_result → tool_use)',
     'settings.showErrorRings': 'Кольца ошибок (красные пунктиры)',
     'settings.showThinking': 'Thinking-блоки (фиолетовые)',
     'settings.showMetrics': 'Бейджи токенов и времени',
-    'tip.theme_light': 'Светлая тема (T)',
-    'tip.theme_dark': 'Тёмная тема (T)',
-    'aria.theme': 'Переключить тему',
+    'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',
@@ -2133,11 +2144,11 @@ const state = {
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
-  showPairEdges: true,    // лимонные пунктирные tool_use ↔ tool_result связи
+  showReverseSignal: true,// анимированный обратный импульс tool_result → tool_use
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
-  theme: 'dark',          // 'dark' | 'light'
+  useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
 };
 
 function resetInteractionState() {
@@ -2420,28 +2431,13 @@ function starScreen(star, camera) {
   };
 }
 
-// На светлой теме звёзды не рисуем (--canvas-star-alpha=0).
-// Кешируем чтение CSS-var в каждом кадре через локальный helper.
-function readStarAlpha() {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue('--canvas-star-alpha').trim();
-    if (!v) return 1;
-    const n = parseFloat(v);
-    return isFinite(n) ? n : 1;
-  } catch {
-    return 1;
-  }
-}
-
 function drawStarfield(ctx, stars, camera, viewport, tSec) {
-  const starAlphaMul = readStarAlpha();
-  if (starAlphaMul <= 0) return;
   const W = viewport.width, H = viewport.height;
   for (const s of stars) {
     const p = starScreen(s, camera);
     if (p.x < -4 || p.x > W + 4 || p.y < -4 || p.y > H + 4) continue;
     const twinkle = 0.85 + 0.15 * Math.sin(tSec * 0.7 + s.phase);
-    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle * starAlphaMul})`;
+    ctx.fillStyle = `rgba(200, 220, 255, ${s.alpha * twinkle})`;
     ctx.beginPath();
     ctx.arc(p.x, p.y, s.size, 0, Math.PI * 2);
     ctx.fill();
@@ -2659,24 +2655,6 @@ function hueToRgbaString(hue, saturation = 0.65, lightness = 0.6, alpha = 1) {
     const { toolIcon } = __M["src/view/tool-icons.js"];
     const { hueToRgbaString } = __M["src/view/topics.js"];
 
-// Простой helper: читает CSS-переменную с :root. Возвращает строку
-// (для прямого использования с ctx.fillStyle/strokeStyle), либо fallback.
-// Кеш-light: на каждый кадр читаем заново — но это всего 8 переменных.
-function cssVar(name, fallback) {
-  try {
-    const s = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return s || fallback;
-  } catch {
-    return fallback;
-  }
-}
-function cssVarNum(name, fallback) {
-  const v = cssVar(name, '');
-  if (!v) return fallback;
-  const n = parseFloat(v);
-  return isFinite(n) ? n : fallback;
-}
-
 function timelineCutoff(state) {
   if (!state.nodes.length) return Infinity;
   let tsMin = Infinity, tsMax = -Infinity;
@@ -2740,14 +2718,8 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
   return `rgba(30, 110, 95, ${alpha})`;
 }
 
-function edgeRgba(childRole, alpha, edge, diffMode, light) {
+function edgeRgba(childRole, alpha, edge, diffMode) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
-  if (light) {
-    // На светлой теме — тёмные насыщенные цвета вместо неоновых
-    if (childRole === 'tool_use') return `rgba(180, 90, 20, ${alpha * 1.5})`;
-    if (childRole === 'thinking') return `rgba(110, 70, 200, ${alpha * 1.3})`;
-    return `rgba(20, 70, 160, ${alpha * 1.3})`;
-  }
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
   if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
   return `rgba(0, 212, 255, ${alpha})`;
@@ -2811,7 +2783,7 @@ function formatLatencyCompact(ms) {
   const m = Math.floor(sec / 60);
   return m + 'm' + Math.round(sec - m * 60) + 's';
 }
-function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
+function drawMetricsBadges(ctx, n, s, r, ag) {
   const tokens = n.tokensOut || 0;
   const latency = n.responseLatencyMs || 0;
   if (!tokens && latency < 1500) return;
@@ -2822,7 +2794,7 @@ function drawMetricsBadges(ctx, n, s, r, ag, isLight) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const padH = 4, padV = 2;
-  const bgFill = isLight ? `rgba(20, 30, 60, ${0.78 * ag})` : `rgba(20, 30, 60, ${0.82 * ag})`;
+  const bgFill = `rgba(20, 30, 60, ${0.82 * ag})`;
   const fgText = `rgba(220, 235, 255, ${Math.min(1, ag * 0.95)})`;
 
   // Tokens — справа-снизу
@@ -2894,14 +2866,14 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 function draw(ctx, state, tSec, viewport, extras) {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  // Radial vignette — читаем стопы из CSS vars (зависит от темы)
+  // Radial vignette — тёмный cyberpunk-фон
   const W = viewport.width, H = viewport.height;
   const vcx = viewport.cx != null ? viewport.cx : W / 2;
   const vcy = viewport.cy != null ? viewport.cy : H / 2;
   const grad = ctx.createRadialGradient(vcx, vcy, 0, vcx, vcy, Math.max(W, H) * 0.8);
-  grad.addColorStop(0, cssVar('--canvas-vig-1', 'rgba(14, 22, 44, 1)'));
-  grad.addColorStop(0.6, cssVar('--canvas-vig-2', 'rgba(10, 14, 26, 1)'));
-  grad.addColorStop(1, cssVar('--canvas-vig-3', 'rgba(5, 8, 16, 1)'));
+  grad.addColorStop(0, 'rgba(14, 22, 44, 1)');
+  grad.addColorStop(0.6, 'rgba(10, 14, 26, 1)');
+  grad.addColorStop(1, 'rgba(5, 8, 16, 1)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -2993,6 +2965,10 @@ function draw(ctx, state, tSec, viewport, extras) {
   const bfOf = n => birthFactor(n.bornAt, nowMs, CFG.birthDurationMs);
   const alpha = n => CFG.birthAlphaStart + (1 - CFG.birthAlphaStart) * easeOutCubic(bfOf(n));
   const sizeScale = n => CFG.birthRadiusStart + (1 - CFG.birthRadiusStart) * easeOutCubic(bfOf(n));
+  // Edge birth — длительнее ноды (чтобы линия не «вспыхивала», а росла)
+  const edgeBirthMs = CFG.birthDurationMs * 1.6;
+  const edgeBfOf = n => birthFactor(n.bornAt, nowMs, edgeBirthMs);
+  const edgeAlphaOf = n => easeOutCubic(edgeBfOf(n)); // от 0 до 1, без начального birthAlphaStart
   const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && state.collapsed && state.collapsed.has(n.parentId);
   const thinkingHidden = state.showThinking === false;
   const visible = n => n.ts <= cutoff && n.bornAt != null
@@ -3025,13 +3001,14 @@ function draw(ctx, state, tSec, viewport, extras) {
   const N = state.nodes.length;
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
-  const isLight = state.theme === 'light';
   ctx.lineWidth = 0.8;
   const edgeCPs = new Map();
   for (const e of state.edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     if (e.adopted && !connectOrphans) continue; // скрываем adopted-edges при forest mode
-    const ag = alpha(e.b) * edgeDim(e);
+    // Edge alpha — растёт по самой младшей ноде с удлинённым duration
+    const youngerEdgeAlpha = Math.min(edgeAlphaOf(e.a), edgeAlphaOf(e.b));
+    const ag = youngerEdgeAlpha * edgeDim(e);
     const aS = worldToScreen(e.a.x, e.a.y, cam);
     const bS = worldToScreen(e.b.x, e.b.y, cam);
     const cpWorld = controlPoint({ x: e.a.x, y: e.a.y }, { x: e.b.x, y: e.b.y }, CFG.edgeCurveStrength);
@@ -3044,30 +3021,55 @@ function draw(ctx, state, tSec, viewport, extras) {
       drawEdgeCurve(ctx, aS, bS, cpS);
       ctx.restore();
     } else {
-      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode, isLight);
+      ctx.strokeStyle = edgeRgba(e.b.role, 0.35 * ag * fogMul, e, !!state.diffMode);
       drawEdgeCurve(ctx, aS, bS, cpS);
     }
   }
 
-  // ---- PAIR EDGES (tool_use ↔ tool_result, lemon-yellow dotted) ----
-  // Animated dash offset чтобы линии "текли" от source к target — то же
-  // поведение что в WebGL renderer для паритета.
-  if (state.showPairEdges !== false && state.pairEdges && state.pairEdges.length) {
+  // ---- REVERSE SIGNAL (tool_result → tool_use, animated lemon comet) ----
+  // Аналог WebGL pass'а: «комета» бежит от tool_result обратно к tool_use,
+  // визуализируя возврат ответа от инструмента к ассистенту.
+  // На Canvas 2D рисуем 1 частицу на pair с pulsing position по quadratic
+  // Bezier (B → A) и затухающим следом.
+  if (state.showReverseSignal !== false && state.pairEdges && state.pairEdges.length) {
     ctx.save();
-    ctx.lineWidth = 1.4;
-    const dashOffset = -(tSec * 12) % 14;
-    ctx.lineDashOffset = dashOffset;
-    ctx.setLineDash([8, 6]);
     for (const p of state.pairEdges) {
       if (!visible(p.a) || !visible(p.b)) continue;
-      const aS = worldToScreen(p.a.x, p.a.y, cam);
-      const bS = worldToScreen(p.b.x, p.b.y, cam);
+      // SWAP направление: комета летит от B (tool_result) к A (tool_use)
+      const ax = p.b.x, ay = p.b.y;
+      const bx = p.a.x, by = p.a.y;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const off = len * 0.10;
+      const ccx = mx - (dy / len) * off;
+      const ccy = my + (dx / len) * off;
+      // t — фаза кометы 0..1, бежит со скоростью ~1 цикл/сек, разный seed на pair
+      const seed = ((p.a.phase || 0) + (p.b.phase || 0)) * 0.15;
+      const tt = (tSec * 1.0 + seed) % 1.0;
+      // Quadratic Bezier point
+      const u = 1 - tt;
+      const wx = u * u * ax + 2 * u * tt * ccx + tt * tt * bx;
+      const wy = u * u * ay + 2 * u * tt * ccy + tt * tt * by;
+      const sH = worldToScreen(wx, wy, cam);
       const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
-      ctx.strokeStyle = `rgba(255, 235, 92, ${0.85 * ag})`;
+      // head — bell-curve размер вдоль пути (ярче в середине)
+      const head = Math.sin(Math.PI * tt);
+      const r = (3 + 3 * head) * Math.max(0.6, cam.scale);
+      // Halo
+      const halo = ctx.createRadialGradient(sH.x, sH.y, 0, sH.x, sH.y, r * 3);
+      halo.addColorStop(0, `rgba(255, 235, 92, ${0.85 * ag * head})`);
+      halo.addColorStop(1, `rgba(255, 235, 92, 0)`);
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.moveTo(aS.x, aS.y);
-      ctx.lineTo(bS.x, bS.y);
-      ctx.stroke();
+      ctx.arc(sH.x, sH.y, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.fillStyle = `rgba(255, 250, 200, ${0.95 * ag * head})`;
+      ctx.beginPath();
+      ctx.arc(sH.x, sH.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -3128,14 +3130,6 @@ function draw(ctx, state, tSec, viewport, extras) {
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Тёмный outline на светлой теме — чтобы ноды не сливались с фоном
-    if (isLight && r >= 2) {
-      ctx.strokeStyle = `rgba(20, 28, 48, ${0.55 * ag})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
 
     // Hub ring (yellow-gold outline для нод с high degree)
     if (n.isHub && perfMode !== 'minimal') {
@@ -3241,7 +3235,7 @@ function draw(ctx, state, tSec, viewport, extras) {
     // Metrics badges (только для assistant-нод, под showMetrics toggle).
     // Размещаем под нодой: tokens справа-внизу, ⏱latency слева-внизу.
     if (state.showMetrics && n.role === 'assistant' && perfMode !== 'minimal') {
-      drawMetricsBadges(ctx, n, s, r, ag, isLight);
+      drawMetricsBadges(ctx, n, s, r, ag);
     }
 
     // Thinking nodes: 💭 icon + soft pulsing dashed ring (как «облако мысли»)
@@ -3371,47 +3365,34 @@ const POINT_VS = `
 `;
 
 // Multi-layer glow: плотное белое ядро → насыщенный цветной middle →
-// мягкий halo. На тёмной теме — wow-эффект как у светящихся орбов.
-// На светлой теме (u_light=1.0) — solid цветной диск с тёмным кантом
-// без white-core/halo (иначе ноды растворяются в белом фоне).
+// мягкий halo. Даёт бёрн-эффект как у реальных светящихся орбов.
 const POINT_FS = `
   precision mediump float;
   varying vec4 v_color;
   varying float v_pulse;
   varying float v_highlight;
-  uniform float u_light;   // 0 = dark theme, 1 = light theme
 
   void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) discard;
 
+    // Три слоя:
+    //   core   — плотная яркая сердцевина (белая, нормализованная цветом)
+    //   mid    — основной тон ноды
+    //   halo   — мягкое свечение до края
     float core = smoothstep(0.25, 0.0, dist);
     float mid  = smoothstep(0.5, 0.15, dist);
     float halo = smoothstep(0.5, 0.0, dist) * 0.45;
 
-    vec3 rgb;
-    float alpha;
+    // Белая сердцевина: цвет стремится к белому в центре.
+    vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
 
-    if (u_light > 0.5) {
-      // Light theme: solid цвет ноды + тёмный outline на ободе
-      // Никакого whiteCore — иначе нода превращается в белое пятно
-      rgb = v_color.rgb;
-      // Лёгкое затемнение от центра к краю (имитация объёма)
-      rgb *= 0.85 + 0.15 * (1.0 - dist * 2.0);
-      // Тёмный кант
-      float outline = smoothstep(0.40, 0.50, dist);
-      rgb = mix(rgb, vec3(0.05, 0.08, 0.18), outline * 0.85);
-      // Сплошная alpha внутри диска, плавный край
-      alpha = smoothstep(0.5, 0.45, dist) * v_color.a * 1.05;
-    } else {
-      // Dark theme: glow + whiteCore — wow эффект
-      vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
-      rgb = whiteCore * (mid + halo * 0.35);
-      alpha = (mid + halo) * v_color.a;
-    }
+    // Композиция (additive-friendly)
+    vec3 rgb = whiteCore * (mid + halo * 0.35);
+    float alpha = (mid + halo) * v_color.a;
 
-    // Search-match подсветка работает в обеих темах
+    // Search-match — подсветка белым поверх
     if (mod(v_highlight, 2.0) >= 1.0) {
       float flash = smoothstep(0.5, 0.2, dist) * (0.5 + 0.5 * v_pulse);
       rgb += vec3(1.0, 1.0, 0.85) * flash * 0.6;
@@ -3496,42 +3477,6 @@ const LINE_FS = `
 // Координаты идут как gl.LINES сегменты; для dotted-effect используем
 // varying, который меняется вдоль линии (в каждой паре вершин t=0 и t=1),
 // и в fragment отрезаем по mod(длина_от_старта).
-const PAIR_VS = `
-  precision mediump float;
-  attribute vec2 a_position;
-  attribute float a_t;          // 0 у source, 1 у target — позиция вдоль pair-edge
-  attribute float a_seglen;     // длина сегмента в screen px (для частоты пунктира)
-  uniform vec2 u_camera;
-  uniform float u_scale;
-  uniform vec2 u_viewport;
-  varying float v_t;
-  varying float v_seglen;
-  void main() {
-    vec2 screen = (a_position - u_camera) * u_scale;
-    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
-    clip.y = -clip.y;
-    gl_Position = vec4(clip, 0.0, 1.0);
-    v_t = a_t;
-    v_seglen = a_seglen;
-  }
-`;
-const PAIR_FS = `
-  precision mediump float;
-  varying float v_t;
-  varying float v_seglen;
-  uniform float u_time;
-  uniform vec3 u_color;       // RGB для пунктира (зависит от темы)
-  uniform float u_alpha;      // общая прозрачность
-  void main() {
-    // Pattern: 12px on / 8px off + animated phase
-    float distance_px = v_t * v_seglen;
-    float anim = u_time * 12.0;
-    float phase = mod(distance_px - anim, 20.0);
-    if (phase > 12.0) discard;
-    float fade = smoothstep(12.0, 8.0, phase);
-    gl_FragColor = vec4(u_color, fade * u_alpha);
-  }
-`;
 
 // --- Error ring (красная пунктирная окружность вокруг assistant с tool error) ---
 const ERR_VS = `
@@ -3688,8 +3633,8 @@ function compileProgram(gl, vsSrc, fsSrc) {
 let gl = null;
 let canvasEl = null;
 
-let pointProg, hubProg, lineProg, particleProg, starProg, pairProg, errProg;
-let pointBuf, hubBuf, lineBuf, particleBuf, starBuf, pairBuf, errBuf;
+let pointProg, hubProg, lineProg, particleProg, starProg, errProg;
+let pointBuf, hubBuf, lineBuf, particleBuf, starBuf, reverseBuf, errBuf;
 
 // Layouts (floats per vertex)
 const POINT_STRIDE = 9;    // x, y, r, g, b, a, size, phase, flags
@@ -3697,15 +3642,15 @@ const HUB_STRIDE = 8;      // x, y, r, g, b, a, size, phase
 const LINE_STRIDE = 6;     // x, y, r, g, b, a
 const PARTICLE_STRIDE = 10; // ax, ay, bx, by, cx, cy, r, g, b, a (offset/speed вычисляются из mod+index)
 const STAR_STRIDE = 4;     // x, y, size, depth
-const PAIR_STRIDE = 4;     // x, y, t (0..1 along edge), seglen (px) — для dotted pattern
+const REVERSE_STRIDE = 10; // тот же layout что PARTICLE — переиспользуем particleProg
 const ERR_STRIDE = 4;      // x, y, size, phase
 
-let pointArr, hubArr, lineArr, particleArr, pairArr, errArr;
+let pointArr, hubArr, lineArr, particleArr, reverseArr, errArr;
 let starsBuilt = null; // Float32Array, statиc
 
 // Uniforms
-const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {}, uPair = {}, uErr = {};
-const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {}, aPair = {}, aErr = {};
+const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {}, uErr = {};
+const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {}, aErr = {};
 
 const EDGE_SEGMENTS = 10;
 const PARTICLES_PER_EDGE = 2;
@@ -3739,13 +3684,11 @@ function initWebglRenderer(canvas) {
   starProg = compileProgram(gl, STAR_VS, STAR_FS);
   // Новые passes (v1.3) — компилируем отдельно, чтобы их падение не
   // ломало всё. При fail просто отключаем pass через null-program.
-  try { pairProg = compileProgram(gl, PAIR_VS, PAIR_FS); }
-  catch (e) { pairProg = null; if (typeof console !== 'undefined') console.warn('[webgl] pairProg compile failed:', e.message); }
   try { errProg = compileProgram(gl, ERR_VS, ERR_FS); }
   catch (e) { errProg = null; if (typeof console !== 'undefined') console.warn('[webgl] errProg compile failed:', e.message); }
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time', 'u_light']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(hubProg, aHub, uHub, ['a_position', 'a_color', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(lineProg, aLine, uLine, ['a_position', 'a_color'],
@@ -3754,8 +3697,6 @@ function initWebglRenderer(canvas) {
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
-  if (pairProg) cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_time', 'u_color', 'u_alpha']);
   if (errProg) cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
@@ -3764,7 +3705,7 @@ function initWebglRenderer(canvas) {
   lineBuf = gl.createBuffer();
   particleBuf = gl.createBuffer();
   starBuf = gl.createBuffer();
-  pairBuf = gl.createBuffer();
+  reverseBuf = gl.createBuffer();
   errBuf = gl.createBuffer();
 
   gl.enable(gl.BLEND);
@@ -3824,13 +3765,6 @@ const ROLE_RGB = {
   tool_use: [0.925, 0.627, 0.250],
   thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
-// Тёмные варианты для светлой темы — пастельные цвета теряются на белом
-const ROLE_RGB_LIGHT = {
-  user: [0.17, 0.37, 0.72],       // тёмно-синий
-  assistant: [0.10, 0.62, 0.48],  // тёмно-зелёный
-  tool_use: [0.77, 0.42, 0.07],   // burnt orange
-  thinking: [0.48, 0.31, 0.85],   // насыщенный фиолетовый
-};
 
 const DIFF_RGB = {
   A: [1.0, 0.376, 0.686],
@@ -3855,15 +3789,12 @@ function hslToRgb(h, s, l) {
 
 function nodeColor(n, state, out) {
   let r, g, b;
-  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     [r, g, b] = DIFF_RGB[n._diffOrigin] || DIFF_RGB.both;
   } else if (state.topicsMode && n._topicHue != null) {
-    // На light теме — насыщенные цвета (lightness ниже)
-    [r, g, b] = hslToRgb(n._topicHue, 0.75, isLight ? 0.42 : 0.58);
+    [r, g, b] = hslToRgb(n._topicHue, 0.75, 0.58);
   } else {
-    const palette = isLight ? ROLE_RGB_LIGHT : ROLE_RGB;
-    [r, g, b] = palette[n.role] || [0.5, 0.5, 0.5];
+    [r, g, b] = ROLE_RGB[n.role] || [0.5, 0.5, 0.5];
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -3871,21 +3802,16 @@ function nodeColor(n, state, out) {
 
 function edgeColor(e, state, out) {
   let r, g, b;
-  const isLight = state.theme === 'light';
   if (state.diffMode && e.diffSide === 'B') {
     [r, g, b] = DIFF_RGB.B;
   } else if (e.adopted) {
-    if (isLight) { r = 0.45; g = 0.35; b = 0.10; }
-    else { r = 0.78; g = 0.71; b = 0.47; }
+    r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
-    if (isLight) { r = 0.65; g = 0.32; b = 0.08; }   // darker burnt-orange
-    else { r = 0.925; g = 0.627; b = 0.250; }
+    r = 0.925; g = 0.627; b = 0.250;
   } else if (e.b && e.b.role === 'thinking') {
-    if (isLight) { r = 0.42; g = 0.27; b = 0.78; }   // насыщенный фиолетовый
-    else { r = 0.71; g = 0.55; b = 1.0; }
+    r = 0.71; g = 0.55; b = 1.0;
   } else {
-    if (isLight) { r = 0.08; g = 0.27; b = 0.62; }   // тёмно-синий навсегда
-    else { r = 0.0; g = 0.831; b = 1.0; }
+    r = 0.0; g = 0.831; b = 1.0;
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -3926,11 +3852,11 @@ function ensureArr(name, neededFloats) {
         particleArr = new Float32Array(Math.max(neededFloats, (particleArr?.length || 0) * 2 || 1024));
       }
       return particleArr;
-    case 'pair':
-      if (!pairArr || pairArr.length < neededFloats) {
-        pairArr = new Float32Array(Math.max(neededFloats, (pairArr?.length || 0) * 2 || 256));
+    case 'reverse':
+      if (!reverseArr || reverseArr.length < neededFloats) {
+        reverseArr = new Float32Array(Math.max(neededFloats, (reverseArr?.length || 0) * 2 || 1024));
       }
-      return pairArr;
+      return reverseArr;
     case 'err':
       if (!errArr || errArr.length < neededFloats) {
         errArr = new Float32Array(Math.max(neededFloats, (errArr?.length || 0) * 2 || 64));
@@ -4025,7 +3951,7 @@ function quadBezier(ax, ay, bx, by, cx, cy, t, out) {
   out[1] = u * u * ay + 2 * u * t * cy + t * t * by;
 }
 
-function fillLineBuffer(state) {
+function fillLineBuffer(state, nowMs) {
   const edges = state.edges;
   const hidden = state.hiddenRoles;
   const connectOrphans = !!state.connectOrphans;
@@ -4039,6 +3965,9 @@ function fillLineBuffer(state) {
   let count = 0;
 
   const thinkingHidden = state.showThinking === false;
+  // Удлинённый birth для edges — чтобы росли плавнее обычной ноды
+  // (нода 600ms, edge выпускает 1000ms = чуть длительнее)
+  const edgeBirthMs = CFG.birthDurationMs * 1.6;
   for (const e of edges) {
     if (!e.a || !e.b) continue;
     if (e.a.bornAt == null || e.b.bornAt == null) continue;
@@ -4048,9 +3977,12 @@ function fillLineBuffer(state) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
 
-    // На светлой теме edges должны быть жирнее, иначе теряются
-    const edgeBoost = state.theme === 'light' ? 1.5 : 1.0;
-    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * edgeBoost;
+    // Birth factor edge'а — берём по самой младшей ноде (b обычно).
+    // Используем удлинённый edgeBirthMs + ease-out cubic для плавности.
+    const youngerBornAt = Math.max(e.a.bornAt, e.b.bornAt);
+    const bft = nowMs != null ? Math.min(1, Math.max(0, (nowMs - youngerBornAt) / edgeBirthMs)) : 1;
+    const birthMul = 1 - Math.pow(1 - bft, 3); // easeOutCubic
+    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * birthMul;
     if (hasSearch) {
       edgeAlpha *= (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
     } else if (topicFilter) {
@@ -4142,15 +4074,25 @@ function fillParticleBuffer(state) {
   return count;
 }
 
-// Заполняет буфер для pair-edges (tool_use ↔ tool_result, dotted lemon-yellow).
-// Каждое pair → одна gl.LINES линия от source.{x,y} к target.{x,y}.
-// Per-vertex данные: t (0 у source, 1 у target), seglen (полная длина сегмента в screen px).
-function fillPairBuffer(state, scale) {
-  if (state.showPairEdges === false) return 0;
+// Заполняет буфер reverse-signal частиц.
+//
+// Идея: вместо статичных пунктирных tool_use ↔ tool_result связей, рисуем
+// светящуюся «комету», бегущую ОТ tool_result (b) → ОБРАТНО к tool_use (a).
+// Это визуализирует поток ответа от инструмента к ассистенту, который
+// его вызвал. Wow-эффект для multi-tool turn'ов: видно как N ответов
+// разлетаются обратно к N разным tool_use родителям.
+//
+// Переиспользуем существующий particleProg shader: тот же layout
+// (a_start, a_end, a_ctrl, a_color, a_offset, a_speed). SWAP a_start↔a_end
+// → particle движется в обратную сторону. Цвет — лимонно-жёлтый.
+const REVERSE_PARTICLES_PER_EDGE = 1;
+const REVERSE_RGB = [1.0, 0.92, 0.36]; // lemon
+function fillReverseSignalBuffer(state) {
+  if (state.showReverseSignal === false) return 0;
   const pairs = state.pairEdges || [];
   if (!pairs.length) return 0;
-  ensureArr('pair', pairs.length * 2 * PAIR_STRIDE);
-  const arr = pairArr;
+  ensureArr('reverse', pairs.length * REVERSE_PARTICLES_PER_EDGE * REVERSE_STRIDE);
+  const arr = reverseArr;
   let count = 0;
   const hidden = state.hiddenRoles;
   const collapsed = state.collapsed;
@@ -4162,15 +4104,29 @@ function fillPairBuffer(state, scale) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(a) || isCollapsedChild(b)) continue;
 
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const lenWorld = Math.hypot(dx, dy) || 1;
-    const seglenPx = lenWorld * scale; // в screen px при текущем zoom
-    let o = count * PAIR_STRIDE;
-    arr[o++] = a.x; arr[o++] = a.y; arr[o++] = 0; arr[o++] = seglenPx;
-    count++;
-    o = count * PAIR_STRIDE;
-    arr[o++] = b.x; arr[o++] = b.y; arr[o++] = 1; arr[o++] = seglenPx;
-    count++;
+    // SWAP направление: start = b (tool_result), end = a (tool_use)
+    const ax = b.x, ay = b.y; // start
+    const bx = a.x, by = a.y; // end
+    // Control point — лёгкий arc, отнесён ортогонально от середины
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    // отгибаем влево от направления; небольшая амплитуда чтобы не путать
+    const off = len * 0.10;
+    const cx = mx - (dy / len) * off;
+    const cy = my + (dx / len) * off;
+    for (let i = 0; i < REVERSE_PARTICLES_PER_EDGE; i++) {
+      const o = count * REVERSE_STRIDE;
+      arr[o + 0] = ax; arr[o + 1] = ay;
+      arr[o + 2] = bx; arr[o + 3] = by;
+      arr[o + 4] = cx; arr[o + 5] = cy;
+      arr[o + 6] = REVERSE_RGB[0];
+      arr[o + 7] = REVERSE_RGB[1];
+      arr[o + 8] = REVERSE_RGB[2];
+      arr[o + 9] = 1.0;
+      count++;
+    }
   }
   return count;
 }
@@ -4218,9 +4174,8 @@ function drawWebgl(state, tSec, viewport) {
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // ---- 1. Starfield (только если --canvas-star-alpha > 0; на light theme = 0) ----
-  const starAlphaMul = readCssVarNum('--canvas-star-alpha', 1);
-  if (starsBuilt && starAlphaMul > 0) {
+  // ---- 1. Starfield ----
+  if (starsBuilt) {
     gl.useProgram(starProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
     const stride = STAR_STRIDE * 4;
@@ -4238,7 +4193,7 @@ function drawWebgl(state, tSec, viewport) {
   }
 
   // ---- 2. Edge lines (основа) ----
-  const lineCount = fillLineBuffer(state);
+  const lineCount = fillLineBuffer(state, nowMs);
   if (lineCount > 0) {
     gl.useProgram(lineProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
@@ -4316,41 +4271,41 @@ function drawWebgl(state, tSec, viewport) {
     gl.drawArrays(gl.POINTS, 0, hubCount);
   }
 
-  // ---- 5. Pair edges (tool_use ↔ tool_result, lemon-yellow dotted) ----
-  // Defensive: если pair shader не скомпилировался или fillPairBuffer
-  // упадёт — не валим весь render.
+  // ---- 5. Reverse signal particles (tool_result → tool_use, lemon comet) ----
+  // Переиспользуем particleProg shader; в буфере a_start/a_end SWAPped
+  // относительно обычных particles → частица движется в обратную сторону.
   try {
-    if (pairProg) {
-      const pairCount = fillPairBuffer(state, state.camera.scale);
-      if (pairCount > 0) {
-        gl.useProgram(pairProg);
-        gl.bindBuffer(gl.ARRAY_BUFFER, pairBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, pairArr.subarray(0, pairCount * PAIR_STRIDE), gl.DYNAMIC_DRAW);
-        const stride = PAIR_STRIDE * 4;
-        gl.enableVertexAttribArray(aPair.position);
-        gl.vertexAttribPointer(aPair.position, 2, gl.FLOAT, false, stride, 0);
-        gl.enableVertexAttribArray(aPair.t);
-        gl.vertexAttribPointer(aPair.t, 1, gl.FLOAT, false, stride, 2 * 4);
-        gl.enableVertexAttribArray(aPair.seglen);
-        gl.vertexAttribPointer(aPair.seglen, 1, gl.FLOAT, false, stride, 3 * 4);
-        gl.uniform2f(uPair.camera, state.camera.x, state.camera.y);
-        gl.uniform1f(uPair.scale, state.camera.scale);
-        gl.uniform2f(uPair.viewport, vw, vh);
-        gl.uniform1f(uPair.time, tSec);
-        // Цвет пунктира: на тёмной — лимонно-жёлтый, на светлой — насыщенный янтарь
-        if (state.theme === 'light') {
-          gl.uniform3f(uPair.color, 0.62, 0.42, 0.05);
-          gl.uniform1f(uPair.alpha, 0.95);
-        } else {
-          gl.uniform3f(uPair.color, 1.0, 0.92, 0.36);
-          gl.uniform1f(uPair.alpha, 0.85);
-        }
-        gl.drawArrays(gl.LINES, 0, pairCount);
-      }
+    const reverseCount = fillReverseSignalBuffer(state);
+    if (reverseCount > 0) {
+      gl.useProgram(particleProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, reverseBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, reverseArr.subarray(0, reverseCount * REVERSE_STRIDE), gl.DYNAMIC_DRAW);
+      const stride = REVERSE_STRIDE * 4;
+      gl.enableVertexAttribArray(aParticle.start);
+      gl.vertexAttribPointer(aParticle.start, 2, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(aParticle.end);
+      gl.vertexAttribPointer(aParticle.end, 2, gl.FLOAT, false, stride, 2 * 4);
+      gl.enableVertexAttribArray(aParticle.ctrl);
+      gl.vertexAttribPointer(aParticle.ctrl, 2, gl.FLOAT, false, stride, 4 * 4);
+      gl.enableVertexAttribArray(aParticle.color);
+      gl.vertexAttribPointer(aParticle.color, 4, gl.FLOAT, false, stride, 6 * 4);
+      // a_offset / a_speed считаем в JS-side (они в shader'е uniform-like
+      // через vertex_id фактически, но удобнее вычислить из id частицы).
+      // Пока — vertexAttrib1f задаёт constant-per-draw (упрощение): один
+      // partic'l на pair → constant offset/speed одинаковые, а phase даём
+      // per-draw через time. Чтобы не дёргать на каждую частицу отдельно,
+      // используем a_offset = 0 (фаза по time только) и a_speed = 1.
+      if (aParticle.offset != null && aParticle.offset >= 0) gl.vertexAttrib1f(aParticle.offset, 0);
+      if (aParticle.speed != null && aParticle.speed >= 0) gl.vertexAttrib1f(aParticle.speed, 1.4);
+      gl.uniform2f(uParticle.camera, state.camera.x, state.camera.y);
+      gl.uniform1f(uParticle.scale, state.camera.scale);
+      gl.uniform2f(uParticle.viewport, vw, vh);
+      gl.uniform1f(uParticle.dpr, dpr);
+      gl.uniform1f(uParticle.time, tSec);
+      gl.drawArrays(gl.POINTS, 0, reverseCount);
     }
   } catch (e) {
-    if (typeof console !== 'undefined') console.warn('[webgl] pair-edges pass failed:', e.message);
-    pairProg = null;
+    if (typeof console !== 'undefined') console.warn('[webgl] reverse-signal pass failed:', e.message);
   }
 
   // ---- 6. Error rings (красные пунктирные кольца у нод с tool error) ----
@@ -4403,19 +4358,7 @@ function drawWebgl(state, tSec, viewport) {
     gl.uniform2f(uPoint.viewport, vw, vh);
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
-    gl.uniform1f(uPoint.light, state.theme === 'light' ? 1.0 : 0.0);
     gl.drawArrays(gl.POINTS, 0, pointCount);
-  }
-}
-
-function readCssVarNum(cssVar, fallback) {
-  try {
-    const s = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
-    if (!s) return fallback;
-    const n = parseFloat(s);
-    return isFinite(n) ? n : fallback;
-  } catch {
-    return fallback;
   }
 }
 
@@ -4585,6 +4528,7 @@ function hasAnnotations() {
     const { CFG } = __M["src/core/config.js"];
     const { state } = __M["src/view/state.js"];
     const { getAnnotation, setAnnotation, toggleStar } = __M["src/ui/annotations.js"];
+    const { t } = __M["src/core/i18n.js"];
 
 let detailEl, detailRoleEl, detailTsEl, detailBodyEl;
 let starBtn, noteTextarea, noteHint;
@@ -4620,8 +4564,8 @@ function ensureAnnotationUI() {
   starBtn = document.createElement('button');
   starBtn.className = 'detail-star';
   starBtn.type = 'button';
-  starBtn.textContent = '☆ Star';
-  starBtn.title = 'Отметить (S)';
+  starBtn.textContent = t('detail.star');
+  starBtn.title = t('tip.star');
   starBtn.addEventListener('click', () => {
     if (!_currentNode) return;
     toggleStar(_currentNode.id);
@@ -4631,7 +4575,7 @@ function ensureAnnotationUI() {
 
   noteHint = document.createElement('span');
   noteHint.className = 'detail-note-hint';
-  noteHint.textContent = 'Note (сохраняется в localStorage):';
+  noteHint.textContent = t('hint.detail_note');
   row.appendChild(noteHint);
 
   wrap.appendChild(row);
@@ -4639,7 +4583,7 @@ function ensureAnnotationUI() {
   noteTextarea = document.createElement('textarea');
   noteTextarea.className = 'detail-note';
   noteTextarea.rows = 3;
-  noteTextarea.placeholder = 'Ваша заметка к этой ноде…';
+  noteTextarea.placeholder = t('placeholder.note');
   noteTextarea.addEventListener('input', () => {
     // Debounce — сохраняем через 400мс после остановки ввода
     if (_saveTimer) clearTimeout(_saveTimer);
@@ -4687,8 +4631,21 @@ function updateAnnotUI() {
   const ann = getAnnotation(_currentNode.id);
   const starred = !!(ann && ann.starred);
   starBtn.classList.toggle('starred', starred);
-  starBtn.textContent = starred ? '★ Starred' : '☆ Star';
+  starBtn.textContent = starred ? t('detail.starred') : t('detail.star');
   noteTextarea.value = (ann && ann.text) || '';
+}
+
+// Перерисовываем тексты в detail panel при смене языка
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (starBtn) {
+      const ann = _currentNode ? getAnnotation(_currentNode.id) : null;
+      starBtn.textContent = (ann && ann.starred) ? t('detail.starred') : t('detail.star');
+      starBtn.title = t('tip.star');
+    }
+    if (noteHint) noteHint.textContent = t('hint.detail_note');
+    if (noteTextarea) noteTextarea.placeholder = t('placeholder.note');
+  });
 }
 
 function showDetail(n) {
@@ -4698,7 +4655,7 @@ function showDetail(n) {
   detailRoleEl.textContent = n.role === 'tool_use' ? (n.toolName || 'tool') : n.role;
   detailRoleEl.className = 'role ' + n.role;
   detailTsEl.textContent = new Date(n.ts).toISOString().replace('T', ' ').slice(0, 19);
-  const txt = n.text || '(empty)';
+  const txt = n.text || t('detail.empty');
   detailBodyEl.textContent = txt.length > CFG.excerptChars ? txt.slice(0, CFG.excerptChars) + '…' : txt;
   updateAnnotUI();
   detailEl.classList.add('show');
@@ -5656,63 +5613,6 @@ function updateFreezeBtn() {
     return { initFreezeToggle, toggleFreeze, updateFreezeBtn };
   })();
 
-  // --- src/ui/theme-toggle.js ---
-  __M["src/ui/theme-toggle.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-    const { t } = __M["src/core/i18n.js"];
-// Theme toggle (dark ↔ light). CSS-vars в :root и :root[data-theme="light"]
-// в HTML определяют все цвета — JS просто переключает атрибут на <html>.
-//
-// Renderer (Canvas 2D + WebGL) читает --canvas-vig-*, --canvas-star-alpha
-// в каждом кадре через getComputedStyle, поэтому переключение мгновенное.
-
-
-const KEY = 'viz:theme';
-let _btn = null;
-
-function initThemeToggle() {
-  // Восстановим сохранённую тему
-  let saved = null;
-  try { saved = localStorage.getItem(KEY); } catch {}
-  if (saved === 'light' || saved === 'dark') state.theme = saved;
-  applyTheme(state.theme || 'dark');
-
-  _btn = document.getElementById('btn-theme');
-  if (_btn) _btn.addEventListener('click', toggleTheme);
-  window.addEventListener('languagechange', updateBtn);
-  updateBtn();
-}
-
-function toggleTheme() {
-  const next = state.theme === 'light' ? 'dark' : 'light';
-  state.theme = next;
-  applyTheme(next);
-  try { localStorage.setItem(KEY, next); } catch {}
-  updateBtn();
-  // Уведомляем 3D-сцену и любых других слушателей
-  try {
-    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: next } }));
-  } catch {}
-}
-
-function applyTheme(theme) {
-  if (typeof document === 'undefined') return;
-  const html = document.documentElement;
-  if (theme === 'light') html.setAttribute('data-theme', 'light');
-  else html.removeAttribute('data-theme');
-}
-
-function updateBtn() {
-  if (!_btn) return;
-  const isLight = state.theme === 'light';
-  _btn.textContent = isLight ? '🌙' : '☀';
-  _btn.title = isLight ? t('tip.theme_dark') : t('tip.theme_light');
-  _btn.setAttribute('aria-label', t('aria.theme'));
-}
-
-    return { initThemeToggle, toggleTheme };
-  })();
-
   // --- src/ui/speed-control.js ---
   __M["src/ui/speed-control.js"] = (function () {
     const { state } = __M["src/view/state.js"];
@@ -5784,12 +5684,127 @@ function update() {
     return { initOrphansToggle, toggleOrphans };
   })();
 
+  // --- src/ui/render-toggle.js ---
+  __M["src/ui/render-toggle.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { isWebglSupported, initWebglRenderer, resizeWebgl } = __M["src/view/renderer-webgl.js"];
+    const { t } = __M["src/core/i18n.js"];
+// Toggle между Canvas 2D и WebGL рендерерами. Сохраняет выбор в
+// localStorage, чтобы после перезагрузки остаться в выбранном режиме.
+// Если WebGL недоступен — кнопка прячется.
+
+
+const LS_KEY = 'viz:render-backend';
+let _btn = null;
+let _webglInited = false;
+let _webglCanvas = null;
+let _canvas2d = null;
+
+function initRenderToggle() {
+  _btn = document.getElementById('btn-render');
+  _webglCanvas = document.getElementById('graph-webgl');
+  _canvas2d = document.getElementById('graph');
+
+  if (!isWebglSupported() || !_webglCanvas) {
+    // WebGL не доступен — форсим canvas2d и прячем кнопку
+    state.renderBackend = 'canvas2d';
+    if (_webglCanvas) _webglCanvas.style.display = 'none';
+    if (_canvas2d) _canvas2d.style.display = 'block';
+    if (_btn) _btn.style.display = 'none';
+    return;
+  }
+
+  // Восстановить выбор из localStorage. Если ничего не сохранено — WebGL
+  // как дефолт (он красивее + быстрее; canvas2d остаётся как fallback).
+  let saved = null;
+  try { saved = localStorage.getItem(LS_KEY); } catch {}
+  const initialBackend = saved === 'canvas2d' ? 'canvas2d' : 'webgl';
+  setBackend(initialBackend, { silent: true });
+  state.useCanvas2D = (state.renderBackend === 'canvas2d');
+
+  if (_btn) _btn.addEventListener('click', () => {
+    setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
+  });
+  window.addEventListener('resize', () => {
+    if (_webglInited && _webglCanvas) resizeWebgl(_webglCanvas);
+  });
+  updateBtn();
+}
+
+function toggleRenderBackend() {
+  setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
+}
+
+/** Программное переключение backend'а — для Settings modal toggle. */
+function setRenderBackend(backend) {
+  if (backend !== 'webgl' && backend !== 'canvas2d') return;
+  if (state.renderBackend === backend) return;
+  setBackend(backend);
+}
+
+function setBackend(backend, opts) {
+  const silent = opts && opts.silent;
+  if (backend === 'webgl') {
+    if (!_webglInited) {
+      try {
+        initWebglRenderer(_webglCanvas);
+        _webglInited = true;
+      } catch (e) {
+        console.error('[render-toggle] WebGL init failed:', e.message);
+        if (!silent) toast('WebGL недоступен: ' + e.message);
+        return;
+      }
+    }
+    state.renderBackend = 'webgl';
+    state.useCanvas2D = false;
+    if (_webglCanvas) _webglCanvas.style.display = 'block';
+    if (_canvas2d) _canvas2d.style.display = 'none';
+    if (_webglCanvas) resizeWebgl(_webglCanvas);
+    if (!silent) toast('WebGL режим включён');
+  } else {
+    state.renderBackend = 'canvas2d';
+    state.useCanvas2D = true;
+    if (_webglCanvas) _webglCanvas.style.display = 'none';
+    if (_canvas2d) _canvas2d.style.display = 'block';
+    if (!silent) toast('Canvas 2D режим');
+  }
+  try { localStorage.setItem(LS_KEY, state.renderBackend); } catch {}
+  updateBtn();
+}
+
+function updateBtn() {
+  if (!_btn) return;
+  if (state.renderBackend === 'webgl') {
+    _btn.textContent = '🎨';
+    _btn.title = t('tip.render_webgl');
+    _btn.classList.add('active-render');
+  } else {
+    _btn.textContent = '🖼';
+    _btn.title = t('tip.render_canvas');
+    _btn.classList.remove('active-render');
+  }
+}
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBtn);
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1500);
+}
+
+    return { initRenderToggle, toggleRenderBackend, setRenderBackend };
+  })();
+
   // --- src/ui/settings-modal.js ---
   __M["src/ui/settings-modal.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
     const { state } = __M["src/view/state.js"];
     const { reheat } = __M["src/core/layout.js"];
     const { t } = __M["src/core/i18n.js"];
+    const { setRenderBackend } = __M["src/ui/render-toggle.js"];
 // Settings modal — live-update для основных CFG параметров.
 // Сохранение в localStorage. Все labels — через t() для i18n.
 
@@ -5842,17 +5857,19 @@ function labelOf(key) {
   return t(LABEL_KEY[key] || ('settings.' + key));
 }
 
-// Boolean toggles [groupKey, key, scope]. scope='state' → state.<key>,
-// 'CFG' → CFG.<key>. Label берётся из t('settings.<key>').
+// Boolean toggles [groupKey, key, scope, customApply?]. scope='state' →
+// state.<key>, 'CFG' → CFG.<key>. customApply вызывается после set value.
 const TOGGLES = [
-  ['display', 'showPairEdges',  'state'],
-  ['display', 'showErrorRings', 'state'],
-  ['display', 'showThinking',   'state'],
-  ['metrics', 'showMetrics',    'state'],
+  ['display', 'showReverseSignal', 'state'],
+  ['display', 'showErrorRings',    'state'],
+  ['display', 'showThinking',      'state'],
+  ['metrics', 'showMetrics',       'state'],
+  // useCanvas2D — boolean fallback вместо WebGL (продвинутая опция)
+  ['advanced', 'useCanvas2D',      'state', (val) => setRenderBackend(val ? 'canvas2d' : 'webgl')],
 ];
 
 // Группы в порядке отображения. Если в группе нет параметров — пропускается.
-const GROUP_ORDER = ['physics', 'visual', 'display', 'metrics', 'playback', 'birth'];
+const GROUP_ORDER = ['physics', 'visual', 'display', 'metrics', 'playback', 'birth', 'advanced'];
 
 let modalEl, btn;
 
@@ -5915,6 +5932,7 @@ function open() {
     for (const tg of items.toggles) {
       const key = tg[1];
       const scope = tg[2];
+      const customApply = tg[3];
       const row = document.createElement('div');
       row.className = 'settings-row settings-row-toggle';
       const lbl = document.createElement('label');
@@ -5924,10 +5942,13 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      input.checked = target[key] !== false; // default ON
+      // Для useCanvas2D default = false (WebGL по умолчанию). Для остальных
+      // toggle'ов — default ON (если поле не задано — считаем true).
+      input.checked = key === 'useCanvas2D' ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
         save();
+        if (customApply) customApply(target[key]);
       });
       row.appendChild(lbl);
       row.appendChild(input);
@@ -6352,7 +6373,6 @@ function focusOnNode(n) {
     const { syncChatToTimeline } = __M["src/ui/story-mode.js"];
     const { hideDetail, toggleStarOnCurrent } = __M["src/ui/detail-panel.js"];
     const { toggleFreeze } = __M["src/ui/freeze-toggle.js"];
-    const { toggleTheme } = __M["src/ui/theme-toggle.js"];
     const { setSpeed } = __M["src/ui/speed-control.js"];
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
@@ -6408,9 +6428,6 @@ function onKey(ev) {
   } else if (ev.key === 'f' || ev.key === 'F') {
     ev.preventDefault();
     toggleFreeze();
-  } else if (ev.key === 't' || ev.key === 'T') {
-    ev.preventDefault();
-    toggleTheme();
   } else if (ev.key === 'o' || ev.key === 'O') {
     ev.preventDefault();
     toggleOrphans();
@@ -7717,110 +7734,6 @@ function formatShortDate(ts) {
     return { initSessionPicker, toggleSessions, addRemoteSessions, addSessionFiles, loadSessionIndex };
   })();
 
-  // --- src/ui/render-toggle.js ---
-  __M["src/ui/render-toggle.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-    const { isWebglSupported, initWebglRenderer, resizeWebgl } = __M["src/view/renderer-webgl.js"];
-    const { t } = __M["src/core/i18n.js"];
-// Toggle между Canvas 2D и WebGL рендерерами. Сохраняет выбор в
-// localStorage, чтобы после перезагрузки остаться в выбранном режиме.
-// Если WebGL недоступен — кнопка прячется.
-
-
-const LS_KEY = 'viz:render-backend';
-let _btn = null;
-let _webglInited = false;
-let _webglCanvas = null;
-let _canvas2d = null;
-
-function initRenderToggle() {
-  _btn = document.getElementById('btn-render');
-  _webglCanvas = document.getElementById('graph-webgl');
-  _canvas2d = document.getElementById('graph');
-
-  if (!isWebglSupported() || !_webglCanvas) {
-    // WebGL не доступен — форсим canvas2d и прячем кнопку
-    state.renderBackend = 'canvas2d';
-    if (_webglCanvas) _webglCanvas.style.display = 'none';
-    if (_canvas2d) _canvas2d.style.display = 'block';
-    if (_btn) _btn.style.display = 'none';
-    return;
-  }
-
-  // Восстановить выбор из localStorage. Если ничего не сохранено — WebGL
-  // как дефолт (он красивее + быстрее; canvas2d остаётся как fallback).
-  let saved = null;
-  try { saved = localStorage.getItem(LS_KEY); } catch {}
-  const initialBackend = saved === 'canvas2d' ? 'canvas2d' : 'webgl';
-  setBackend(initialBackend, { silent: true });
-
-  if (_btn) _btn.addEventListener('click', () => {
-    setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
-  });
-  window.addEventListener('resize', () => {
-    if (_webglInited && _webglCanvas) resizeWebgl(_webglCanvas);
-  });
-  updateBtn();
-}
-
-function toggleRenderBackend() {
-  setBackend(state.renderBackend === 'webgl' ? 'canvas2d' : 'webgl');
-}
-
-function setBackend(backend, opts) {
-  const silent = opts && opts.silent;
-  if (backend === 'webgl') {
-    if (!_webglInited) {
-      try {
-        initWebglRenderer(_webglCanvas);
-        _webglInited = true;
-      } catch (e) {
-        console.error('[render-toggle] WebGL init failed:', e.message);
-        if (!silent) toast('WebGL недоступен: ' + e.message);
-        return;
-      }
-    }
-    state.renderBackend = 'webgl';
-    if (_webglCanvas) _webglCanvas.style.display = 'block';
-    if (_canvas2d) _canvas2d.style.display = 'none';
-    if (_webglCanvas) resizeWebgl(_webglCanvas);
-    if (!silent) toast('WebGL режим включён');
-  } else {
-    state.renderBackend = 'canvas2d';
-    if (_webglCanvas) _webglCanvas.style.display = 'none';
-    if (_canvas2d) _canvas2d.style.display = 'block';
-    if (!silent) toast('Canvas 2D режим');
-  }
-  try { localStorage.setItem(LS_KEY, state.renderBackend); } catch {}
-  updateBtn();
-}
-
-function updateBtn() {
-  if (!_btn) return;
-  if (state.renderBackend === 'webgl') {
-    _btn.textContent = '🎨';
-    _btn.title = t('tip.render_webgl');
-    _btn.classList.add('active-render');
-  } else {
-    _btn.textContent = '🖼';
-    _btn.title = t('tip.render_canvas');
-    _btn.classList.remove('active-render');
-  }
-}
-
-if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBtn);
-
-function toast(msg) {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 1500);
-}
-
-    return { initRenderToggle, toggleRenderBackend };
-  })();
-
   // --- src/ui/lang-toggle.js ---
   __M["src/ui/lang-toggle.js"] = (function () {
     const { setLanguage, getLanguage } = __M["src/core/i18n.js"];
@@ -8444,6 +8357,13 @@ function resetView() {
   state.camera.y = cam.y;
 }
 
+// Перерисовываем stats при переключении языка
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (state.stats) updateStatsHUD();
+  });
+}
+
 function updateStatsHUD() {
   const s = state.stats;
   const el = document.getElementById('stats');
@@ -8453,8 +8373,8 @@ function updateStatsHUD() {
   const perfSuffix = state.perfMode && state.perfMode !== 'normal'
     ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
     : '';
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}${perfSuffix}`;
-  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}\nperf: ${state.perfMode}`;
+  el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
+  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {
@@ -8624,7 +8544,6 @@ async function applyUrlParamsLate() {
     const { drawWebgl } = __M["src/view/renderer-webgl.js"];
     const { initI18n } = __M["src/core/i18n.js"];
     const { initLangToggle } = __M["src/ui/lang-toggle.js"];
-    const { initThemeToggle } = __M["src/ui/theme-toggle.js"];
     const { updateMetricsOverlay, clearMetricsOverlay } = __M["src/ui/metrics-overlay.js"];
 
 const canvas = document.getElementById('graph');
@@ -8686,7 +8605,6 @@ initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
 initRenderToggle();
-initThemeToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

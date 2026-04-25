@@ -242,6 +242,13 @@ function resetView() {
   state.camera.y = cam.y;
 }
 
+// Перерисовываем stats при переключении языка
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (state.stats) updateStatsHUD();
+  });
+}
+
 function updateStatsHUD() {
   const s = state.stats;
   const el = document.getElementById('stats');
@@ -251,8 +258,8 @@ function updateStatsHUD() {
   const perfSuffix = state.perfMode && state.perfMode !== 'normal'
     ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
     : '';
-  el.innerHTML = `<b>${state.nodes.length}</b> nodes &middot; <b>${state.edges.length}</b> edges &middot; <span>${s.parsed} lines</span>${fmtSuffix}${perfSuffix}`;
-  el.title = `parsed: ${s.parsed}\nkept: ${s.kept}\nskipped: ${s.skipped}\nerrors: ${s.errors}\nperf: ${state.perfMode}`;
+  el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
+  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {

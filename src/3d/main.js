@@ -36,20 +36,12 @@ import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
-import { initThemeToggle } from '../ui/theme-toggle.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
   assistant: 0x50d4b5,
   tool_use: 0xeca040,
   thinking: 0xb58cff,
-};
-// Тёмные варианты для светлой темы (пастельные плохо видны на белом)
-const ROLE_COLORS_LIGHT = {
-  user: 0x2c5fb8,
-  assistant: 0x1b9f7b,
-  tool_use: 0xc46a11,
-  thinking: 0x7b4fd9,
 };
 
 // Diff-режим: те же цвета, что и в 2D renderer (A=pink, B=cyan, both=gray)
@@ -59,21 +51,19 @@ const DIFF_COLORS = {
   both: 0xc8c8d6,
 };
 
-// Возвращает {color, emissive} для ноды с учётом topics/diff/theme.
+// Возвращает {color, emissive} для ноды с учётом topics/diff-режима.
 const _tmpColor = new THREE.Color();
 function colorForNode(n) {
-  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     const c = DIFF_COLORS[n._diffOrigin] || 0x888888;
     return { color: c, emissive: c };
   }
   if (state.topicsMode && n._topicHue != null) {
-    _tmpColor.setHSL(n._topicHue, 0.75, isLight ? 0.42 : 0.55);
+    _tmpColor.setHSL(n._topicHue, 0.7, 0.55);
     const hex = _tmpColor.getHex();
     return { color: hex, emissive: hex };
   }
-  const palette = isLight ? ROLE_COLORS_LIGHT : ROLE_COLORS;
-  const c = palette[n.role] || 0x888888;
+  const c = ROLE_COLORS[n.role] || 0x888888;
   return { color: c, emissive: c };
 }
 
@@ -121,23 +111,6 @@ composer.addPass(new OutputPass());
 // (fresnel + пульсирующее ядро), поэтому Lambert/PBR лайтинг не нужен
 // и даже мешает — он заливает всё ровным цветом, убивая объём.
 scene.add(new THREE.AmbientLight(0xffffff, 0.15));
-
-// === Theme application ===
-// При переключении dark↔light меняем background scene'ы и fog. Edges
-// тоже становятся темнее (читаемее на белом). Stars прячем.
-function applyTheme3D() {
-  const isLight = state.theme === 'light';
-  if (isLight) {
-    scene.background = new THREE.Color(0xeef2f8);
-    scene.fog = new THREE.Fog(0xeef2f8, 1800, 8000);
-    if (starsObj) starsObj.visible = false;
-  } else {
-    scene.background = new THREE.Color(0x0a0e1a);
-    scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
-    if (starsObj) starsObj.visible = true;
-  }
-}
-window.addEventListener('themechange', applyTheme3D);
 
 // Starfield
 const STAR_COUNT = 2000;
@@ -399,16 +372,14 @@ function buildFromState() {
   updateStats();
 }
 
-// Цвет ребра: учитываем diff-режим, role, и текущую тему.
-// На светлой теме edges должны быть тёмными чтобы читались на белом.
+// Цвет ребра: учитываем diff-режим (edge.diffSide), tool_use, adopted, role
 const _edgeColor = new THREE.Color();
 function edgeColorHex(e) {
-  const isLight = state.theme === 'light';
-  if (state.diffMode && e.diffSide === 'B') return isLight ? 0x0d6ba0 : 0x5ad2ff;
-  if (e.adopted) return isLight ? 0x735a18 : 0xc8b478;
-  if (e.b && e.b.role === 'tool_use') return isLight ? 0xa55308 : 0xeca040;
-  if (e.b && e.b.role === 'thinking') return isLight ? 0x6b45b8 : 0xb58cff;
-  return isLight ? 0x14479e : 0x00d4ff;
+  if (state.diffMode && e.diffSide === 'B') return 0x5ad2ff;
+  if (e.adopted) return 0xc8b478;
+  if (e.b && e.b.role === 'tool_use') return 0xeca040;
+  if (e.b && e.b.role === 'thinking') return 0xb58cff;
+  return 0x00d4ff;
 }
 
 /**
@@ -740,8 +711,6 @@ window.addEventListener('keydown', (ev) => {
 window.__viz = { state, CFG };
 initI18n();
 initLangToggle();
-initThemeToggle();
-applyTheme3D();
 initTimeline();
 initStory();
 initSpeedControl();

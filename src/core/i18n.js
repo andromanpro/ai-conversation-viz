@@ -35,8 +35,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.2 · force-directed',
-    'header.subtitle_standalone': 'v1.5.2 · standalone bundle',
+    'header.subtitle_force': 'v1.5.3 · force-directed',
+    'header.subtitle_standalone': 'v1.5.3 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -139,6 +139,13 @@ const DICT = {
     'stats.hubs': 'hubs',
     'stats.longest': 'longest',
     'stats.timeline': 'timeline',
+    'stats.nodes': 'nodes',
+    'stats.edges': 'edges',
+    'stats.lines': 'lines',
+    'stats.parsed': 'parsed',
+    'stats.kept': 'kept',
+    'stats.skipped': 'skipped',
+    'stats.errors': 'errors',
 
     // Detail panel
     'detail.empty': '(empty)',
@@ -156,6 +163,7 @@ const DICT = {
     'settings.group.birth': 'Birth animation',
     'settings.group.display': 'Display',
     'settings.group.metrics': 'Metrics',
+    'settings.group.advanced': 'Advanced',
     'settings.header': '⚙ Settings',
     // Settings keys
     'settings.repulsion': 'Repulsion strength',
@@ -177,14 +185,11 @@ const DICT = {
     'settings.maxChars': 'Max chars per bubble',
     'settings.postGapMs': 'Min gap between bubbles',
     'settings.birthMs': 'Birth animation (ms)',
-    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showReverseSignal': 'Reverse signal (tool_result → tool_use)',
     'settings.showErrorRings': 'Error rings (red dashed)',
     'settings.showThinking': 'Thinking blocks (purple)',
     'settings.showMetrics': 'Token & duration badges',
-    // Theme
-    'tip.theme_light': 'Switch to light theme (T)',
-    'tip.theme_dark': 'Switch to dark theme (T)',
-    'aria.theme': 'Toggle theme',
+    'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
 
     // Live status
     'live.idle': 'idle',
@@ -227,8 +232,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.2 · force-directed',
-    'header.subtitle_standalone': 'v1.5.2 · standalone-сборка',
+    'header.subtitle_force': 'v1.5.3 · force-directed',
+    'header.subtitle_standalone': 'v1.5.3 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -321,9 +326,16 @@ const DICT = {
     'stats.tokens': 'токены',
     'stats.duration': 'длительность',
     'stats.top_tools': 'топ-инструменты',
-    'stats.hubs': 'hubs',
+    'stats.hubs': 'хабы',
     'stats.longest': 'самое длинное',
     'stats.timeline': 'шкала',
+    'stats.nodes': 'нод',
+    'stats.edges': 'связей',
+    'stats.lines': 'строк',
+    'stats.parsed': 'разобрано',
+    'stats.kept': 'оставлено',
+    'stats.skipped': 'пропущено',
+    'stats.errors': 'ошибок',
 
     'detail.empty': '(пусто)',
     'detail.star': '☆ Звезда',
@@ -338,6 +350,7 @@ const DICT = {
     'settings.group.birth': 'Анимация рождения',
     'settings.group.display': 'Отображение',
     'settings.group.metrics': 'Метрики',
+    'settings.group.advanced': 'Продвинутые',
     'settings.header': '⚙ Настройки',
     'settings.repulsion': 'Сила отталкивания',
     'settings.spring': 'Жёсткость пружины',
@@ -358,13 +371,11 @@ const DICT = {
     'settings.maxChars': 'Макс. символов в пузыре',
     'settings.postGapMs': 'Мин. пауза между пузырями',
     'settings.birthMs': 'Анимация рождения (мс)',
-    'settings.showPairEdges': 'Pair edges (tool_use ↔ result)',
+    'settings.showReverseSignal': 'Обратный сигнал (tool_result → tool_use)',
     'settings.showErrorRings': 'Кольца ошибок (красные пунктиры)',
     'settings.showThinking': 'Thinking-блоки (фиолетовые)',
     'settings.showMetrics': 'Бейджи токенов и времени',
-    'tip.theme_light': 'Светлая тема (T)',
-    'tip.theme_dark': 'Тёмная тема (T)',
-    'aria.theme': 'Переключить тему',
+    'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',

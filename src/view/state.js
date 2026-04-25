@@ -30,11 +30,11 @@ export const state = {
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
   renderBackend: 'webgl', // 'canvas2d' | 'webgl' — WebGL по умолчанию (красивее и быстрее; 2D как fallback)
-  showPairEdges: true,    // лимонные пунктирные tool_use ↔ tool_result связи
+  showReverseSignal: true,// анимированный обратный импульс tool_result → tool_use
   showErrorRings: true,   // красные пунктирные кольца у нод с tool error
   showThinking: true,     // фиолетовые thinking-ноды как virtual children
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
-  theme: 'dark',          // 'dark' | 'light'
+  useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
 };
 
 export function resetInteractionState() {

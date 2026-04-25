@@ -34,7 +34,6 @@ import { initRenderToggle } from './ui/render-toggle.js';
 import { drawWebgl } from './view/renderer-webgl.js';
 import { initI18n } from './core/i18n.js';
 import { initLangToggle } from './ui/lang-toggle.js';
-import { initThemeToggle } from './ui/theme-toggle.js';
 import { updateMetricsOverlay, clearMetricsOverlay } from './ui/metrics-overlay.js';
 
 const canvas = document.getElementById('graph');
@@ -96,7 +95,6 @@ initSessionPicker(loadText);
 initAnnotations();
 initBookmarks();
 initRenderToggle();
-initThemeToggle();
 state.sim = createSim();
 let urlParamsApplied = false;
 function onGraphReady() {

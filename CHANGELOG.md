@@ -4,6 +4,105 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] — 2026-04-25
+
+### Removed — Light theme
+
+Светлая тема выпилена целиком по запросу пользователя — на белом фоне
+ноды и edges либо терялись, либо требовали отдельной палитры,
+shader-ветки, dark outline и nоды-перерисовки. Это давало хрупкий код
+и плохой результат. Тёмная cyberpunk-тема — единственная.
+
+Удалено:
+- `state.theme`, `src/ui/theme-toggle.js` (целиком)
+- `[data-theme="light"]` CSS блоки (index/standalone/3d.html)
+- `#btn-theme` из всех HUD
+- `--canvas-vig-*`, `--canvas-edge*`, `--canvas-star-alpha` CSS-vars
+- Hotkey **T**, i18n keys `tip.theme_*`, `aria.theme`
+- POINT_FS uniform `u_light` и его branching
+- `ROLE_RGB_LIGHT`, `ROLE_COLORS_LIGHT` (Canvas 2D + WebGL + 3D)
+- isLight ветки в `edgeColor`, `nodeColor`, `edgeRgba`, `edgeColorHex`
+- Edge alpha boost для light, dark outline для light
+- 3D `applyTheme3D`, `themechange` event listener в 3d/main.js
+
+### Added — Reverse signal particles
+
+Заменил статичные пунктирные tool_use ↔ tool_result связи на
+**анимированную «комету»**, бегущую от tool_result обратно к tool_use.
+Визуализирует возврат ответа от инструмента к ассистенту, который его
+вызвал. На multi-tool turn'ах видно как N ответов разлетаются обратно
+к N parent'ам.
+
+Реализация:
+- WebGL: переиспользует `particleProg` shader, в буфере SWAP a_start↔a_end
+  → particle движется в обратную сторону. Цвет лимонно-жёлтый (1.0,
+  0.92, 0.36). Buffer/stride отдельные (`reverseBuf`, `reverseArr`).
+- Canvas 2D: 1 частица на pair, движется по quadratic Bezier (B → A) с
+  bell-curve размером (Math.sin(π·t) для head). Halo radial-gradient.
+- Toggle: Settings → Display → «Reverse signal (tool_result → tool_use)»
+  (был `showPairEdges`, переименован в `showReverseSignal`).
+
+Удалено: `PAIR_VS`, `PAIR_FS`, `fillPairBuffer`, `pairBuf`, `PAIR_STRIDE`,
+вся 5-я pass для pair edges; Canvas 2D pair-edges drawing.
+
+### Added — Canvas 2D toggle moved to Settings
+
+`#btn-render` 🎨 удалена из HUD (загружала visual-noise при том что
+99% юзеров остаются в WebGL). Toggle перенесён в Settings → Advanced
+→ «Canvas 2D fallback (WebGL by default)». Default OFF.
+
+В `settings-modal.js` добавлен новый формат TOGGLES `[group, key, scope,
+customApply]` — `customApply(val)` вызывается после set value. Для
+useCanvas2D — `setRenderBackend(val ? 'canvas2d' : 'webgl')`.
+
+### Improved — Smoother edge birth
+
+Связи между нодами рождались слишком резко (вспыхивали полной alpha
+сразу после `bornAt` обеих нод). Сделал плавный fade-in:
+- `edgeBirthMs = CFG.birthDurationMs * 1.6` — длительнее ноды
+- Edge alpha = easeOutCubic((nowMs - youngerBornAt) / edgeBirthMs)
+- WebGL `fillLineBuffer` теперь принимает `nowMs` параметр
+- Canvas 2D вычисляет `edgeAlphaOf(n)` отдельно от node alpha
+
+### Improved — i18n right HUD
+
+Stats-панель показывала «87 nodes · 86 edges · 60 lines» — захардкожено
+в `loader.js#updateStatsHUD`. Заменено на `t('stats.nodes')`, добавлены
+keys: nodes, edges, lines, parsed, kept, skipped, errors (en + ru).
+`updateStatsHUD()` подписан на `languagechange` event для перерисовки.
+
+`detail-panel.js`: «☆ Star», «Note (сохраняется в localStorage):»,
+«Ваша заметка к этой ноде…», «(empty)» — заменены на t(). Listener
+languagechange перерисовывает starBtn / noteHint / placeholder.
+
+### Files
+
+- `src/view/state.js` — `showReverseSignal`, `useCanvas2D`; убран `theme`
+- `src/ui/theme-toggle.js` — **удалён**
+- `src/ui/render-toggle.js` — `setRenderBackend()` export, sync
+  `state.useCanvas2D` ↔ `state.renderBackend`
+- `src/ui/settings-modal.js` — TOGGLES с customApply hook, group `advanced`
+- `src/ui/loader.js` — i18n stats text, languagechange listener
+- `src/ui/detail-panel.js` — i18n labels, languagechange listener
+- `src/ui/keyboard.js` — убран hotkey T
+- `src/main.js` — убран import initThemeToggle
+- `src/3d/main.js` — убраны applyTheme3D, ROLE_COLORS_LIGHT, isLight
+  ветки в colorForNode/edgeColorHex
+- `src/view/renderer.js` — Canvas 2D reverse signal particles, edge
+  alpha по edgeBirthMs, убраны cssVar/isLight
+- `src/view/renderer-webgl.js` — fillReverseSignalBuffer, переиспользует
+  particleProg; убраны PAIR shaders, ROLE_RGB_LIGHT, edge alpha boost,
+  u_light uniform; fillLineBuffer принимает nowMs
+- `src/view/starfield.js` — убран --canvas-star-alpha check
+- `src/core/i18n.js` — keys для stats.nodes/edges/lines/parsed/kept/etc;
+  settings.useCanvas2D, settings.group.advanced
+- `index.html / standalone.html / 3d.html` — убраны [data-theme=light]
+  CSS, btn-theme, btn-render
+- `build.cjs` — убран theme-toggle.js
+- `CHANGELOG.md`, `package.json`
+
+123 passed, bundle 351 KB / 50 modules.
+
 ## [1.5.2] — 2026-04-25
 
 ### Added — 3D Force/Radial/Swim layouts

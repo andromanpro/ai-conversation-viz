@@ -17,18 +17,6 @@
     --panel: rgba(10, 14, 26, 0.85);
     --border: rgba(123, 170, 240, 0.25);
   }
-  :root[data-theme="light"] {
-    --bg: #eef2f8;
-    --user: #2C5FB8;
-    --assistant: #1B9F7B;
-    --tool: #C46A11;
-    --edge: rgba(40, 90, 180, 0.55);
-    --accent: #C46A11;
-    --text: #1a2335;
-    --muted: #5a6580;
-    --panel: rgba(255, 255, 255, 0.94);
-    --border: rgba(60, 90, 170, 0.22);
-  }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 13px; }
   #three-container { position: fixed; inset: 0; }
@@ -134,7 +122,6 @@
     <button class="btn" id="btn-freeze" data-i18n-title="tip.freeze_on">❄</button>
     <button class="btn" id="btn-orphans" data-i18n-title="tip.orphans_off">🔗</button>
     <button class="btn" id="btn-topics" data-i18n-title="tip.topics_off">🧬</button>
-    <button class="btn btn-icon" id="btn-theme" data-i18n-title="tip.theme_light" data-i18n-aria="aria.theme">☀</button>
     <button class="btn btn-icon" id="btn-lang" data-i18n-title="tip.lang">EN</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt">
   </div>

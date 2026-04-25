@@ -55,47 +55,34 @@ const POINT_VS = `
 `;
 
 // Multi-layer glow: плотное белое ядро → насыщенный цветной middle →
-// мягкий halo. На тёмной теме — wow-эффект как у светящихся орбов.
-// На светлой теме (u_light=1.0) — solid цветной диск с тёмным кантом
-// без white-core/halo (иначе ноды растворяются в белом фоне).
+// мягкий halo. Даёт бёрн-эффект как у реальных светящихся орбов.
 const POINT_FS = `
   precision mediump float;
   varying vec4 v_color;
   varying float v_pulse;
   varying float v_highlight;
-  uniform float u_light;   // 0 = dark theme, 1 = light theme
 
   void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) discard;
 
+    // Три слоя:
+    //   core   — плотная яркая сердцевина (белая, нормализованная цветом)
+    //   mid    — основной тон ноды
+    //   halo   — мягкое свечение до края
     float core = smoothstep(0.25, 0.0, dist);
     float mid  = smoothstep(0.5, 0.15, dist);
     float halo = smoothstep(0.5, 0.0, dist) * 0.45;
 
-    vec3 rgb;
-    float alpha;
+    // Белая сердцевина: цвет стремится к белому в центре.
+    vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
 
-    if (u_light > 0.5) {
-      // Light theme: solid цвет ноды + тёмный outline на ободе
-      // Никакого whiteCore — иначе нода превращается в белое пятно
-      rgb = v_color.rgb;
-      // Лёгкое затемнение от центра к краю (имитация объёма)
-      rgb *= 0.85 + 0.15 * (1.0 - dist * 2.0);
-      // Тёмный кант
-      float outline = smoothstep(0.40, 0.50, dist);
-      rgb = mix(rgb, vec3(0.05, 0.08, 0.18), outline * 0.85);
-      // Сплошная alpha внутри диска, плавный край
-      alpha = smoothstep(0.5, 0.45, dist) * v_color.a * 1.05;
-    } else {
-      // Dark theme: glow + whiteCore — wow эффект
-      vec3 whiteCore = mix(v_color.rgb, vec3(1.0, 1.0, 1.0), core * (0.65 + 0.25 * v_pulse));
-      rgb = whiteCore * (mid + halo * 0.35);
-      alpha = (mid + halo) * v_color.a;
-    }
+    // Композиция (additive-friendly)
+    vec3 rgb = whiteCore * (mid + halo * 0.35);
+    float alpha = (mid + halo) * v_color.a;
 
-    // Search-match подсветка работает в обеих темах
+    // Search-match — подсветка белым поверх
     if (mod(v_highlight, 2.0) >= 1.0) {
       float flash = smoothstep(0.5, 0.2, dist) * (0.5 + 0.5 * v_pulse);
       rgb += vec3(1.0, 1.0, 0.85) * flash * 0.6;
@@ -180,42 +167,6 @@ const LINE_FS = `
 // Координаты идут как gl.LINES сегменты; для dotted-effect используем
 // varying, который меняется вдоль линии (в каждой паре вершин t=0 и t=1),
 // и в fragment отрезаем по mod(длина_от_старта).
-const PAIR_VS = `
-  precision mediump float;
-  attribute vec2 a_position;
-  attribute float a_t;          // 0 у source, 1 у target — позиция вдоль pair-edge
-  attribute float a_seglen;     // длина сегмента в screen px (для частоты пунктира)
-  uniform vec2 u_camera;
-  uniform float u_scale;
-  uniform vec2 u_viewport;
-  varying float v_t;
-  varying float v_seglen;
-  void main() {
-    vec2 screen = (a_position - u_camera) * u_scale;
-    vec2 clip = screen / (u_viewport * 0.5) - 1.0;
-    clip.y = -clip.y;
-    gl_Position = vec4(clip, 0.0, 1.0);
-    v_t = a_t;
-    v_seglen = a_seglen;
-  }
-`;
-const PAIR_FS = `
-  precision mediump float;
-  varying float v_t;
-  varying float v_seglen;
-  uniform float u_time;
-  uniform vec3 u_color;       // RGB для пунктира (зависит от темы)
-  uniform float u_alpha;      // общая прозрачность
-  void main() {
-    // Pattern: 12px on / 8px off + animated phase
-    float distance_px = v_t * v_seglen;
-    float anim = u_time * 12.0;
-    float phase = mod(distance_px - anim, 20.0);
-    if (phase > 12.0) discard;
-    float fade = smoothstep(12.0, 8.0, phase);
-    gl_FragColor = vec4(u_color, fade * u_alpha);
-  }
-`;
 
 // --- Error ring (красная пунктирная окружность вокруг assistant с tool error) ---
 const ERR_VS = `
@@ -372,8 +323,8 @@ function compileProgram(gl, vsSrc, fsSrc) {
 let gl = null;
 let canvasEl = null;
 
-let pointProg, hubProg, lineProg, particleProg, starProg, pairProg, errProg;
-let pointBuf, hubBuf, lineBuf, particleBuf, starBuf, pairBuf, errBuf;
+let pointProg, hubProg, lineProg, particleProg, starProg, errProg;
+let pointBuf, hubBuf, lineBuf, particleBuf, starBuf, reverseBuf, errBuf;
 
 // Layouts (floats per vertex)
 const POINT_STRIDE = 9;    // x, y, r, g, b, a, size, phase, flags
@@ -381,15 +332,15 @@ const HUB_STRIDE = 8;      // x, y, r, g, b, a, size, phase
 const LINE_STRIDE = 6;     // x, y, r, g, b, a
 const PARTICLE_STRIDE = 10; // ax, ay, bx, by, cx, cy, r, g, b, a (offset/speed вычисляются из mod+index)
 const STAR_STRIDE = 4;     // x, y, size, depth
-const PAIR_STRIDE = 4;     // x, y, t (0..1 along edge), seglen (px) — для dotted pattern
+const REVERSE_STRIDE = 10; // тот же layout что PARTICLE — переиспользуем particleProg
 const ERR_STRIDE = 4;      // x, y, size, phase
 
-let pointArr, hubArr, lineArr, particleArr, pairArr, errArr;
+let pointArr, hubArr, lineArr, particleArr, reverseArr, errArr;
 let starsBuilt = null; // Float32Array, statиc
 
 // Uniforms
-const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {}, uPair = {}, uErr = {};
-const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {}, aPair = {}, aErr = {};
+const uPoint = {}, uHub = {}, uLine = {}, uParticle = {}, uStar = {}, uErr = {};
+const aPoint = {}, aHub = {}, aLine = {}, aParticle = {}, aStar = {}, aErr = {};
 
 const EDGE_SEGMENTS = 10;
 const PARTICLES_PER_EDGE = 2;
@@ -423,13 +374,11 @@ export function initWebglRenderer(canvas) {
   starProg = compileProgram(gl, STAR_VS, STAR_FS);
   // Новые passes (v1.3) — компилируем отдельно, чтобы их падение не
   // ломало всё. При fail просто отключаем pass через null-program.
-  try { pairProg = compileProgram(gl, PAIR_VS, PAIR_FS); }
-  catch (e) { pairProg = null; if (typeof console !== 'undefined') console.warn('[webgl] pairProg compile failed:', e.message); }
   try { errProg = compileProgram(gl, ERR_VS, ERR_FS); }
   catch (e) { errProg = null; if (typeof console !== 'undefined') console.warn('[webgl] errProg compile failed:', e.message); }
 
   cacheAttribs(pointProg, aPoint, uPoint, ['a_position', 'a_color', 'a_size', 'a_phase', 'a_flags'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time', 'u_light']);
+    ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(hubProg, aHub, uHub, ['a_position', 'a_color', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(lineProg, aLine, uLine, ['a_position', 'a_color'],
@@ -438,8 +387,6 @@ export function initWebglRenderer(canvas) {
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
   cacheAttribs(starProg, aStar, uStar, ['a_position', 'a_size', 'a_depth'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr']);
-  if (pairProg) cacheAttribs(pairProg, aPair, uPair, ['a_position', 'a_t', 'a_seglen'],
-    ['u_camera', 'u_scale', 'u_viewport', 'u_time', 'u_color', 'u_alpha']);
   if (errProg) cacheAttribs(errProg, aErr, uErr, ['a_position', 'a_size', 'a_phase'],
     ['u_camera', 'u_scale', 'u_viewport', 'u_dpr', 'u_time']);
 
@@ -448,7 +395,7 @@ export function initWebglRenderer(canvas) {
   lineBuf = gl.createBuffer();
   particleBuf = gl.createBuffer();
   starBuf = gl.createBuffer();
-  pairBuf = gl.createBuffer();
+  reverseBuf = gl.createBuffer();
   errBuf = gl.createBuffer();
 
   gl.enable(gl.BLEND);
@@ -508,13 +455,6 @@ const ROLE_RGB = {
   tool_use: [0.925, 0.627, 0.250],
   thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
 };
-// Тёмные варианты для светлой темы — пастельные цвета теряются на белом
-const ROLE_RGB_LIGHT = {
-  user: [0.17, 0.37, 0.72],       // тёмно-синий
-  assistant: [0.10, 0.62, 0.48],  // тёмно-зелёный
-  tool_use: [0.77, 0.42, 0.07],   // burnt orange
-  thinking: [0.48, 0.31, 0.85],   // насыщенный фиолетовый
-};
 
 const DIFF_RGB = {
   A: [1.0, 0.376, 0.686],
@@ -539,15 +479,12 @@ function hslToRgb(h, s, l) {
 
 function nodeColor(n, state, out) {
   let r, g, b;
-  const isLight = state.theme === 'light';
   if (state.diffMode && n._diffOrigin) {
     [r, g, b] = DIFF_RGB[n._diffOrigin] || DIFF_RGB.both;
   } else if (state.topicsMode && n._topicHue != null) {
-    // На light теме — насыщенные цвета (lightness ниже)
-    [r, g, b] = hslToRgb(n._topicHue, 0.75, isLight ? 0.42 : 0.58);
+    [r, g, b] = hslToRgb(n._topicHue, 0.75, 0.58);
   } else {
-    const palette = isLight ? ROLE_RGB_LIGHT : ROLE_RGB;
-    [r, g, b] = palette[n.role] || [0.5, 0.5, 0.5];
+    [r, g, b] = ROLE_RGB[n.role] || [0.5, 0.5, 0.5];
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -555,21 +492,16 @@ function nodeColor(n, state, out) {
 
 function edgeColor(e, state, out) {
   let r, g, b;
-  const isLight = state.theme === 'light';
   if (state.diffMode && e.diffSide === 'B') {
     [r, g, b] = DIFF_RGB.B;
   } else if (e.adopted) {
-    if (isLight) { r = 0.45; g = 0.35; b = 0.10; }
-    else { r = 0.78; g = 0.71; b = 0.47; }
+    r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
-    if (isLight) { r = 0.65; g = 0.32; b = 0.08; }   // darker burnt-orange
-    else { r = 0.925; g = 0.627; b = 0.250; }
+    r = 0.925; g = 0.627; b = 0.250;
   } else if (e.b && e.b.role === 'thinking') {
-    if (isLight) { r = 0.42; g = 0.27; b = 0.78; }   // насыщенный фиолетовый
-    else { r = 0.71; g = 0.55; b = 1.0; }
+    r = 0.71; g = 0.55; b = 1.0;
   } else {
-    if (isLight) { r = 0.08; g = 0.27; b = 0.62; }   // тёмно-синий навсегда
-    else { r = 0.0; g = 0.831; b = 1.0; }
+    r = 0.0; g = 0.831; b = 1.0;
   }
   out[0] = r; out[1] = g; out[2] = b;
   return out;
@@ -610,11 +542,11 @@ function ensureArr(name, neededFloats) {
         particleArr = new Float32Array(Math.max(neededFloats, (particleArr?.length || 0) * 2 || 1024));
       }
       return particleArr;
-    case 'pair':
-      if (!pairArr || pairArr.length < neededFloats) {
-        pairArr = new Float32Array(Math.max(neededFloats, (pairArr?.length || 0) * 2 || 256));
+    case 'reverse':
+      if (!reverseArr || reverseArr.length < neededFloats) {
+        reverseArr = new Float32Array(Math.max(neededFloats, (reverseArr?.length || 0) * 2 || 1024));
       }
-      return pairArr;
+      return reverseArr;
     case 'err':
       if (!errArr || errArr.length < neededFloats) {
         errArr = new Float32Array(Math.max(neededFloats, (errArr?.length || 0) * 2 || 64));
@@ -709,7 +641,7 @@ function quadBezier(ax, ay, bx, by, cx, cy, t, out) {
   out[1] = u * u * ay + 2 * u * t * cy + t * t * by;
 }
 
-function fillLineBuffer(state) {
+function fillLineBuffer(state, nowMs) {
   const edges = state.edges;
   const hidden = state.hiddenRoles;
   const connectOrphans = !!state.connectOrphans;
@@ -723,6 +655,9 @@ function fillLineBuffer(state) {
   let count = 0;
 
   const thinkingHidden = state.showThinking === false;
+  // Удлинённый birth для edges — чтобы росли плавнее обычной ноды
+  // (нода 600ms, edge выпускает 1000ms = чуть длительнее)
+  const edgeBirthMs = CFG.birthDurationMs * 1.6;
   for (const e of edges) {
     if (!e.a || !e.b) continue;
     if (e.a.bornAt == null || e.b.bornAt == null) continue;
@@ -732,9 +667,12 @@ function fillLineBuffer(state) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(e.a) || isCollapsedChild(e.b)) continue;
 
-    // На светлой теме edges должны быть жирнее, иначе теряются
-    const edgeBoost = state.theme === 'light' ? 1.5 : 1.0;
-    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * edgeBoost;
+    // Birth factor edge'а — берём по самой младшей ноде (b обычно).
+    // Используем удлинённый edgeBirthMs + ease-out cubic для плавности.
+    const youngerBornAt = Math.max(e.a.bornAt, e.b.bornAt);
+    const bft = nowMs != null ? Math.min(1, Math.max(0, (nowMs - youngerBornAt) / edgeBirthMs)) : 1;
+    const birthMul = 1 - Math.pow(1 - bft, 3); // easeOutCubic
+    let edgeAlpha = (e.adopted ? 0.25 : 0.6) * birthMul;
     if (hasSearch) {
       edgeAlpha *= (state.searchMatches.has(e.a.id) && state.searchMatches.has(e.b.id)) ? 1 : CFG.searchDimAlpha;
     } else if (topicFilter) {
@@ -826,15 +764,25 @@ function fillParticleBuffer(state) {
   return count;
 }
 
-// Заполняет буфер для pair-edges (tool_use ↔ tool_result, dotted lemon-yellow).
-// Каждое pair → одна gl.LINES линия от source.{x,y} к target.{x,y}.
-// Per-vertex данные: t (0 у source, 1 у target), seglen (полная длина сегмента в screen px).
-function fillPairBuffer(state, scale) {
-  if (state.showPairEdges === false) return 0;
+// Заполняет буфер reverse-signal частиц.
+//
+// Идея: вместо статичных пунктирных tool_use ↔ tool_result связей, рисуем
+// светящуюся «комету», бегущую ОТ tool_result (b) → ОБРАТНО к tool_use (a).
+// Это визуализирует поток ответа от инструмента к ассистенту, который
+// его вызвал. Wow-эффект для multi-tool turn'ов: видно как N ответов
+// разлетаются обратно к N разным tool_use родителям.
+//
+// Переиспользуем существующий particleProg shader: тот же layout
+// (a_start, a_end, a_ctrl, a_color, a_offset, a_speed). SWAP a_start↔a_end
+// → particle движется в обратную сторону. Цвет — лимонно-жёлтый.
+const REVERSE_PARTICLES_PER_EDGE = 1;
+const REVERSE_RGB = [1.0, 0.92, 0.36]; // lemon
+function fillReverseSignalBuffer(state) {
+  if (state.showReverseSignal === false) return 0;
   const pairs = state.pairEdges || [];
   if (!pairs.length) return 0;
-  ensureArr('pair', pairs.length * 2 * PAIR_STRIDE);
-  const arr = pairArr;
+  ensureArr('reverse', pairs.length * REVERSE_PARTICLES_PER_EDGE * REVERSE_STRIDE);
+  const arr = reverseArr;
   let count = 0;
   const hidden = state.hiddenRoles;
   const collapsed = state.collapsed;
@@ -846,15 +794,29 @@ function fillPairBuffer(state, scale) {
     const isCollapsedChild = n => n.role === 'tool_use' && n.parentId && collapsed && collapsed.has(n.parentId);
     if (isCollapsedChild(a) || isCollapsedChild(b)) continue;
 
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const lenWorld = Math.hypot(dx, dy) || 1;
-    const seglenPx = lenWorld * scale; // в screen px при текущем zoom
-    let o = count * PAIR_STRIDE;
-    arr[o++] = a.x; arr[o++] = a.y; arr[o++] = 0; arr[o++] = seglenPx;
-    count++;
-    o = count * PAIR_STRIDE;
-    arr[o++] = b.x; arr[o++] = b.y; arr[o++] = 1; arr[o++] = seglenPx;
-    count++;
+    // SWAP направление: start = b (tool_result), end = a (tool_use)
+    const ax = b.x, ay = b.y; // start
+    const bx = a.x, by = a.y; // end
+    // Control point — лёгкий arc, отнесён ортогонально от середины
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    // отгибаем влево от направления; небольшая амплитуда чтобы не путать
+    const off = len * 0.10;
+    const cx = mx - (dy / len) * off;
+    const cy = my + (dx / len) * off;
+    for (let i = 0; i < REVERSE_PARTICLES_PER_EDGE; i++) {
+      const o = count * REVERSE_STRIDE;
+      arr[o + 0] = ax; arr[o + 1] = ay;
+      arr[o + 2] = bx; arr[o + 3] = by;
+      arr[o + 4] = cx; arr[o + 5] = cy;
+      arr[o + 6] = REVERSE_RGB[0];
+      arr[o + 7] = REVERSE_RGB[1];
+      arr[o + 8] = REVERSE_RGB[2];
+      arr[o + 9] = 1.0;
+      count++;
+    }
   }
   return count;
 }
@@ -902,9 +864,8 @@ export function drawWebgl(state, tSec, viewport) {
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // ---- 1. Starfield (только если --canvas-star-alpha > 0; на light theme = 0) ----
-  const starAlphaMul = readCssVarNum('--canvas-star-alpha', 1);
-  if (starsBuilt && starAlphaMul > 0) {
+  // ---- 1. Starfield ----
+  if (starsBuilt) {
     gl.useProgram(starProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
     const stride = STAR_STRIDE * 4;
@@ -922,7 +883,7 @@ export function drawWebgl(state, tSec, viewport) {
   }
 
   // ---- 2. Edge lines (основа) ----
-  const lineCount = fillLineBuffer(state);
+  const lineCount = fillLineBuffer(state, nowMs);
   if (lineCount > 0) {
     gl.useProgram(lineProg);
     gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
@@ -1000,41 +961,41 @@ export function drawWebgl(state, tSec, viewport) {
     gl.drawArrays(gl.POINTS, 0, hubCount);
   }
 
-  // ---- 5. Pair edges (tool_use ↔ tool_result, lemon-yellow dotted) ----
-  // Defensive: если pair shader не скомпилировался или fillPairBuffer
-  // упадёт — не валим весь render.
+  // ---- 5. Reverse signal particles (tool_result → tool_use, lemon comet) ----
+  // Переиспользуем particleProg shader; в буфере a_start/a_end SWAPped
+  // относительно обычных particles → частица движется в обратную сторону.
   try {
-    if (pairProg) {
-      const pairCount = fillPairBuffer(state, state.camera.scale);
-      if (pairCount > 0) {
-        gl.useProgram(pairProg);
-        gl.bindBuffer(gl.ARRAY_BUFFER, pairBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, pairArr.subarray(0, pairCount * PAIR_STRIDE), gl.DYNAMIC_DRAW);
-        const stride = PAIR_STRIDE * 4;
-        gl.enableVertexAttribArray(aPair.position);
-        gl.vertexAttribPointer(aPair.position, 2, gl.FLOAT, false, stride, 0);
-        gl.enableVertexAttribArray(aPair.t);
-        gl.vertexAttribPointer(aPair.t, 1, gl.FLOAT, false, stride, 2 * 4);
-        gl.enableVertexAttribArray(aPair.seglen);
-        gl.vertexAttribPointer(aPair.seglen, 1, gl.FLOAT, false, stride, 3 * 4);
-        gl.uniform2f(uPair.camera, state.camera.x, state.camera.y);
-        gl.uniform1f(uPair.scale, state.camera.scale);
-        gl.uniform2f(uPair.viewport, vw, vh);
-        gl.uniform1f(uPair.time, tSec);
-        // Цвет пунктира: на тёмной — лимонно-жёлтый, на светлой — насыщенный янтарь
-        if (state.theme === 'light') {
-          gl.uniform3f(uPair.color, 0.62, 0.42, 0.05);
-          gl.uniform1f(uPair.alpha, 0.95);
-        } else {
-          gl.uniform3f(uPair.color, 1.0, 0.92, 0.36);
-          gl.uniform1f(uPair.alpha, 0.85);
-        }
-        gl.drawArrays(gl.LINES, 0, pairCount);
-      }
+    const reverseCount = fillReverseSignalBuffer(state);
+    if (reverseCount > 0) {
+      gl.useProgram(particleProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, reverseBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, reverseArr.subarray(0, reverseCount * REVERSE_STRIDE), gl.DYNAMIC_DRAW);
+      const stride = REVERSE_STRIDE * 4;
+      gl.enableVertexAttribArray(aParticle.start);
+      gl.vertexAttribPointer(aParticle.start, 2, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(aParticle.end);
+      gl.vertexAttribPointer(aParticle.end, 2, gl.FLOAT, false, stride, 2 * 4);
+      gl.enableVertexAttribArray(aParticle.ctrl);
+      gl.vertexAttribPointer(aParticle.ctrl, 2, gl.FLOAT, false, stride, 4 * 4);
+      gl.enableVertexAttribArray(aParticle.color);
+      gl.vertexAttribPointer(aParticle.color, 4, gl.FLOAT, false, stride, 6 * 4);
+      // a_offset / a_speed считаем в JS-side (они в shader'е uniform-like
+      // через vertex_id фактически, но удобнее вычислить из id частицы).
+      // Пока — vertexAttrib1f задаёт constant-per-draw (упрощение): один
+      // partic'l на pair → constant offset/speed одинаковые, а phase даём
+      // per-draw через time. Чтобы не дёргать на каждую частицу отдельно,
+      // используем a_offset = 0 (фаза по time только) и a_speed = 1.
+      if (aParticle.offset != null && aParticle.offset >= 0) gl.vertexAttrib1f(aParticle.offset, 0);
+      if (aParticle.speed != null && aParticle.speed >= 0) gl.vertexAttrib1f(aParticle.speed, 1.4);
+      gl.uniform2f(uParticle.camera, state.camera.x, state.camera.y);
+      gl.uniform1f(uParticle.scale, state.camera.scale);
+      gl.uniform2f(uParticle.viewport, vw, vh);
+      gl.uniform1f(uParticle.dpr, dpr);
+      gl.uniform1f(uParticle.time, tSec);
+      gl.drawArrays(gl.POINTS, 0, reverseCount);
     }
   } catch (e) {
-    if (typeof console !== 'undefined') console.warn('[webgl] pair-edges pass failed:', e.message);
-    pairProg = null;
+    if (typeof console !== 'undefined') console.warn('[webgl] reverse-signal pass failed:', e.message);
   }
 
   // ---- 6. Error rings (красные пунктирные кольца у нод с tool error) ----
@@ -1087,19 +1048,7 @@ export function drawWebgl(state, tSec, viewport) {
     gl.uniform2f(uPoint.viewport, vw, vh);
     gl.uniform1f(uPoint.dpr, dpr);
     gl.uniform1f(uPoint.time, tSec);
-    gl.uniform1f(uPoint.light, state.theme === 'light' ? 1.0 : 0.0);
     gl.drawArrays(gl.POINTS, 0, pointCount);
-  }
-}
-
-function readCssVarNum(cssVar, fallback) {
-  try {
-    const s = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
-    if (!s) return fallback;
-    const n = parseFloat(s);
-    return isFinite(n) ? n : fallback;
-  } catch {
-    return fallback;
   }
 }
 
