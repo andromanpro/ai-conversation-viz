@@ -74,28 +74,28 @@ npm install @andromanpro/ai-conversation-viz
 import { mount, SAMPLE_JSONL } from '@andromanpro/ai-conversation-viz';
 
 const viewer = mount(document.getElementById('viz'), {
-  jsonl: SAMPLE_JSONL,     // либо своя строка JSONL / ChatGPT json / Anthropic messages
-  width: 800,               // опционально (иначе clientWidth)
+  jsonl: SAMPLE_JSONL,     // own JSONL string / ChatGPT export / Anthropic messages
+  width: 800,               // optional (else uses clientWidth)
   height: 600,
   starfield: true,
   autoFit: true,
 });
 
 // API
-viewer.loadJsonl(newJsonl);   // заменить данные
-viewer.setTimeline(0.5);      // позиция [0..1]
-viewer.play();                // от начала
+viewer.loadJsonl(newJsonl);   // replace data
+viewer.setTimeline(0.5);      // position [0..1]
+viewer.play();                // from start
 viewer.pause();
 viewer.fitView();
 viewer.destroy();
-viewer.getState();            // низкоуровневый доступ
+viewer.getState();            // low-level state access
 ```
 
 ## Usage (full UI standalone)
 
-Двойной клик на `standalone.html` — готовый self-contained offline viewer с полным UI (phone, timeline, search, stats, share, record). Данные подгружаются через «Open JSONL…» или drag-drop.
+Double-click `standalone.html` — self-contained offline viewer with full UI (phone, timeline, search, stats, share, record). Data loads via "Open JSONL…" button or drag-drop.
 
-Или через HTTP:
+Or via HTTP:
 ```bash
 npx serve .
 # http://localhost:3000/         — 2D
@@ -104,12 +104,12 @@ npx serve .
 
 ## Data formats
 
-Распознаются автоматически:
+Auto-detected:
 - **Claude Code JSONL** — `{"type":"user|assistant", "uuid", "parentUuid", "message":{"content":[{"type":"text|thinking|tool_use|tool_result|image"}]}}`
-- **ChatGPT export** (`conversations.json`) — массив с `mapping: {id: {message, parent, children}}`
-- **Anthropic API** — массив `[{role, content}]`
+- **ChatGPT export** (`conversations.json`) — array with `mapping: {id: {message, parent, children}}`
+- **Anthropic API** — array `[{role, content}]`
 
-Parser извлекает из каждого message: text, thinking (`💭`), tool_use (имя + key param), tool_result (`↩` или `⚠` при `is_error`), image (`[image]`). Для assistant без текста генерируется summary `🔧 Grep "pattern" · Bash "cmd" · …`.
+Parser extracts from each message: text, thinking (`💭`), tool_use (name + key param), tool_result (`↩` or `⚠` for `is_error`), image (`[image]`). For assistants without their own text, a summary is synthesized like `🔧 Grep "pattern" · Bash "cmd" · …`.
 
 ## Keyboard shortcuts
 
@@ -138,22 +138,23 @@ npm run sonar    # SonarQube scan (host/token via SONAR_HOST_URL + SONAR_TOKEN e
 ```
 src/
 ├─ core/
-│  ├─ config.js        — все настройки (CFG + COLORS)
+│  ├─ config.js        — all tunables (CFG + COLORS)
 │  ├─ parser.js        — parseJSONL, parseLine, classifyContent
 │  ├─ adapters.js      — detect + ChatGPT/Anthropic → Claude JSONL
 │  ├─ graph.js         — buildGraph, appendRawNodes, degree/hub
-│  ├─ layout.js        — stepPhysics (sim), radial, swim, fitToView
+│  ├─ layout.js        — stepPhysics (sim), radial, swim, fitToView, stepPhysics3D
 │  ├─ quadtree.js      — Barnes-Hut O(n log n) repulsion
 │  ├─ tree.js          — computeDepths (BFS)
 │  └─ sample.js        — demo JSONL
 ├─ view/
-│  ├─ state.js         — общий mutable state
+│  ├─ state.js         — shared mutable state
 │  ├─ camera.js        — world↔screen
 │  ├─ renderer.js      — canvas 2D draw + birth-animation
-│  ├─ particles.js     — electric sparks по рёбрам
-│  ├─ starfield.js     — parallax звёзды
+│  ├─ renderer-webgl.js— WebGL renderer (faster on 1500+ nodes)
+│  ├─ particles.js     — electric sparks along edges
+│  ├─ starfield.js     — parallax stars
 │  ├─ path.js          — pathToRoot (hover highlight)
-│  └─ tool-icons.js    — юникод-иконки по имени тула
+│  └─ tool-icons.js    — Unicode glyph per tool name
 ├─ ui/
 │  ├─ loader.js        — load/drop/URL → normalize → buildGraph
 │  ├─ interaction.js   — mouse/wheel events
@@ -167,6 +168,7 @@ src/
 │  ├─ minimap.js       — corner map + click-teleport
 │  ├─ stats-hud.js     — tokens/duration/tools/hubs
 │  ├─ share.js         — Share URL
+│  ├─ settings-modal.js— ⚙ Settings
 │  ├─ layout-toggle.js — force/radial/swim chips
 │  ├─ freeze-toggle.js — ❄ Freeze button
 │  ├─ speed-control.js — play speed chips
@@ -176,7 +178,9 @@ src/
 │  ├─ orphans-toggle.js— 🔗 Connect orphans
 │  └─ keyboard.js      — global shortcuts
 ├─ 3d/
-│  └─ main.js          — Three.js сцена, raycaster, phone
+│  ├─ main.js          — Three.js scene, raycaster, phone
+│  ├─ layouts3d.js     — compute3DRadialLayout, compute3DSwimLanes
+│  └─ scatter.js       — applySphericalScatter (Fibonacci)
 ├─ main.js             — 2D entrypoint
 └─ embed.js            — npm entry (programmatic mount)
 ```
