@@ -36,6 +36,12 @@ function toggle() {
   else start();
 }
 
+// Public API для внешних UI-контролов (например объединённого
+// snapshot-menu в 3D). Позволяет вызывать запись из других мест без
+// собственной кнопки `#btn-record`.
+export function toggleRecord() { toggle(); }
+export function isRecording() { return !!(recorder && recorder.state === 'recording'); }
+
 function start() {
   const canvas = _getCanvas();
   if (!canvas) {
@@ -112,17 +118,42 @@ function download() {
 }
 
 function updateBtn(recording) {
-  if (!_recBtnEl) return;
-  _recBtnEl.textContent = recording ? '● REC 0s' : '●';
-  _recBtnEl.classList.toggle('recording', recording);
+  if (_recBtnEl) {
+    _recBtnEl.textContent = recording ? '● REC 0s' : '●';
+    _recBtnEl.classList.toggle('recording', recording);
+  } else {
+    // Нет dedicated btn — показываем sticky toast с таймером (для 3D
+    // где запись запускается из меню snapshot'а)
+    if (recording) updateStickyToast('● REC 0s');
+    else clearStickyToast();
+  }
 }
 
 function updateTimer() {
-  if (!_recBtnEl || !recorder) return;
+  if (!recorder) return;
   const sec = Math.floor((Date.now() - startedAt) / 1000);
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  const text = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  if (_recBtnEl) _recBtnEl.textContent = text;
+  else updateStickyToast(text);
+}
+
+function updateStickyToast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  el.dataset.sticky = '1';
+}
+
+function clearStickyToast() {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  if (el.dataset.sticky === '1') {
+    delete el.dataset.sticky;
+    el.classList.remove('show');
+  }
 }
 
 function showToast(msg, ms) {

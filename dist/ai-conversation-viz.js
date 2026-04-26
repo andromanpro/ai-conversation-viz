@@ -2132,6 +2132,8 @@ const DICT = {
     'snapshot.png_1x': '⬇ PNG (1×)',
     'snapshot.png_2x': '⬇ PNG (2× — retina)',
     'snapshot.svg': '⬇ SVG (nodes + edges)',
+    'snapshot.video_start': '🎥 Start video recording',
+    'snapshot.video_stop': '⏹ Stop video recording',
 
     // Toasts / errors
     'toast.link_copied': 'Link copied to clipboard',
@@ -2324,6 +2326,8 @@ const DICT = {
     'snapshot.png_1x': '⬇ PNG (1×)',
     'snapshot.png_2x': '⬇ PNG (2× — retina)',
     'snapshot.svg': '⬇ SVG (ноды + рёбра)',
+    'snapshot.video_start': '🎥 Начать запись видео',
+    'snapshot.video_stop': '⏹ Остановить запись',
 
     'toast.link_copied': 'Ссылка скопирована',
     'toast.webgl_on': 'WebGL режим включён',
@@ -7341,6 +7345,12 @@ function toggle() {
   else start();
 }
 
+// Public API для внешних UI-контролов (например объединённого
+// snapshot-menu в 3D). Позволяет вызывать запись из других мест без
+// собственной кнопки `#btn-record`.
+function toggleRecord() { toggle(); }
+function isRecording() { return !!(recorder && recorder.state === 'recording'); }
+
 function start() {
   const canvas = _getCanvas();
   if (!canvas) {
@@ -7417,17 +7427,42 @@ function download() {
 }
 
 function updateBtn(recording) {
-  if (!_recBtnEl) return;
-  _recBtnEl.textContent = recording ? '● REC 0s' : '●';
-  _recBtnEl.classList.toggle('recording', recording);
+  if (_recBtnEl) {
+    _recBtnEl.textContent = recording ? '● REC 0s' : '●';
+    _recBtnEl.classList.toggle('recording', recording);
+  } else {
+    // Нет dedicated btn — показываем sticky toast с таймером (для 3D
+    // где запись запускается из меню snapshot'а)
+    if (recording) updateStickyToast('● REC 0s');
+    else clearStickyToast();
+  }
 }
 
 function updateTimer() {
-  if (!_recBtnEl || !recorder) return;
+  if (!recorder) return;
   const sec = Math.floor((Date.now() - startedAt) / 1000);
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  const text = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
+  if (_recBtnEl) _recBtnEl.textContent = text;
+  else updateStickyToast(text);
+}
+
+function updateStickyToast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  el.dataset.sticky = '1';
+}
+
+function clearStickyToast() {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  if (el.dataset.sticky === '1') {
+    delete el.dataset.sticky;
+    el.classList.remove('show');
+  }
 }
 
 function showToast(msg, ms) {
@@ -7438,7 +7473,7 @@ function showToast(msg, ms) {
   setTimeout(() => el.classList.remove('show'), ms || 2500);
 }
 
-    return { initRecorder };
+    return { initRecorder, toggleRecord, isRecording };
   })();
 
   // --- src/ui/snapshot.js ---
@@ -7459,14 +7494,24 @@ let _supportSvg = true;
 // Single-click PNG режим — для 3D, где кроме PNG ничего нет, popup-menu
 // избыточен. Click сразу скачивает PNG @1×.
 let _singleClickPng = false;
+// Опциональная интеграция с recorder.js — добавляет в menu пункт
+// "Start/Stop video recording". Не подтягиваем recorder напрямую как
+// import чтобы не плодить cross-deps; передаём через opts.
+let _videoRecorder = null;
 
 function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
   if (opts && typeof opts.supportSvg === 'boolean') _supportSvg = opts.supportSvg;
   if (opts && typeof opts.singleClickPng === 'boolean') _singleClickPng = opts.singleClickPng;
+  if (opts && opts.videoRecorder && typeof opts.videoRecorder.toggle === 'function') {
+    _videoRecorder = opts.videoRecorder;
+  }
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  _snapBtn.addEventListener('click', _singleClickPng ? () => savePng(1) : showMenu);
+  // Если есть videoRecorder integration — singleClick не имеет смысла
+  // (нужен popup для выбора между PNG / video). Иначе — соблюдаем флаг.
+  const useSingleClick = _singleClickPng && !_videoRecorder;
+  _snapBtn.addEventListener('click', useSingleClick ? () => savePng(1) : showMenu);
 }
 
 function showMenu() {
@@ -7498,8 +7543,14 @@ function showMenu() {
     menu.appendChild(b);
   };
   mkBtn(t('snapshot.png_1x'), () => savePng(1));
-  mkBtn(t('snapshot.png_2x'), () => savePng(2));
+  if (!_singleClickPng) mkBtn(t('snapshot.png_2x'), () => savePng(2));
   if (_supportSvg) mkBtn(t('snapshot.svg'), () => saveSvg());
+  // Optional video recording entry — label dynamically reflects current state
+  if (_videoRecorder) {
+    const isRec = !!(_videoRecorder.isActive && _videoRecorder.isActive());
+    const label = isRec ? t('snapshot.video_stop') : t('snapshot.video_start');
+    mkBtn(label, () => _videoRecorder.toggle());
+  }
   document.body.appendChild(menu);
 
   // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)

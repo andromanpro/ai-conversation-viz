@@ -225,6 +225,8 @@ const DICT = {
     'snapshot.png_1x': '⬇ PNG (1×)',
     'snapshot.png_2x': '⬇ PNG (2× — retina)',
     'snapshot.svg': '⬇ SVG (nodes + edges)',
+    'snapshot.video_start': '🎥 Start video recording',
+    'snapshot.video_stop': '⏹ Stop video recording',
 
     // Toasts / errors
     'toast.link_copied': 'Link copied to clipboard',
@@ -417,6 +419,8 @@ const DICT = {
     'snapshot.png_1x': '⬇ PNG (1×)',
     'snapshot.png_2x': '⬇ PNG (2× — retina)',
     'snapshot.svg': '⬇ SVG (ноды + рёбра)',
+    'snapshot.video_start': '🎥 Начать запись видео',
+    'snapshot.video_stop': '⏹ Остановить запись',
 
     'toast.link_copied': 'Ссылка скопирована',
     'toast.webgl_on': 'WebGL режим включён',

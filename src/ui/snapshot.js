@@ -14,14 +14,24 @@ let _supportSvg = true;
 // Single-click PNG режим — для 3D, где кроме PNG ничего нет, popup-menu
 // избыточен. Click сразу скачивает PNG @1×.
 let _singleClickPng = false;
+// Опциональная интеграция с recorder.js — добавляет в menu пункт
+// "Start/Stop video recording". Не подтягиваем recorder напрямую как
+// import чтобы не плодить cross-deps; передаём через opts.
+let _videoRecorder = null;
 
 export function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
   if (opts && typeof opts.supportSvg === 'boolean') _supportSvg = opts.supportSvg;
   if (opts && typeof opts.singleClickPng === 'boolean') _singleClickPng = opts.singleClickPng;
+  if (opts && opts.videoRecorder && typeof opts.videoRecorder.toggle === 'function') {
+    _videoRecorder = opts.videoRecorder;
+  }
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  _snapBtn.addEventListener('click', _singleClickPng ? () => savePng(1) : showMenu);
+  // Если есть videoRecorder integration — singleClick не имеет смысла
+  // (нужен popup для выбора между PNG / video). Иначе — соблюдаем флаг.
+  const useSingleClick = _singleClickPng && !_videoRecorder;
+  _snapBtn.addEventListener('click', useSingleClick ? () => savePng(1) : showMenu);
 }
 
 function showMenu() {
@@ -53,8 +63,14 @@ function showMenu() {
     menu.appendChild(b);
   };
   mkBtn(t('snapshot.png_1x'), () => savePng(1));
-  mkBtn(t('snapshot.png_2x'), () => savePng(2));
+  if (!_singleClickPng) mkBtn(t('snapshot.png_2x'), () => savePng(2));
   if (_supportSvg) mkBtn(t('snapshot.svg'), () => saveSvg());
+  // Optional video recording entry — label dynamically reflects current state
+  if (_videoRecorder) {
+    const isRec = !!(_videoRecorder.isActive && _videoRecorder.isActive());
+    const label = isRec ? t('snapshot.video_stop') : t('snapshot.video_start');
+    mkBtn(label, () => _videoRecorder.toggle());
+  }
   document.body.appendChild(menu);
 
   // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)

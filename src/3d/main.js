@@ -38,7 +38,7 @@ import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { applySphericalScatter } from './scatter.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
 import { initTooltip, showTooltip, hideTooltip } from '../ui/tooltip.js';
-import { initRecorder } from '../ui/recorder.js';
+import { initRecorder, toggleRecord, isRecording } from '../ui/recorder.js';
 import { initSnapshot } from '../ui/snapshot.js';
 
 const ROLE_COLORS = {
@@ -1453,10 +1453,15 @@ initSettingsModal();
 initTooltip();
 // Recorder + Snapshot работают на Three.js canvas. SVG-snapshot отключён —
 // для 3D scene нет sensible vector representation.
+// 3D снимок и видео — одна кнопка 📷 с popup'ом «PNG / Start-Stop video».
+// Recorder без своей кнопки — управляется из меню snapshot'а.
 initRecorder(() => renderer.domElement);
-// 3D snapshot — одна опция (PNG), popup-menu избыточен → single-click сразу
-// скачивает PNG @1×. Если понадобится 2×/SVG — переделать на меню.
-initSnapshot({ getCanvas: () => renderer.domElement, supportSvg: false, singleClickPng: true });
+initSnapshot({
+  getCanvas: () => renderer.domElement,
+  supportSvg: false,
+  singleClickPng: true, // прячем PNG 2× (один пункт PNG достаточно)
+  videoRecorder: { toggle: toggleRecord, isActive: isRecording },
+});
 initAudio();
 initFpsCounter('fps-counter');
 init3DLayoutSwitch();
