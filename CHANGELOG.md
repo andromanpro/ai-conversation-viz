@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] — 2026-04-26
+
+### Added — 3D Recorder + Snapshot
+
+В 3D-режиме раньше не было ни кнопки snapshot, ни кнопки записи видео.
+Теперь — единая иконка 📷 в HUD с popup-меню:
+
+- **PNG** — single-click на пункт меню, сразу скачивается png (через
+  `canvas.toBlob`). Для этого включён `preserveDrawingBuffer:true` в
+  WebGLRenderer (без него буфер очищается после render и toBlob возвращает
+  пустоту).
+- **Видеозапись** — пункт меню с динамической label «Начать запись» /
+  «Остановить запись» в зависимости от текущего состояния recorder'а.
+  При активной записи в нижней части экрана висит sticky toast
+  `● REC Xs` (обновляется каждые 250ms).
+
+Реализация чистая через DI:
+- `recorder.js` — экспортирует `toggleRecord()` + `isRecording()` для
+  external triggers (без привязки к собственной кнопке)
+- `snapshot.js` — принимает opts `{ getCanvas, supportSvg, singleClickPng,
+  videoRecorder }`. Если передан videoRecorder — добавляет соответствующий
+  пункт в menu.
+
+### Changed — Privacy / Polish
+
+- Убраны hardcoded private LAN адреса и admin creds из public configs
+  (`sonar-project.properties`, `package.json` npm-script, README hints)
+- EN README: переведены оставшиеся русские комментарии в code-блоке embed
+  + Architecture-tree
+- Code smells: removed unused imports/vars, snapshot ternaries → ROLE_HEX
+  map, NOSONAR на S3516 false-positive в layout.js
+
+### Fixed — Visual
+
+- 2D reverse-signal халo больше не превращается в огромные жёлтые шары
+  на хабах при множественных параллельных Task-tool'ах. Заменено на
+  electric-spark pattern (тот же что у edge-particles): trail из
+  `CFG.particleTrailLen` точек, perpendicular jitter, halo+mid+core слои
+  в screen-space без `cam.scale` множителя. headFade clamp у нод убирает
+  «застрявший glow».
+- 3D loading toast виден до начала тяжёлой работы (parser + prewarm) —
+  через `setTimeout(30)` вместо `requestAnimationFrame`.
+- Adaptive scaling для мегаструктур — `safeW`, `camera.far`, `scene.fog`,
+  `controls.maxDistance` пересчитываются по `√N`.
+
 ## [1.6.0] — 2026-04-26
 
 ### Added — Semantic role split for `user`
