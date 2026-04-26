@@ -11,13 +11,17 @@ let _getCanvas = () => document.getElementById('graph');
 // SVG-snapshot имеет смысл только для 2D (где есть state.nodes/edges с
 // плоскими x/y координатами). В 3D — отключаем пункт меню.
 let _supportSvg = true;
+// Single-click PNG режим — для 3D, где кроме PNG ничего нет, popup-menu
+// избыточен. Click сразу скачивает PNG @1×.
+let _singleClickPng = false;
 
 export function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
   if (opts && typeof opts.supportSvg === 'boolean') _supportSvg = opts.supportSvg;
+  if (opts && typeof opts.singleClickPng === 'boolean') _singleClickPng = opts.singleClickPng;
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  _snapBtn.addEventListener('click', showMenu);
+  _snapBtn.addEventListener('click', _singleClickPng ? () => savePng(1) : showMenu);
 }
 
 function showMenu() {

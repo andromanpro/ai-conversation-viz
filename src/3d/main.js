@@ -1454,7 +1454,9 @@ initTooltip();
 // Recorder + Snapshot работают на Three.js canvas. SVG-snapshot отключён —
 // для 3D scene нет sensible vector representation.
 initRecorder(() => renderer.domElement);
-initSnapshot({ getCanvas: () => renderer.domElement, supportSvg: false });
+// 3D snapshot — одна опция (PNG), popup-menu избыточен → single-click сразу
+// скачивает PNG @1×. Если понадобится 2×/SVG — переделать на меню.
+initSnapshot({ getCanvas: () => renderer.domElement, supportSvg: false, singleClickPng: true });
 initAudio();
 initFpsCounter('fps-counter');
 init3DLayoutSwitch();

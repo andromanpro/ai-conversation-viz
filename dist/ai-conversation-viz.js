@@ -7343,34 +7343,50 @@ function toggle() {
 
 function start() {
   const canvas = _getCanvas();
-  if (!canvas || !canvas.captureStream) {
-    showToast('Recording not supported in this browser');
+  if (!canvas) {
+    console.warn('[recorder] canvas not found');
+    showToast('Recording: canvas not found', 5000);
+    return;
+  }
+  if (!canvas.captureStream) {
+    console.warn('[recorder] canvas.captureStream not supported');
+    showToast('Recording not supported in this browser', 5000);
     return;
   }
   const mime = getSupportedMime();
   if (!mime) {
-    showToast('MediaRecorder not available');
+    console.warn('[recorder] no supported MediaRecorder mime');
+    showToast('MediaRecorder not available', 5000);
     return;
   }
   let stream;
-  try { stream = canvas.captureStream(30); } catch (e) {
-    showToast('captureStream failed');
+  try {
+    stream = canvas.captureStream(30);
+    console.log('[recorder] stream OK, tracks:', stream.getTracks().length, 'mime:', mime);
+  } catch (e) {
+    console.error('[recorder] captureStream failed', e);
+    showToast('captureStream failed: ' + e.message, 5000);
     return;
   }
   try {
     recorder = new MediaRecorder(stream, { mimeType: mime });
   } catch (e) {
-    console.error('[recorder]', e);
-    showToast('Recorder init failed');
+    console.error('[recorder] MediaRecorder init failed', e);
+    showToast('Recorder init failed: ' + e.message, 5000);
     return;
   }
   chunks = [];
   recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
   recorder.onstop = download;
+  recorder.onerror = (e) => {
+    console.error('[recorder] runtime error', e);
+    showToast('Recording error', 5000);
+  };
   recorder.start(250); // chunks of 250ms
   startedAt = Date.now();
   updateBtn(true);
   timerId = setInterval(updateTimer, 250);
+  showToast('Recording started — click ● again to stop', 2000);
 }
 
 function stop() {
@@ -7414,12 +7430,12 @@ function updateTimer() {
   _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
 }
 
-function showToast(msg) {
+function showToast(msg, ms) {
   const el = document.getElementById('toast');
   if (!el) return;
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), ms || 2500);
 }
 
     return { initRecorder };
@@ -7440,13 +7456,17 @@ let _getCanvas = () => document.getElementById('graph');
 // SVG-snapshot имеет смысл только для 2D (где есть state.nodes/edges с
 // плоскими x/y координатами). В 3D — отключаем пункт меню.
 let _supportSvg = true;
+// Single-click PNG режим — для 3D, где кроме PNG ничего нет, popup-menu
+// избыточен. Click сразу скачивает PNG @1×.
+let _singleClickPng = false;
 
 function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
   if (opts && typeof opts.supportSvg === 'boolean') _supportSvg = opts.supportSvg;
+  if (opts && typeof opts.singleClickPng === 'boolean') _singleClickPng = opts.singleClickPng;
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  _snapBtn.addEventListener('click', showMenu);
+  _snapBtn.addEventListener('click', _singleClickPng ? () => savePng(1) : showMenu);
 }
 
 function showMenu() {

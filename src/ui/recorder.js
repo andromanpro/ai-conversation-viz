@@ -38,34 +38,50 @@ function toggle() {
 
 function start() {
   const canvas = _getCanvas();
-  if (!canvas || !canvas.captureStream) {
-    showToast('Recording not supported in this browser');
+  if (!canvas) {
+    console.warn('[recorder] canvas not found');
+    showToast('Recording: canvas not found', 5000);
+    return;
+  }
+  if (!canvas.captureStream) {
+    console.warn('[recorder] canvas.captureStream not supported');
+    showToast('Recording not supported in this browser', 5000);
     return;
   }
   const mime = getSupportedMime();
   if (!mime) {
-    showToast('MediaRecorder not available');
+    console.warn('[recorder] no supported MediaRecorder mime');
+    showToast('MediaRecorder not available', 5000);
     return;
   }
   let stream;
-  try { stream = canvas.captureStream(30); } catch (e) {
-    showToast('captureStream failed');
+  try {
+    stream = canvas.captureStream(30);
+    console.log('[recorder] stream OK, tracks:', stream.getTracks().length, 'mime:', mime);
+  } catch (e) {
+    console.error('[recorder] captureStream failed', e);
+    showToast('captureStream failed: ' + e.message, 5000);
     return;
   }
   try {
     recorder = new MediaRecorder(stream, { mimeType: mime });
   } catch (e) {
-    console.error('[recorder]', e);
-    showToast('Recorder init failed');
+    console.error('[recorder] MediaRecorder init failed', e);
+    showToast('Recorder init failed: ' + e.message, 5000);
     return;
   }
   chunks = [];
   recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
   recorder.onstop = download;
+  recorder.onerror = (e) => {
+    console.error('[recorder] runtime error', e);
+    showToast('Recording error', 5000);
+  };
   recorder.start(250); // chunks of 250ms
   startedAt = Date.now();
   updateBtn(true);
   timerId = setInterval(updateTimer, 250);
+  showToast('Recording started — click ● again to stop', 2000);
 }
 
 function stop() {
@@ -109,10 +125,10 @@ function updateTimer() {
   _recBtnEl.textContent = m > 0 ? `● REC ${m}m${s.toString().padStart(2,'0')}s` : `● REC ${s}s`;
 }
 
-function showToast(msg) {
+function showToast(msg, ms) {
   const el = document.getElementById('toast');
   if (!el) return;
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), ms || 2500);
 }
