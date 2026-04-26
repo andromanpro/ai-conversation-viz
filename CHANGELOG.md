@@ -4,6 +4,97 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-04-26
+
+### Added — Semantic role split for `user`
+
+Перегруженная роль `user` (живой человек / sub-agent prompt / pure tool_result)
+разделена на три:
+
+- **`subagent_input`** — user-message чей `parentUuid` указывает на
+  virtual `Task` tool_use ID родительского ассистента. Это машинно-
+  сгенерированный prompt от Lead-агента к саб-агенту. Цвет — steel-blue
+  `#8CA5C8` (десатурированный, «полу-человек»). Toggle `user` скрывает
+  обоих.
+- **`tool_result`** — user-message содержащий ТОЛЬКО `tool_result` блоки
+  (без своего `text`/`thinking`/`image`). Семантически — возврат от
+  tool'а, не ввод человека. Цвет — peach-amber `#C89150` (приглушённый
+  оранжевый, связан с tool_use). Toggle `tool_use` скрывает обоих. Радиус
+  как у `tool_use` (вспомогательная нода).
+- **`user`** — реальный человек (или mixed message с текстом + tool_result).
+
+Поддержка во всех палитрах: Canvas 2D / WebGL / 3D / minimap / SVG snapshot.
+Tooltip показывает правильный цвет роли. Whitelist `?hide=` URL-параметра
+расширен до полного списка известных ролей.
+
+### Added — `tool_result` → `tool_use` pair edges
+
+Через `toolResultIds` массив на ноде `tool_result` теперь точно строится
+graph pair-edges. Параллельные Task'и (4 tool_use → 1 tool_result-нода)
+дают 4 разных pair-edge — каждая исходит из своей virtual tool_use ноды,
+все входят в одну tool_result, но визуально не overlap'ят.
+
+### Added — 3D hover preview
+
+Settings → Display → «3D — show node preview on hover» (default off).
+При включении наведение мыши на орб показывает tooltip с ролью и
+preview-текстом (как в 2D). Выключено по умолчанию чтобы не отвлекать
+при свободном вращении камеры.
+
+### Added — Adaptive scaling for mega-graphs
+
+Раньше на N=2000+ нод 3D-граф «обрезался» — bbox растягивался на 5000+
+единиц, `camera.far=8000` фиксированно → меши клипуются за far-плоскостью.
+Soft-wall куб тоже был фиксирован `±1000`, ноды спрессованы.
+
+Адаптивно по N:
+- `safeW = max(2000, 1500 + sqrt(N) * 60)` — куб расширяется с количеством нод
+- `camera.far`, `scene.fog`, `controls.maxDistance` пересчитываются в
+  `fitCameraToBBox` на основе bbox размера
+
+### Added — Performance & UX
+
+- **Adaptive prewarm iterations** в 3D — `O(N²)` × 260 итераций при
+  большом N давали 3-5 секунд freeze. Теперь `iters = max(40, 26000/N)`.
+  Качество layout страдает чуть-чуть, force-directed дойдёт до равновесия
+  за пару секунд после загрузки.
+- **Loading indicator** при загрузке большого JSONL в 3D — toast
+  «Loading ~X KB JSONL…» + perf-логирование в console.
+- **GPU memory leak fix**: `clearGroups()` теперь disposeит
+  `reverseSignalGroup` Points (раньше повторный loadText добавлял +3
+  Points с своими geometry+material, старые висели в сцене).
+- **2D edgeCPs Map** — создавалась каждый кадр и заполнялась без чтения
+  (mini-leak), удалена.
+
+### Added — `compactions` counter + `_hasCliMeta` flag + `_isPendingToolUse`
+
+- `parseJSONL` теперь считает `type:"summary"` (Claude Code compactions)
+  → `stats.compactions`. Видно в tooltip счётчика загрузки.
+- `stripCliMeta()` экспортируется из parser.js — удаляет
+  `<system-reminder>` / `<command-name>` / `<command-message>` /
+  `<command-args>` / `<local-command-stdout>` / `<local-command-caveat>`
+  из user-text. Если что-то стрипнули — флаг `n._hasCliMeta=true`.
+- `markPendingToolUses` post-pass — virtual tool_use без matching
+  tool_result получает флаг `_isPendingToolUse=true` (для будущего
+  visual hint в renderer).
+
+### Changed — 2D reverse-signal: heavy comet → electric spark
+
+Раньше halo `r * 3` × `cam.scale` → огромные жёлтые шары на хабах при
+zoom-in (особенно на множественных параллельных Task'ах сходящихся в
+одну tool_result-ноду). Теперь — электрический паттерн как у
+forward-particles: trail из `CFG.particleTrailLen` точек, perpendicular
+jitter, halo+mid+core слои в screen-space (без `cam.scale` множителя).
+`headFade` clamp у нод убирает «застрявший glow».
+
+### Tests + tooling
+
+- 134 → **147 unit tests** (+13). Покрыты: subagent_input detection,
+  pure tool_result, mixed user, hasError на tool_result, stripCliMeta
+  (3 теста), CLI-meta flag, compactions counter, pending tool_use,
+  idempotency.
+- Sonar: 92 → **69 issues** (−25%), 0 BLOCKER, 0 vulnerabilities, 0 bugs.
+
 ## [1.5.3] — 2026-04-25
 
 ### Removed — Light theme

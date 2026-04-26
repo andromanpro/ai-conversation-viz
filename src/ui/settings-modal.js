@@ -64,6 +64,9 @@ const TOGGLES = [
   ['display', 'showForwardSignal', 'state'],
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
+  // 3D-only: hover-tooltip с превью текста ноды (по умолчанию off,
+  // чтобы не отвлекало при свободном вращении камеры)
+  ['display', 'show3DHoverPreview','state'],
   ['metrics', 'showMetrics',       'state'],
   // Play slider — равномерно по count нод вместо по реальному ts
   ['playback', 'timelineByCount',  'state'],
@@ -145,9 +148,10 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      // Toggles с default OFF: useCanvas2D, timelineByCount.
+      // Toggles с default OFF: useCanvas2D, timelineByCount, showMetrics, show3DHoverPreview.
       // Для остальных — default ON (если поле не задано в state — считаем true).
-      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount' || key === 'showMetrics';
+      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount'
+        || key === 'showMetrics' || key === 'show3DHoverPreview';
       input.checked = defaultOff ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;

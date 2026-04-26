@@ -372,7 +372,10 @@ function assignRadialPosition(id, depth, angleStart, angleEnd, ctx) {
   }
 }
 
-export function computeRadialLayout(nodes, byId, viewport) {
+// Sonar S3516 false positive: считает что функция всегда возвращает один
+// тот же объект (Map). Reference действительно один, но содержимое мутируется
+// через ctx.positions внутри assignRadialPosition — Sonar этого не видит.
+export function computeRadialLayout(nodes, byId, viewport) { // NOSONAR
   const positions = new Map();
   if (!nodes.length) return positions;
   const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;

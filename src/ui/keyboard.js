@@ -7,10 +7,9 @@ import { toggleFreeze } from './freeze-toggle.js';
 import { setSpeed } from './speed-control.js';
 import { toggleOrphans } from './orphans-toggle.js';
 import { toggleSettings } from './settings-modal.js';
-import { toggleTopics, clearTopicFilter } from './topics-toggle.js';
-import { toggleBookmarks } from './bookmarks.js';
+import { clearTopicFilter } from './topics-toggle.js';
+import { toggleBookmarks, updateBadge as updateBookmarksBadge } from './bookmarks.js';
 import { toggleStar } from './annotations.js';
-import { updateBadge as updateBookmarksBadge } from './bookmarks.js';
 
 let _kbdGetViewport = () => ({
   width: window.innerWidth,

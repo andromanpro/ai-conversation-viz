@@ -30,3 +30,4 @@ coverage/
 *.tsbuildinfo
 _sample*.jsonl
 .scannerwork/
+readme-preview*.html

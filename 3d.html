@@ -121,10 +121,27 @@
 
   #toast { position: fixed; bottom: 82px; left: 50%; transform: translateX(-50%); background: var(--panel); backdrop-filter: blur(8px); border: 1px solid var(--assistant); padding: 8px 18px; border-radius: 20px; font-size: 12px; color: var(--text); z-index: 20; opacity: 0; transition: opacity .2s ease; pointer-events: none; }
   #toast.show { opacity: 1; }
+
+  /* Hover tooltip — переиспользует tooltip.js / DOM-структуру с index.html */
+  #tooltip { position: fixed; pointer-events: none; z-index: 9; background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--border); padding: 8px 10px; font-size: 11px; line-height: 1.4; max-width: 280px; display: none; }
+  #tooltip.show { display: block; }
+  #tooltip .tt-role { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; color: var(--muted); }
+  #tooltip .tt-role.user { color: var(--user); }
+  #tooltip .tt-role.assistant { color: var(--assistant); }
+  #tooltip .tt-role.tool_use { color: var(--tool); }
+  #tooltip .tt-role.tool_result { color: #C89150; }
+  #tooltip .tt-role.subagent_input { color: #8CA5C8; }
+  #tooltip .tt-role.thinking { color: #B58CFF; }
+  #tooltip .tt-body { color: var(--text); word-break: break-word; white-space: pre-wrap; }
 </style>
 </head>
 <body>
 <div id="three-container"></div>
+
+<div id="tooltip">
+  <div class="tt-role"></div>
+  <div class="tt-body"></div>
+</div>
 
 <div class="hud" id="top-left">
   <div class="title" data-i18n="header.title">AI Conversation Viz · 3D</div>

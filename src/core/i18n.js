@@ -35,8 +35,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.3 · force-directed',
-    'header.subtitle_standalone': 'v1.5.3 · standalone bundle',
+    'header.subtitle_force': 'v1.6.0 · force-directed',
+    'header.subtitle_standalone': 'v1.6.0 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -102,9 +102,9 @@ const DICT = {
     'aria.lang': 'Switch language',
     'aria.3d': 'Open 3D visualization',
     'aria.close': 'Close',
-    'tip.role_user': 'Toggle user',
+    'tip.role_user': 'Toggle user (incl. subagent prompts)',
     'tip.role_assistant': 'Toggle assistant',
-    'tip.role_tool_use': 'Toggle tool_use',
+    'tip.role_tool_use': 'Toggle tool_use (incl. tool_result)',
     'tip.star': 'Mark (S)',
     'tip.remove_session': 'Remove from list',
     'tip.topic_filter': 'Click to keep only this topic (click again to clear)',
@@ -151,6 +151,7 @@ const DICT = {
     'stats.kept': 'kept',
     'stats.skipped': 'skipped',
     'stats.errors': 'errors',
+    'stats.compactions': 'compactions',
 
     // Detail panel
     'detail.empty': '(empty)',
@@ -198,6 +199,7 @@ const DICT = {
     'settings.showMetrics': 'Token & duration badges',
     'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
     'settings.timelineByCount': 'Play slider — равномерно по count нод (вместо ts)',
+    'settings.show3DHoverPreview': '3D — show node preview on hover',
 
     // Live status
     'live.idle': 'idle',
@@ -240,8 +242,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.3 · force-directed',
-    'header.subtitle_standalone': 'v1.5.3 · standalone-сборка',
+    'header.subtitle_force': 'v1.6.0 · force-directed',
+    'header.subtitle_standalone': 'v1.6.0 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -305,9 +307,9 @@ const DICT = {
     'aria.lang': 'Переключить язык',
     'aria.3d': 'Открыть 3D-визуализацию',
     'aria.close': 'Закрыть',
-    'tip.role_user': 'Скрыть/показать user',
+    'tip.role_user': 'Скрыть/показать user (вкл. subagent-промпты)',
     'tip.role_assistant': 'Скрыть/показать assistant',
-    'tip.role_tool_use': 'Скрыть/показать tool_use',
+    'tip.role_tool_use': 'Скрыть/показать tool_use (вкл. tool_result)',
     'tip.star': 'Отметить (S)',
     'tip.remove_session': 'Удалить из списка',
     'tip.topic_filter': 'Клик — оставить только эту тему (повтор снимет)',
@@ -349,6 +351,7 @@ const DICT = {
     'stats.kept': 'оставлено',
     'stats.skipped': 'пропущено',
     'stats.errors': 'ошибок',
+    'stats.compactions': 'сжатий',
 
     'detail.empty': '(пусто)',
     'detail.star': '☆ Звезда',
@@ -392,6 +395,7 @@ const DICT = {
     'settings.showMetrics': 'Бейджи токенов и времени',
     'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
     'settings.timelineByCount': 'Слайдер play — равномерно по нодам (вместо ts)',
+    'settings.show3DHoverPreview': '3D — превью ноды при наведении',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',

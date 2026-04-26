@@ -94,9 +94,17 @@ function saveSvg() {
   const W = window.innerWidth;
   const H = window.innerHeight;
 
-  const roleColor = (role) => role === 'user' ? '#7BAAF0'
-    : role === 'tool_use' ? '#ECA040'
-    : '#50D4B5';
+  // Палитра ролей для SVG snapshot. Должна совпадать с Canvas/WebGL/3D
+  // палитрами в renderer.js / renderer-webgl.js / 3d/main.js.
+  const ROLE_HEX = {
+    user: '#7BAAF0',
+    subagent_input: '#8CA5C8',
+    tool_use: '#ECA040',
+    tool_result: '#C89150',
+    thinking: '#B58CFF',
+    // assistant (и любая другая) → дефолтный teal
+  };
+  const roleColor = (role) => ROLE_HEX[role] || '#50D4B5';
 
   const w2s = (x, y) => ({ x: (x - cam.x) * cam.scale, y: (y - cam.y) * cam.scale });
 

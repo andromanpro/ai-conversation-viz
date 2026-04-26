@@ -325,6 +325,26 @@ const MULTI_AGENT_ORCHESTRATION_JSONL = "{\"type\":\"user\",\"uuid\":\"u1\",\"pa
   __M["src/core/parser.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
 
+// Regex для CLI-meta тегов которые Claude Code CLI вставляет в user-message
+// при slash-командах и system reminders. В публичных JSONL они обычно
+// отсутствуют, но при работе через CLI или экспорте сырых сессий — могут
+// пробрасываться и засорять отображаемый текст.
+const CLI_META_REGEX = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\s\S]*?<\/\1>/g;
+const CLI_META_DETECT = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-caveat)>/;
+
+/**
+ * Удаляет CLI-meta теги из user-текста и схлопывает множественные пустые
+ * строки оставшиеся после удаления. Возвращает очищенный текст.
+ * Идемпотентна.
+ */
+function stripCliMeta(text) {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    .replace(CLI_META_REGEX, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function extractToolResultText(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -338,23 +358,50 @@ function extractToolResultText(content) {
 }
 
 function classifyContent(content) {
-  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [], thinkings: [] };
-  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [], thinkings: [] };
+  // blockCounts — сколько блоков каждого типа было в content (нужно чтобы
+  // отличить "user-message с tool_result + текстом" от "pure tool_result").
+  const emptyCounts = { text: 0, image: 0, toolUse: 0, toolResult: 0, thinking: 0 };
+  if (typeof content === 'string') {
+    const stripped = stripCliMeta(content);
+    return {
+      text: stripped,
+      toolUses: [], toolResults: [], thinkings: [],
+      blockCounts: { ...emptyCounts, text: stripped ? 1 : 0 },
+      hasCliMeta: CLI_META_DETECT.test(content),
+    };
+  }
+  if (!Array.isArray(content)) {
+    return { text: '', toolUses: [], toolResults: [], thinkings: [], blockCounts: emptyCounts, hasCliMeta: false };
+  }
   const textParts = [];
   const toolUses = [];
-  const toolResults = []; // { toolUseId, isError }
-  const thinkings = [];   // string[] — для отдельных virtual thinking nodes
+  // toolResults — массив объектов с полями toolUseId (string) и isError (bool)
+  const toolResults = [];
+  // thinkings — массив текстов для отдельных virtual thinking nodes
+  const thinkings = [];
+  const blockCounts = { ...emptyCounts };
+  let hasCliMeta = false;
   for (const block of content) {
     if (!block) continue;
     switch (block.type) {
       case 'text':
-        if (typeof block.text === 'string') textParts.push(block.text);
+        if (typeof block.text === 'string') {
+          if (CLI_META_DETECT.test(block.text)) hasCliMeta = true;
+          const cleaned = stripCliMeta(block.text);
+          if (cleaned) {
+            textParts.push(cleaned);
+            blockCounts.text++;
+          }
+          // Если после strip остался пустой текст — блок был чисто meta,
+          // не считаем его как text-блок (важно для pure tool_result detection).
+        }
         break;
       case 'thinking':
         // Сохраняем текст для отдельной virtual thinking ноды.
         // В text родителя НЕ дублируем — иначе двойное отображение.
         if (typeof block.thinking === 'string' && block.thinking.trim()) {
           thinkings.push(block.thinking);
+          blockCounts.thinking++;
         }
         break;
       case 'tool_use':
@@ -363,6 +410,7 @@ function classifyContent(content) {
           name: typeof block.name === 'string' ? block.name : 'tool',
           input: block.input || {},
         });
+        blockCounts.toolUse++;
         break;
       case 'tool_result': {
         const rt = extractToolResultText(block.content);
@@ -374,17 +422,19 @@ function classifyContent(content) {
             isError: !!block.is_error,
           });
         }
+        blockCounts.toolResult++;
         break;
       }
       case 'image':
         textParts.push('[image]');
+        blockCounts.image++;
         break;
       default:
         // неизвестный тип — пропускаем
         break;
     }
   }
-  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings };
+  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings, blockCounts, hasCliMeta };
 }
 
 function extractText(message) {
@@ -401,7 +451,7 @@ function parseJSONL(text) {
   const lines = text.split(/\r?\n/);
   const nodes = [];
   const unknownTypes = new Map();
-  let parsed = 0, kept = 0, skipped = 0, errors = 0;
+  let parsed = 0, kept = 0, skipped = 0, errors = 0, compactions = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -411,13 +461,14 @@ function parseJSONL(text) {
     try { obj = JSON.parse(trimmed); } catch { errors++; continue; }
 
     const t = obj.type;
+    if (t === 'summary') compactions++;
     if (t !== 'user' && t !== 'assistant') {
       if (t && !SERVICE_TYPES.has(t)) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
       skipped++;
       continue;
     }
 
-    const { text: msgText, toolUses, toolResults, thinkings } = classifyContent(obj.message && obj.message.content);
+    const { text: msgText, toolUses, toolResults, thinkings, blockCounts, hasCliMeta } = classifyContent(obj.message && obj.message.content);
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
@@ -429,17 +480,30 @@ function parseJSONL(text) {
       else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
     }
 
-    // На user-нодах сохраняем массив tool_use_id из tool_result блоков и
-    // флаг наличия error — для visualization pair-edges и red error-ring.
+    // Pure tool_result detection: user-message содержит ≥1 tool_result блок
+    // и НЕТ блоков text/thinking/image — это чистый «возврат от tool'а»,
+    // не реальный пользовательский ввод. Получает отдельную роль.
+    // (Mixed: user с текстом + tool_result — оставляем role='user', т.к.
+    // там есть и реальный комментарий пользователя.)
+    let role = t;
+    if (t === 'user' && toolResults.length > 0
+        && blockCounts.text === 0 && blockCounts.thinking === 0 && blockCounts.image === 0) {
+      role = 'tool_result';
+    }
+
+    // На user/tool_result нодах сохраняем массив tool_use_id из tool_result
+    // блоков и флаг наличия error — для visualization pair-edges и red ring
+    // на parent assistant'е (graph.js buildPairEdges использует n.hasError).
     // На assistant-нодах сохраняем usage (для метрик-бейджей).
     const node = {
       id: baseId,
       parentId,
-      role: t,
+      role,
       ts,
       text: finalText,
       textLen: finalText.length,
     };
+    if (hasCliMeta) node._hasCliMeta = true;
     if (t === 'user' && toolResults.length) {
       node.toolResultIds = toolResults.map(r => r.toolUseId);
       node.hasError = toolResults.some(r => r.isError);
@@ -493,11 +557,71 @@ function parseJSONL(text) {
     if (kept >= CFG.maxMessages) break;
   }
 
+  // Post-pass: помечаем user-ноды которые на самом деле — subagent prompts.
+  // В Claude Code тред саб-агента начинается с user-message чей parentUuid
+  // указывает на virtual tool_use ID родительского ассистента (Task tool).
+  // Семантически это машинно-сгенерированный prompt от Lead-агента к
+  // саб-агенту, а не ввод человека — отображаем отдельным цветом.
+  markSubagentInputs(nodes);
+  // Post-pass: помечаем virtual tool_use ноды которые остались без ответа
+  // (нет matching tool_result в каком-либо tool_result-message).
+  // Может случаться при truncated сессиях или если CLI прервался.
+  markPendingToolUses(nodes);
+
   if (unknownTypes.size && typeof console !== 'undefined') {
     console.warn('[parseJSONL] skipped types:', JSON.stringify(Object.fromEntries(unknownTypes)));
   }
 
-  return { nodes, stats: { parsed, kept, skipped, errors } };
+  return { nodes, stats: { parsed, kept, skipped, errors, compactions } };
+}
+
+// Помечает user-ноды как 'subagent_input' если их parent — virtual tool_use
+// с toolName='Task'. Идемпотентна — может вызываться дважды без эффекта.
+// Экспортируется для appendRawNodes (live-mode incremental parsing) — после
+// добавления новых нод вызываем этот пост-проход чтобы перевести user→subagent_input.
+function markSubagentInputs(nodes) {
+  const taskToolUseIds = new Set();
+  for (const n of nodes) {
+    if (n.role === 'tool_use' && n.toolName === 'Task') {
+      taskToolUseIds.add(n.id);
+    }
+  }
+  for (const n of nodes) {
+    if (n.role === 'user' && n.parentId && taskToolUseIds.has(n.parentId)) {
+      n.role = 'subagent_input';
+    }
+  }
+}
+
+/**
+ * Помечает virtual tool_use ноды флагом `_isPendingToolUse=true` если для
+ * их `toolUseId` нигде в графе нет matching tool_result (ни в одной user/
+ * tool_result ноде через `toolResultIds`).
+ *
+ * Бывает при:
+ *  - truncated JSONL (сессия оборвалась пока tool ещё работал)
+ *  - максимальный лимит CFG.maxMessages дошёл до tool_use, но не до result
+ *  - саб-агенский tool_use чья tool_result-нода обрезана
+ *
+ * Идемпотентна. Renderer'ы могут использовать флаг для приглушённого
+ * отображения (визуально «не закрытый вызов»), но это polish.
+ */
+function markPendingToolUses(nodes) {
+  const respondedToolUseIds = new Set();
+  for (const n of nodes) {
+    if (n.toolResultIds) {
+      for (const tuid of n.toolResultIds) respondedToolUseIds.add(tuid);
+    }
+  }
+  for (const n of nodes) {
+    if (n.role === 'tool_use' && n.toolUseId && !respondedToolUseIds.has(n.toolUseId)) {
+      n._isPendingToolUse = true;
+    } else if (n.role === 'tool_use' && n._isPendingToolUse) {
+      // Если ранее был помечен, а теперь tool_result появился (live-mode) —
+      // снимаем флаг. Поддерживает идемпотентность при повторных вызовах.
+      n._isPendingToolUse = false;
+    }
+  }
 }
 
 function safeStringify(v) {
@@ -558,7 +682,7 @@ function parseLine(line, seedCounter) {
   const t = obj.type;
   if (t !== 'user' && t !== 'assistant') return [];
 
-  const { text: msgText, toolUses, thinkings } = classifyContent(obj.message && obj.message.content);
+  const { text: msgText, toolUses, toolResults, thinkings, blockCounts, hasCliMeta } = classifyContent(obj.message && obj.message.content);
   const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
   const parentId = obj.parentUuid || null;
@@ -568,14 +692,27 @@ function parseLine(line, seedCounter) {
     else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
   }
 
-  const out = [{
+  // Pure tool_result detection (тот же критерий что в parseJSONL).
+  let role = t;
+  if (t === 'user' && toolResults && toolResults.length > 0
+      && blockCounts.text === 0 && blockCounts.thinking === 0 && blockCounts.image === 0) {
+    role = 'tool_result';
+  }
+
+  const baseNode = {
     id: baseId,
     parentId,
-    role: t,
+    role,
     ts,
     text: finalText,
     textLen: finalText.length,
-  }];
+  };
+  if (hasCliMeta) baseNode._hasCliMeta = true;
+  if (t === 'user' && toolResults && toolResults.length) {
+    baseNode.toolResultIds = toolResults.map(r => r.toolUseId);
+    baseNode.hasError = toolResults.some(r => r.isError);
+  }
+  const out = [baseNode];
   if (t === 'assistant') {
     for (let i = 0; i < thinkings.length; i++) {
       const tk = thinkings[i];
@@ -606,7 +743,7 @@ function parseLine(line, seedCounter) {
   return out;
 }
 
-    return { extractText, parseJSONL, summariseToolUse, parseLine };
+    return { stripCliMeta, extractText, parseJSONL, markSubagentInputs, markPendingToolUses, summariseToolUse, parseLine };
   })();
 
   // --- src/core/adapters.js ---
@@ -1261,7 +1398,10 @@ function assignRadialPosition(id, depth, angleStart, angleEnd, ctx) {
   }
 }
 
-function computeRadialLayout(nodes, byId, viewport) {
+// Sonar S3516 false positive: считает что функция всегда возвращает один
+// тот же объект (Map). Reference действительно один, но содержимое мутируется
+// через ctx.positions внутри assignRadialPosition — Sonar этого не видит.
+function computeRadialLayout(nodes, byId, viewport) { // NOSONAR
   const positions = new Map();
   if (!nodes.length) return positions;
   const cx = viewport.cx != null ? viewport.cx : viewport.width / 2;
@@ -1375,11 +1515,14 @@ function fitToView(nodes, viewport) {
   __M["src/core/graph.js"] = (function () {
     const { CFG } = __M["src/core/config.js"];
     const { seedJitter } = __M["src/core/layout.js"];
+    const { markSubagentInputs, markPendingToolUses } = __M["src/core/parser.js"];
 
 function computeRadius(n) {
   const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
   const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-  if (n.role === 'tool_use') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
+  // tool_use и tool_result — оба вспомогательные ноды tool-цепочки,
+  // одинаковый scale чтобы pair выглядел сбалансированно.
+  if (n.role === 'tool_use' || n.role === 'tool_result') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
   // Thinking-ноды чуть меньше assistant'а — полупрозрачное «облако мыслей»
   if (n.role === 'thinking') return Math.max(CFG.minR, clamped * 0.7);
   return clamped;
@@ -1464,6 +1607,14 @@ function appendRawNodes(state, rawNodes, viewport) {
     }
     added.push(node);
   }
+  // Live-mode: после добавления нод-инкремента переоцениваем subagent_input
+  // (parseLine не имеет полного контекста, ставит role='user', а здесь —
+  // имеем все накопленные ноды и можем найти связь user → Task tool_use).
+  markSubagentInputs(state.nodes);
+  // А также переоцениваем pending tool_use: если новый tool_result наконец
+  // пришёл, флаг _isPendingToolUse снимется. Если новый tool_use без ответа
+  // — пометится.
+  markPendingToolUses(state.nodes);
   recomputeRecency(state.nodes);
   computeDegreesAndHubs(state.nodes, state.edges);
   return added;
@@ -1742,7 +1893,7 @@ function isLikelyIntranet(url) {
       || h === '127.0.0.1'
       || /^10\./.test(h)
       || /^192\.168\./.test(h)
-      || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
       || h.endsWith('.local');
   } catch {
     return false;
@@ -1791,8 +1942,8 @@ const DICT = {
   en: {
     // Header / subtitle
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.3 · force-directed',
-    'header.subtitle_standalone': 'v1.5.3 · standalone bundle',
+    'header.subtitle_force': 'v1.6.0 · force-directed',
+    'header.subtitle_standalone': 'v1.6.0 · standalone bundle',
     'header.subtitle_3d': 'Three.js · glowing orbs',
 
     // Primary buttons
@@ -1858,9 +2009,9 @@ const DICT = {
     'aria.lang': 'Switch language',
     'aria.3d': 'Open 3D visualization',
     'aria.close': 'Close',
-    'tip.role_user': 'Toggle user',
+    'tip.role_user': 'Toggle user (incl. subagent prompts)',
     'tip.role_assistant': 'Toggle assistant',
-    'tip.role_tool_use': 'Toggle tool_use',
+    'tip.role_tool_use': 'Toggle tool_use (incl. tool_result)',
     'tip.star': 'Mark (S)',
     'tip.remove_session': 'Remove from list',
     'tip.topic_filter': 'Click to keep only this topic (click again to clear)',
@@ -1907,6 +2058,7 @@ const DICT = {
     'stats.kept': 'kept',
     'stats.skipped': 'skipped',
     'stats.errors': 'errors',
+    'stats.compactions': 'compactions',
 
     // Detail panel
     'detail.empty': '(empty)',
@@ -1954,6 +2106,7 @@ const DICT = {
     'settings.showMetrics': 'Token & duration badges',
     'settings.useCanvas2D': 'Use Canvas 2D fallback (WebGL by default)',
     'settings.timelineByCount': 'Play slider — равномерно по count нод (вместо ts)',
+    'settings.show3DHoverPreview': '3D — show node preview on hover',
 
     // Live status
     'live.idle': 'idle',
@@ -1996,8 +2149,8 @@ const DICT = {
   },
   ru: {
     'header.title': 'AI Conversation Viz',
-    'header.subtitle_force': 'v1.5.3 · force-directed',
-    'header.subtitle_standalone': 'v1.5.3 · standalone-сборка',
+    'header.subtitle_force': 'v1.6.0 · force-directed',
+    'header.subtitle_standalone': 'v1.6.0 · standalone-сборка',
     'header.subtitle_3d': 'Three.js · светящиеся орбы',
 
     'btn.sample': 'Примеры ▾',
@@ -2061,9 +2214,9 @@ const DICT = {
     'aria.lang': 'Переключить язык',
     'aria.3d': 'Открыть 3D-визуализацию',
     'aria.close': 'Закрыть',
-    'tip.role_user': 'Скрыть/показать user',
+    'tip.role_user': 'Скрыть/показать user (вкл. subagent-промпты)',
     'tip.role_assistant': 'Скрыть/показать assistant',
-    'tip.role_tool_use': 'Скрыть/показать tool_use',
+    'tip.role_tool_use': 'Скрыть/показать tool_use (вкл. tool_result)',
     'tip.star': 'Отметить (S)',
     'tip.remove_session': 'Удалить из списка',
     'tip.topic_filter': 'Клик — оставить только эту тему (повтор снимет)',
@@ -2105,6 +2258,7 @@ const DICT = {
     'stats.kept': 'оставлено',
     'stats.skipped': 'пропущено',
     'stats.errors': 'ошибок',
+    'stats.compactions': 'сжатий',
 
     'detail.empty': '(пусто)',
     'detail.star': '☆ Звезда',
@@ -2148,6 +2302,7 @@ const DICT = {
     'settings.showMetrics': 'Бейджи токенов и времени',
     'settings.useCanvas2D': 'Canvas 2D вместо WebGL (fallback)',
     'settings.timelineByCount': 'Слайдер play — равномерно по нодам (вместо ts)',
+    'settings.show3DHoverPreview': '3D — превью ноды при наведении',
 
     'live.idle': 'ожидание',
     'live.connecting': 'подключение…',
@@ -2277,8 +2432,10 @@ const state = {
   topicsMode: false, // TF-IDF topic coloring
   topicFilter: null, // string | null — если задан, подсвечиваем только ноды с таким _topicWord
   diffMode: false,     // сравнение двух сессий
-  diffStats: null,     // { onlyA, onlyB, both }
-  sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
+  // diffStats — объект со счётчиками: onlyA, onlyB, both
+  diffStats: null,
+  // sessions — массив объектов с полями id, name, size, content, meta, remoteUrl?
+  sessions: [],
   sessionsOpen: false, // панель session-picker открыта
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
@@ -2290,6 +2447,7 @@ const state = {
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
   useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
   timelineByCount: false, // play slider — равномерно по count нод (true) или по ts (false, default)
+  show3DHoverPreview: false, // в 3D — показывать tooltip при hover на ноду (по умолчанию off, чтобы не отвлекало при панорамировании)
 };
 
 function resetInteractionState() {
@@ -2792,7 +2950,7 @@ function hueToRgbaString(hue, saturation = 0.65, lightness = 0.6, alpha = 1) {
   __M["src/view/renderer.js"] = (function () {
     const { CFG, COLORS } = __M["src/core/config.js"];
     const { worldToScreen } = __M["src/view/camera.js"];
-    const { controlPoint, bezierPoint } = __M["src/view/particles.js"];
+    const { controlPoint } = __M["src/view/particles.js"];
     const { toolIcon } = __M["src/view/tool-icons.js"];
     const { hueToRgbaString } = __M["src/view/topics.js"];
 
@@ -2826,13 +2984,21 @@ function diffCoreDark(origin, alpha) {
   return `rgba(120, 120, 130, ${alpha})`;
 }
 
+// subagent_input — машинный prompt от Lead к саб-агенту (parent: Task tool_use).
+// Тон: десатурированный сине-стальной — намёк «полу-пользователь, полу-машина»;
+// явно отличается от живого user (saturated blue) и от tool_use (orange).
+//
+// tool_result — pure возврат от tool'а (user-message без своего текста).
+// Тон: приглушённый peach-amber — связан с tool_use orange но темнее.
 function glowRgba(role, alpha, node, topicsMode, diffMode) {
   if (diffMode && node && node._diffOrigin) return diffGlowRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(140, 165, 200, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'tool_result') return `rgba(200, 145, 80, ${alpha})`;
   if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
@@ -2843,7 +3009,9 @@ function coreRgba(role, alpha, node, topicsMode, diffMode) {
     return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(140, 165, 200, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'tool_result') return `rgba(200, 145, 80, ${alpha})`;
   if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
@@ -2854,7 +3022,9 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
     return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
   }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(70, 95, 135, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
+  if (role === 'tool_result') return `rgba(115, 75, 30, ${alpha})`;
   if (role === 'thinking') return `rgba(95, 70, 160, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
 }
@@ -2862,7 +3032,9 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
 function edgeRgba(childRole, alpha, edge, diffMode) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
+  if (childRole === 'tool_result') return `rgba(200, 145, 80, ${alpha * 1.15})`;
   if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
+  if (childRole === 'subagent_input') return `rgba(140, 165, 200, ${alpha * 1.1})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
 
@@ -3027,7 +3199,6 @@ function draw(ctx, state, tSec, viewport, extras) {
   // Swim-mode guide lines (в world) + sticky labels вверху (screen-space)
   if (state.layoutMode === 'swim') {
     const laneSpacingWorld = (viewport.safeH != null ? viewport.safeH : viewport.height) * 0.32;
-    const vcx_world = viewport.cx != null ? viewport.cx : viewport.width / 2;
     const vcy_world = viewport.cy != null ? viewport.cy : viewport.height / 2;
     const lanes = [
       { y: vcy_world - laneSpacingWorld, label: 'USER',      color: 'rgba(123,170,240,' },
@@ -3143,7 +3314,6 @@ function draw(ctx, state, tSec, viewport, extras) {
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
   ctx.lineWidth = 0.8;
-  const edgeCPs = new Map();
   for (const e of state.edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     if (e.adopted && !connectOrphans) continue; // скрываем adopted-edges при forest mode
@@ -3154,7 +3324,6 @@ function draw(ctx, state, tSec, viewport, extras) {
     const bS = worldToScreen(e.b.x, e.b.y, cam);
     const cpWorld = controlPoint({ x: e.a.x, y: e.a.y }, { x: e.b.x, y: e.b.y }, CFG.edgeCurveStrength);
     const cpS = worldToScreen(cpWorld.x, cpWorld.y, cam);
-    edgeCPs.set(e, cpWorld);
     if (e.adopted) {
       ctx.save();
       ctx.setLineDash([4, 4]);
@@ -3188,28 +3357,59 @@ function draw(ctx, state, tSec, viewport, extras) {
       // t — фаза кометы 0..1, бежит со скоростью ~1 цикл/сек, разный seed на pair
       const seed = ((p.a.phase || 0) + (p.b.phase || 0)) * 0.15;
       const tt = (tSec * 1.0 + seed) % 1.0;
-      // Quadratic Bezier point
-      const u = 1 - tt;
-      const wx = u * u * ax + 2 * u * tt * ccx + tt * tt * bx;
-      const wy = u * u * ay + 2 * u * tt * ccy + tt * tt * by;
-      const sH = worldToScreen(wx, wy, cam);
       const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
-      // head — bell-curve размер вдоль пути (ярче в середине)
+      // headFade — гасим когда комета ВПЛОТНУЮ к ноде (tt < 0.15 / > 0.85).
+      // Убирает «застрявший glow» на хабах где сходится N pair-edges.
       const head = Math.sin(Math.PI * tt);
-      const r = (3 + 3 * head) * Math.max(0.6, cam.scale);
-      // Halo
-      const halo = ctx.createRadialGradient(sH.x, sH.y, 0, sH.x, sH.y, r * 3);
-      halo.addColorStop(0, `rgba(255, 235, 92, ${0.85 * ag * head})`);
-      halo.addColorStop(1, `rgba(255, 235, 92, 0)`);
-      ctx.fillStyle = halo;
-      ctx.beginPath();
-      ctx.arc(sH.x, sH.y, r * 3, 0, Math.PI * 2);
-      ctx.fill();
-      // Core
-      ctx.fillStyle = `rgba(255, 250, 200, ${0.95 * ag * head})`;
-      ctx.beginPath();
-      ctx.arc(sH.x, sH.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      const headFade = Math.max(0, head * 1.4 - 0.4);
+      if (headFade <= 0.01) continue;
+      // ---- Электрическая искра (как edge-particles, не масштабируется с zoom)
+      // Trail из CFG.particleTrailLen точек, каждая с perpendicular-jitter,
+      // halo+mid+core layers. Цвет — жёлтый чтобы отличать от cyan/orange
+      // edge-частиц (forward направления).
+      const trailN = CFG.particleTrailLen;
+      const gap = CFG.particleTrailGap;
+      const sz = CFG.particleSize;
+      // Pre-compute Bezier tangent at this t для perpendicular jitter
+      for (let k = 0; k < trailN; k++) {
+        const tk = tt - k * gap;
+        if (tk < 0 || tk > 1) continue;
+        const uk = 1 - tk;
+        const wxk = uk * uk * ax + 2 * uk * tk * ccx + tk * tk * bx;
+        const wyk = uk * uk * ay + 2 * uk * tk * ccy + tk * tk * by;
+        const sH = worldToScreen(wxk, wyk, cam);
+        // Perpendicular jitter (электрический «дребезг»)
+        const tanX = 2 * uk * (ccx - ax) + 2 * tk * (bx - ccx);
+        const tanY = 2 * uk * (ccy - ay) + 2 * tk * (by - ccy);
+        const tanLen = Math.hypot(tanX, tanY) || 1;
+        const perpX = -tanY / tanLen;
+        const perpY = tanX / tanLen;
+        const headFactor = k === 0 ? 1 : 0.4;
+        const jitterAmt = (Math.random() - 0.5) * CFG.particleJitterPx * 2 * headFactor;
+        const sx = sH.x + perpX * jitterAmt;
+        const sy = sH.y + perpY * jitterAmt;
+        const trailFade = 1 - k / trailN;
+        const a = ag * headFade * trailFade;
+        if (a < 0.02) continue;
+        // Halo (жёлтый)
+        const haloR = sz * CFG.particleHaloMul * trailFade;
+        ctx.fillStyle = `rgba(255, 220, 80, ${a * 0.22})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+        ctx.fill();
+        // Mid (тёплый жёлтый)
+        const midR = sz * CFG.particleMidMul * trailFade;
+        ctx.fillStyle = `rgba(255, 230, 130, ${a * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+        ctx.fill();
+        // Core (почти белый)
+        const coreR = Math.max(0.6, sz * trailFade * 0.7);
+        ctx.fillStyle = `rgba(255, 250, 220, ${a})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, coreR, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -3903,7 +4103,9 @@ const ROLE_RGB = {
   user: [0.482, 0.666, 0.941],
   assistant: [0.313, 0.831, 0.709],
   tool_use: [0.925, 0.627, 0.250],
-  thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
+  thinking: [0.71, 0.55, 1.0],          // фиолетовый — «облако мысли»
+  subagent_input: [0.549, 0.647, 0.784], // steel-blue — машинный prompt от Lead
+  tool_result: [0.784, 0.568, 0.313],   // приглушённый peach — возврат от tool'а
 };
 
 const DIFF_RGB = {
@@ -3948,8 +4150,12 @@ function edgeColor(e, state, out) {
     r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
     r = 0.925; g = 0.627; b = 0.250;
+  } else if (e.b && e.b.role === 'tool_result') {
+    r = 0.784; g = 0.568; b = 0.313;
   } else if (e.b && e.b.role === 'thinking') {
     r = 0.71; g = 0.55; b = 1.0;
+  } else if (e.b && e.b.role === 'subagent_input') {
+    r = 0.549; g = 0.647; b = 0.784;
   } else {
     r = 0.0; g = 0.831; b = 1.0;
   }
@@ -4166,7 +4372,6 @@ function fillLineBuffer(state, nowMs) {
 function fillParticleBuffer(state) {
   const edges = state.edges;
   const hidden = state.hiddenRoles;
-  const connectOrphans = !!state.connectOrphans;
   const collapsed = state.collapsed;
   const topicFilter = state.topicFilter || null;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
@@ -5569,6 +5774,14 @@ function setStatus(s) {
 
 const ROLES = ['user', 'assistant', 'tool_use'];
 
+// Связанные роли: при toggle ключевой роли скрываются/показываются вместе.
+//   user → subagent_input — оба «вход для агента» (живой / машинный)
+//   tool_use → tool_result — pair tool-цепочки (вызов / ответ)
+const LINKED_ROLES = {
+  user: ['subagent_input'],
+  tool_use: ['tool_result'],
+};
+
 function initFilter() {
   for (const role of ROLES) {
     const btn = document.querySelector(`.btn-role[data-role="${role}"]`);
@@ -5579,11 +5792,14 @@ function initFilter() {
 }
 
 function toggleRole(role, btn) {
+  const linked = LINKED_ROLES[role] || [];
   if (state.hiddenRoles.has(role)) {
     state.hiddenRoles.delete(role);
+    for (const r of linked) state.hiddenRoles.delete(r);
     btn.classList.add('active');
   } else {
     state.hiddenRoles.add(role);
+    for (const r of linked) state.hiddenRoles.add(r);
     btn.classList.remove('active');
   }
 }
@@ -5626,7 +5842,10 @@ function initMinimap(_mmGetViewportFn) {
 
 function colorFor(role) {
   if (role === 'user') return '#7BAAF0';
+  if (role === 'subagent_input') return '#8CA5C8';
   if (role === 'tool_use') return '#ECA040';
+  if (role === 'tool_result') return '#C89150';
+  if (role === 'thinking') return '#B58CFF';
   return '#50D4B5';
 }
 
@@ -6016,6 +6235,9 @@ const TOGGLES = [
   ['display', 'showForwardSignal', 'state'],
   ['display', 'showErrorRings',    'state'],
   ['display', 'showThinking',      'state'],
+  // 3D-only: hover-tooltip с превью текста ноды (по умолчанию off,
+  // чтобы не отвлекало при свободном вращении камеры)
+  ['display', 'show3DHoverPreview','state'],
   ['metrics', 'showMetrics',       'state'],
   // Play slider — равномерно по count нод вместо по реальному ts
   ['playback', 'timelineByCount',  'state'],
@@ -6097,9 +6319,10 @@ function open() {
       input.dataset.key = key;
       input.dataset.scope = scope;
       const target = scope === 'state' ? state : CFG;
-      // Toggles с default OFF: useCanvas2D, timelineByCount.
+      // Toggles с default OFF: useCanvas2D, timelineByCount, showMetrics, show3DHoverPreview.
       // Для остальных — default ON (если поле не задано в state — считаем true).
-      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount' || key === 'showMetrics';
+      const defaultOff = key === 'useCanvas2D' || key === 'timelineByCount'
+        || key === 'showMetrics' || key === 'show3DHoverPreview';
       input.checked = defaultOff ? !!target[key] : target[key] !== false;
       input.addEventListener('change', () => {
         target[key] = !!input.checked;
@@ -6532,7 +6755,7 @@ function focusOnNode(n) {
     const { setSpeed } = __M["src/ui/speed-control.js"];
     const { toggleOrphans } = __M["src/ui/orphans-toggle.js"];
     const { toggleSettings } = __M["src/ui/settings-modal.js"];
-    const { toggleTopics, clearTopicFilter } = __M["src/ui/topics-toggle.js"];
+    const { clearTopicFilter } = __M["src/ui/topics-toggle.js"];
     const { toggleBookmarks, updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
     const { toggleStar } = __M["src/ui/annotations.js"];
 
@@ -6752,7 +6975,8 @@ function tickStats() {
     const { CFG } = __M["src/core/config.js"];
     const { computeRadialLayout, computeSwimLanes, easeInOutQuad, fitToView, reheat } = __M["src/core/layout.js"];
 
-let btns = []; // {mode, el}
+// btns — массив объектов с полями mode (string) и el (HTMLElement)
+let btns = [];
 let transition = null;
 let _ltGetViewport = () => ({
   width: window.innerWidth,
@@ -7295,9 +7519,17 @@ function saveSvg() {
   const W = window.innerWidth;
   const H = window.innerHeight;
 
-  const roleColor = (role) => role === 'user' ? '#7BAAF0'
-    : role === 'tool_use' ? '#ECA040'
-    : '#50D4B5';
+  // Палитра ролей для SVG snapshot. Должна совпадать с Canvas/WebGL/3D
+  // палитрами в renderer.js / renderer-webgl.js / 3d/main.js.
+  const ROLE_HEX = {
+    user: '#7BAAF0',
+    subagent_input: '#8CA5C8',
+    tool_use: '#ECA040',
+    tool_result: '#C89150',
+    thinking: '#B58CFF',
+    // assistant (и любая другая) → дефолтный teal
+  };
+  const roleColor = (role) => ROLE_HEX[role] || '#50D4B5';
 
   const w2s = (x, y) => ({ x: (x - cam.x) * cam.scale, y: (y - cam.y) * cam.scale });
 
@@ -8600,7 +8832,8 @@ function updateStatsHUD() {
     ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
     : '';
   el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
-  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}\nperf: ${state.perfMode}`;
+  const compLine = s.compactions ? `\n${t('stats.compactions')}: ${s.compactions}` : '';
+  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}${compLine}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {
@@ -8713,7 +8946,7 @@ async function applyUrlParamsLate() {
   }
 
   // Whitelist ролей — не принимаем произвольный текст из ?hide=
-  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use']);
+  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use', 'tool_result', 'subagent_input', 'thinking']);
   if (Array.isArray(params.hide)) {
     for (const r of params.hide) {
       if (!KNOWN_ROLES.has(r)) continue;

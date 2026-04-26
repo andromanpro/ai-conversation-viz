@@ -1,6 +1,6 @@
 import { CFG, COLORS } from '../core/config.js';
 import { worldToScreen } from './camera.js';
-import { controlPoint, bezierPoint } from './particles.js';
+import { controlPoint } from './particles.js';
 import { toolIcon } from './tool-icons.js';
 import { hueToRgbaString } from './topics.js';
 
@@ -34,13 +34,21 @@ function diffCoreDark(origin, alpha) {
   return `rgba(120, 120, 130, ${alpha})`;
 }
 
+// subagent_input — машинный prompt от Lead к саб-агенту (parent: Task tool_use).
+// Тон: десатурированный сине-стальной — намёк «полу-пользователь, полу-машина»;
+// явно отличается от живого user (saturated blue) и от tool_use (orange).
+//
+// tool_result — pure возврат от tool'а (user-message без своего текста).
+// Тон: приглушённый peach-amber — связан с tool_use orange но темнее.
 function glowRgba(role, alpha, node, topicsMode, diffMode) {
   if (diffMode && node && node._diffOrigin) return diffGlowRgba(node._diffOrigin, alpha);
   if (topicsMode && node && node._topicHue != null) {
     return hueToRgbaString(node._topicHue, 0.7, 0.6, alpha);
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(140, 165, 200, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'tool_result') return `rgba(200, 145, 80, ${alpha})`;
   if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
@@ -51,7 +59,9 @@ function coreRgba(role, alpha, node, topicsMode, diffMode) {
     return hueToRgbaString(node._topicHue, 0.75, 0.62, alpha);
   }
   if (role === 'user') return `rgba(123, 170, 240, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(140, 165, 200, ${alpha})`;
   if (role === 'tool_use') return `rgba(236, 160, 64, ${alpha})`;
+  if (role === 'tool_result') return `rgba(200, 145, 80, ${alpha})`;
   if (role === 'thinking') return `rgba(181, 140, 255, ${alpha})`;
   return `rgba(80, 212, 181, ${alpha})`;
 }
@@ -62,7 +72,9 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
     return hueToRgbaString(node._topicHue, 0.8, 0.35, alpha);
   }
   if (role === 'user') return `rgba(60, 100, 170, ${alpha})`;
+  if (role === 'subagent_input') return `rgba(70, 95, 135, ${alpha})`;
   if (role === 'tool_use') return `rgba(140, 80, 30, ${alpha})`;
+  if (role === 'tool_result') return `rgba(115, 75, 30, ${alpha})`;
   if (role === 'thinking') return `rgba(95, 70, 160, ${alpha})`;
   return `rgba(30, 110, 95, ${alpha})`;
 }
@@ -70,7 +82,9 @@ function coreDarkRgba(role, alpha, node, topicsMode, diffMode) {
 function edgeRgba(childRole, alpha, edge, diffMode) {
   if (diffMode && edge && edge.diffSide === 'B') return `rgba(90, 210, 255, ${alpha * 1.1})`;
   if (childRole === 'tool_use') return `rgba(236, 160, 64, ${alpha * 1.28})`;
+  if (childRole === 'tool_result') return `rgba(200, 145, 80, ${alpha * 1.15})`;
   if (childRole === 'thinking') return `rgba(181, 140, 255, ${alpha * 1.05})`;
+  if (childRole === 'subagent_input') return `rgba(140, 165, 200, ${alpha * 1.1})`;
   return `rgba(0, 212, 255, ${alpha})`;
 }
 
@@ -235,7 +249,6 @@ export function draw(ctx, state, tSec, viewport, extras) {
   // Swim-mode guide lines (в world) + sticky labels вверху (screen-space)
   if (state.layoutMode === 'swim') {
     const laneSpacingWorld = (viewport.safeH != null ? viewport.safeH : viewport.height) * 0.32;
-    const vcx_world = viewport.cx != null ? viewport.cx : viewport.width / 2;
     const vcy_world = viewport.cy != null ? viewport.cy : viewport.height / 2;
     const lanes = [
       { y: vcy_world - laneSpacingWorld, label: 'USER',      color: 'rgba(123,170,240,' },
@@ -351,7 +364,6 @@ export function draw(ctx, state, tSec, viewport, extras) {
   const fogMul = N > 500 ? Math.max(0.25, 1 - (N - 500) / 2500) : 1;
   const connectOrphans = !!state.connectOrphans;
   ctx.lineWidth = 0.8;
-  const edgeCPs = new Map();
   for (const e of state.edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     if (e.adopted && !connectOrphans) continue; // скрываем adopted-edges при forest mode
@@ -362,7 +374,6 @@ export function draw(ctx, state, tSec, viewport, extras) {
     const bS = worldToScreen(e.b.x, e.b.y, cam);
     const cpWorld = controlPoint({ x: e.a.x, y: e.a.y }, { x: e.b.x, y: e.b.y }, CFG.edgeCurveStrength);
     const cpS = worldToScreen(cpWorld.x, cpWorld.y, cam);
-    edgeCPs.set(e, cpWorld);
     if (e.adopted) {
       ctx.save();
       ctx.setLineDash([4, 4]);
@@ -396,28 +407,59 @@ export function draw(ctx, state, tSec, viewport, extras) {
       // t — фаза кометы 0..1, бежит со скоростью ~1 цикл/сек, разный seed на pair
       const seed = ((p.a.phase || 0) + (p.b.phase || 0)) * 0.15;
       const tt = (tSec * 1.0 + seed) % 1.0;
-      // Quadratic Bezier point
-      const u = 1 - tt;
-      const wx = u * u * ax + 2 * u * tt * ccx + tt * tt * bx;
-      const wy = u * u * ay + 2 * u * tt * ccy + tt * tt * by;
-      const sH = worldToScreen(wx, wy, cam);
       const ag = Math.min(alpha(p.a), alpha(p.b)) * edgeDim({ a: p.a, b: p.b }) * fogMul;
-      // head — bell-curve размер вдоль пути (ярче в середине)
+      // headFade — гасим когда комета ВПЛОТНУЮ к ноде (tt < 0.15 / > 0.85).
+      // Убирает «застрявший glow» на хабах где сходится N pair-edges.
       const head = Math.sin(Math.PI * tt);
-      const r = (3 + 3 * head) * Math.max(0.6, cam.scale);
-      // Halo
-      const halo = ctx.createRadialGradient(sH.x, sH.y, 0, sH.x, sH.y, r * 3);
-      halo.addColorStop(0, `rgba(255, 235, 92, ${0.85 * ag * head})`);
-      halo.addColorStop(1, `rgba(255, 235, 92, 0)`);
-      ctx.fillStyle = halo;
-      ctx.beginPath();
-      ctx.arc(sH.x, sH.y, r * 3, 0, Math.PI * 2);
-      ctx.fill();
-      // Core
-      ctx.fillStyle = `rgba(255, 250, 200, ${0.95 * ag * head})`;
-      ctx.beginPath();
-      ctx.arc(sH.x, sH.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      const headFade = Math.max(0, head * 1.4 - 0.4);
+      if (headFade <= 0.01) continue;
+      // ---- Электрическая искра (как edge-particles, не масштабируется с zoom)
+      // Trail из CFG.particleTrailLen точек, каждая с perpendicular-jitter,
+      // halo+mid+core layers. Цвет — жёлтый чтобы отличать от cyan/orange
+      // edge-частиц (forward направления).
+      const trailN = CFG.particleTrailLen;
+      const gap = CFG.particleTrailGap;
+      const sz = CFG.particleSize;
+      // Pre-compute Bezier tangent at this t для perpendicular jitter
+      for (let k = 0; k < trailN; k++) {
+        const tk = tt - k * gap;
+        if (tk < 0 || tk > 1) continue;
+        const uk = 1 - tk;
+        const wxk = uk * uk * ax + 2 * uk * tk * ccx + tk * tk * bx;
+        const wyk = uk * uk * ay + 2 * uk * tk * ccy + tk * tk * by;
+        const sH = worldToScreen(wxk, wyk, cam);
+        // Perpendicular jitter (электрический «дребезг»)
+        const tanX = 2 * uk * (ccx - ax) + 2 * tk * (bx - ccx);
+        const tanY = 2 * uk * (ccy - ay) + 2 * tk * (by - ccy);
+        const tanLen = Math.hypot(tanX, tanY) || 1;
+        const perpX = -tanY / tanLen;
+        const perpY = tanX / tanLen;
+        const headFactor = k === 0 ? 1 : 0.4;
+        const jitterAmt = (Math.random() - 0.5) * CFG.particleJitterPx * 2 * headFactor;
+        const sx = sH.x + perpX * jitterAmt;
+        const sy = sH.y + perpY * jitterAmt;
+        const trailFade = 1 - k / trailN;
+        const a = ag * headFade * trailFade;
+        if (a < 0.02) continue;
+        // Halo (жёлтый)
+        const haloR = sz * CFG.particleHaloMul * trailFade;
+        ctx.fillStyle = `rgba(255, 220, 80, ${a * 0.22})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+        ctx.fill();
+        // Mid (тёплый жёлтый)
+        const midR = sz * CFG.particleMidMul * trailFade;
+        ctx.fillStyle = `rgba(255, 230, 130, ${a * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+        ctx.fill();
+        // Core (почти белый)
+        const coreR = Math.max(0.6, sz * trailFade * 0.7);
+        ctx.fillStyle = `rgba(255, 250, 220, ${a})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, coreR, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }

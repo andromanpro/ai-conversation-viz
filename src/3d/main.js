@@ -17,7 +17,6 @@ import { prewarm3D, stepPhysics3D, createSim } from '../core/layout.js';
 import { SAMPLE_JSONL } from '../core/sample.js';
 import { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } from '../core/samples-embedded.js';
 import { normalizeToClaudeJsonl } from '../core/adapters.js';
-import { toolIcon } from '../view/tool-icons.js';
 import { birthFactor, easeOutCubic } from '../view/renderer.js';
 import { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } from '../core/session-bridge.js';
 import { safeFetch } from '../core/url-safety.js';
@@ -25,26 +24,28 @@ import { initI18n, t as _t } from '../core/i18n.js';
 import { initLangToggle } from '../ui/lang-toggle.js';
 
 import { initStory, tickStory, resetStory } from '../ui/story-mode.js';
-import { initTimeline, tickPlay, isPlaying } from '../ui/timeline.js';
+import { initTimeline, tickPlay } from '../ui/timeline.js';
 import { initSpeedControl } from '../ui/speed-control.js';
 import { initFreezeToggle } from '../ui/freeze-toggle.js';
 import { initFilter } from '../ui/filter.js';
 import { initStats, tickStats, recomputeStats } from '../ui/stats-hud.js';
-import { initSearch, matchNodes } from '../ui/search.js';
+import { initSearch } from '../ui/search.js';
 import { initTopicsToggle } from '../ui/topics-toggle.js';
 import { initOrphansToggle } from '../ui/orphans-toggle.js';
 import { initAudio } from '../ui/audio.js';
 import { initFpsCounter, tickFps } from '../ui/fps-counter.js';
-import { hueToRgbaString } from '../view/topics.js';
 import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { applySphericalScatter } from './scatter.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
+import { initTooltip, showTooltip, hideTooltip } from '../ui/tooltip.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
   assistant: 0x50d4b5,
   tool_use: 0xeca040,
   thinking: 0xb58cff,
+  subagent_input: 0x8ca5c8, // steel-blue — машинный prompt от Lead к саб-агенту
+  tool_result: 0xc89150,    // peach-amber — возврат от tool'а
 };
 
 // Diff-режим: те же цвета, что и в 2D renderer (A=pink, B=cyan, both=gray)
@@ -623,6 +624,23 @@ function fitCameraToBBox(opts) {
   const sizeZ = maxZ - minZ;
   const size = Math.max(sizeX, sizeY, sizeZ, 400);
   const dist = (size * 0.5) / Math.tan((55 * Math.PI / 180) / 2) * 1.7;
+  // Adaptive camera frustum + fog для мегаграфов. Без этого при N=2000+
+  // bbox растягивается на 5000+ единиц, dist > camera.far (8000) → нодные
+  // меши клипуются за far-плоскостью или попадают в полный fog → пользователь
+  // видит «обрезанный» граф или вообще пустоту при zoom-out.
+  const desiredFar = Math.max(8000, dist * 4 + size);
+  if (camera.far !== desiredFar) {
+    camera.far = desiredFar;
+    camera.updateProjectionMatrix();
+  }
+  if (scene.fog) {
+    // Fog endpoint = camera.far (не дальше); fog start пропорционально размеру
+    scene.fog.far = desiredFar * 0.95;
+    scene.fog.near = Math.max(1800, scene.fog.far * 0.22);
+  }
+  // controls.maxDistance — позволяем пользователю откатиться достаточно
+  // далеко чтобы видеть всё; +50% запас сверх dist
+  controls.maxDistance = desiredFar * 0.9;
   camera.position.set(cx + dist * 0.55, cy - dist * 0.45, cz + dist * 0.75);
   controls.target.set(cx, cy, cz);
   controls.update();
@@ -1060,11 +1078,44 @@ function updateStats() {
 
 // ---- Loader ----
 function loadText(text) {
+  // Показываем большой видимый toast перед блокирующей работой — infoEl
+  // в углу часто не виден на мегаструктуре. Toast по центру прикреплён
+  // к bottom-center, ярко.
+  const toastEl = document.getElementById('toast');
+  if (toastEl) {
+    toastEl.textContent = `Loading ~${Math.round(text.length / 1024)}KB JSONL…`;
+    toastEl.classList.add('show');
+  }
+  if (infoEl) infoEl.textContent = 'Loading…';
+  // setTimeout(0) даёт браузеру 1 кадр на отрисовку toast'а, потом
+  // запускает sync-блокирующий parse + prewarm. RAF не всегда срабатывает
+  // когда вкладка не приоритетная, setTimeout надёжнее.
+  setTimeout(() => {
+    try {
+      loadTextInner(text);
+    } finally {
+      if (toastEl) {
+        // Скрываем toast через короткую паузу — пусть пользователь увидит
+        // финальный count
+        setTimeout(() => toastEl.classList.remove('show'), 600);
+      }
+    }
+  }, 30);
+}
+
+function loadTextInner(text) {
+  const tParse0 = performance.now();
   const norm = normalizeToClaudeJsonl(text);
   const parsed = parseJSONL(norm.text);
-  if (!parsed.nodes.length) return;
+  if (!parsed.nodes.length) {
+    if (infoEl) infoEl.textContent = 'No messages found';
+    return;
+  }
+  const tParse = performance.now() - tParse0;
   const vp = { width: window.innerWidth, height: window.innerHeight, cx: 0, cy: 0 };
+  const tGraph0 = performance.now();
   const g = buildGraph(parsed, vp);
+  const tGraph = performance.now() - tGraph0;
   // В 3D по умолчанию подключаем orphan-edges к физике — иначе на
   // линейных графах ноды вытягиваются в «верёвку», sibling-orphan'ы
   // не имеют притяжения друг к другу. Это та самая разница которую
@@ -1076,7 +1127,25 @@ function loadText(text) {
   applySphericalScatter(g.nodes);
   // Полное 3D physics — vx, vy, vz, fxAcc/fyAcc/fzAcc, repulsion и
   // spring в 3D-distance. Куб, не плоскость.
-  prewarm3D(g.nodes, g.edges, { safeW: 2000 }, state.sim, CFG.prewarmIterations);
+  //
+  // Adaptive prewarm iterations: O(N²) на каждой итерации, поэтому при
+  // большом N снижаем количество итераций, чтобы не блокировать UI:
+  //   N=100  → 260 iters (быстро, можем себе позволить)
+  //   N=300  → ~87 iters
+  //   N=600  → 43 iters (clamp to 40)
+  //   N=1000 → 26 iters → 40
+  // Качество layout страдает чуть-чуть, но force-directed продолжает
+  // работать каждый кадр после загрузки и быстро дойдёт до равновесия.
+  const N = g.nodes.length;
+  const adaptiveIters = Math.max(40, Math.min(CFG.prewarmIterations, Math.round(26000 / Math.max(1, N))));
+  // Adaptive soft-wall — куб разрастается с количеством нод, иначе при
+  // N=3000 граф «спрессован» в 2000-куб и обрезается фрустумом камеры.
+  const adaptiveSafeW = Math.max(2000, 1500 + Math.sqrt(N) * 60);
+  state._adaptiveSafeW = adaptiveSafeW; // tick() будет использовать
+  const tPrewarm0 = performance.now();
+  prewarm3D(g.nodes, g.edges, { safeW: adaptiveSafeW }, state.sim, adaptiveIters);
+  const tPrewarm = performance.now() - tPrewarm0;
+  console.log(`[3D loader] N=${N} edges=${g.edges.length} | parse=${tParse.toFixed(0)}ms graph=${tGraph.toFixed(0)}ms prewarm=${tPrewarm.toFixed(0)}ms (${adaptiveIters} iters)`);
   state.nodes = g.nodes;
   state.edges = g.edges;
   state.byId = g.byId;
@@ -1244,6 +1313,32 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   ev.preventDefault();
 });
 
+// Hover-tooltip — показываем превью текста ноды при наведении.
+// Работает только когда state.show3DHoverPreview=true (по умолчанию off,
+// чтобы не отвлекать при свободном вращении камеры).
+// Listener на canvas, не на window — hover актуален только над сценой.
+let _lastHoveredNode = null;
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (!state.show3DHoverPreview) {
+    if (_lastHoveredNode) { hideTooltip(); _lastHoveredNode = null; }
+    return;
+  }
+  // Во время drag не показываем tooltip — он перекрывает курсор и мешает
+  if (_draggedNode) return;
+  const hit = pickNodeMesh(ev);
+  if (hit && hit.object.userData && hit.object.userData.node) {
+    const node = hit.object.userData.node;
+    showTooltip(node, ev.clientX, ev.clientY);
+    _lastHoveredNode = node;
+  } else if (_lastHoveredNode) {
+    hideTooltip();
+    _lastHoveredNode = null;
+  }
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+  if (_lastHoveredNode) { hideTooltip(); _lastHoveredNode = null; }
+});
+
 window.addEventListener('pointermove', (ev) => {
   if (!_draggedNode) return;
   const dx = ev.clientX - _dragStart.x;
@@ -1350,6 +1445,7 @@ initSearch(() => ({ width: window.innerWidth, height: window.innerHeight, cx: 0,
 initTopicsToggle();
 initOrphansToggle();
 initSettingsModal();
+initTooltip();
 initAudio();
 initFpsCounter('fps-counter');
 init3DLayoutSwitch();
@@ -1535,7 +1631,6 @@ let prevMs = performance.now();
 function tick() {
   requestAnimationFrame(tick);
   const nowMs = performance.now();
-  const dt = Math.min(0.1, (nowMs - prevMs) / 1000);
   prevMs = nowMs;
   // Подхватываем cameraRotateSpeed из CFG (Settings modal может поменять)
   controls.autoRotateSpeed = CFG.cameraRotateSpeed;
@@ -1553,7 +1648,7 @@ function tick() {
   // на каждом кадре несмотря на правильный 3D-prewarm.
   // Explode-intro сам замораживает sim (sim.frozen=true) — physics ждёт.
   if (state.layoutMode === 'force' && state.sim && !state.sim.frozen && state.nodes.length) {
-    stepPhysics3D(state.nodes, state.edges, { safeW: 2000 }, state.sim);
+    stepPhysics3D(state.nodes, state.edges, { safeW: state._adaptiveSafeW || 2000 }, state.sim);
   }
 
   const t = nowMs / 1000;

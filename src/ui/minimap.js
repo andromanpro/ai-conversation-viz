@@ -27,7 +27,10 @@ export function initMinimap(_mmGetViewportFn) {
 
 function colorFor(role) {
   if (role === 'user') return '#7BAAF0';
+  if (role === 'subagent_input') return '#8CA5C8';
   if (role === 'tool_use') return '#ECA040';
+  if (role === 'tool_result') return '#C89150';
+  if (role === 'thinking') return '#B58CFF';
   return '#50D4B5';
 }
 

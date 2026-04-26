@@ -1,5 +1,25 @@
 import { CFG } from './config.js';
 
+// Regex для CLI-meta тегов которые Claude Code CLI вставляет в user-message
+// при slash-командах и system reminders. В публичных JSONL они обычно
+// отсутствуют, но при работе через CLI или экспорте сырых сессий — могут
+// пробрасываться и засорять отображаемый текст.
+const CLI_META_REGEX = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\s\S]*?<\/\1>/g;
+const CLI_META_DETECT = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-caveat)>/;
+
+/**
+ * Удаляет CLI-meta теги из user-текста и схлопывает множественные пустые
+ * строки оставшиеся после удаления. Возвращает очищенный текст.
+ * Идемпотентна.
+ */
+export function stripCliMeta(text) {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    .replace(CLI_META_REGEX, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function extractToolResultText(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -13,23 +33,50 @@ function extractToolResultText(content) {
 }
 
 function classifyContent(content) {
-  if (typeof content === 'string') return { text: content, toolUses: [], toolResults: [], thinkings: [] };
-  if (!Array.isArray(content)) return { text: '', toolUses: [], toolResults: [], thinkings: [] };
+  // blockCounts — сколько блоков каждого типа было в content (нужно чтобы
+  // отличить "user-message с tool_result + текстом" от "pure tool_result").
+  const emptyCounts = { text: 0, image: 0, toolUse: 0, toolResult: 0, thinking: 0 };
+  if (typeof content === 'string') {
+    const stripped = stripCliMeta(content);
+    return {
+      text: stripped,
+      toolUses: [], toolResults: [], thinkings: [],
+      blockCounts: { ...emptyCounts, text: stripped ? 1 : 0 },
+      hasCliMeta: CLI_META_DETECT.test(content),
+    };
+  }
+  if (!Array.isArray(content)) {
+    return { text: '', toolUses: [], toolResults: [], thinkings: [], blockCounts: emptyCounts, hasCliMeta: false };
+  }
   const textParts = [];
   const toolUses = [];
-  const toolResults = []; // { toolUseId, isError }
-  const thinkings = [];   // string[] — для отдельных virtual thinking nodes
+  // toolResults — массив объектов с полями toolUseId (string) и isError (bool)
+  const toolResults = [];
+  // thinkings — массив текстов для отдельных virtual thinking nodes
+  const thinkings = [];
+  const blockCounts = { ...emptyCounts };
+  let hasCliMeta = false;
   for (const block of content) {
     if (!block) continue;
     switch (block.type) {
       case 'text':
-        if (typeof block.text === 'string') textParts.push(block.text);
+        if (typeof block.text === 'string') {
+          if (CLI_META_DETECT.test(block.text)) hasCliMeta = true;
+          const cleaned = stripCliMeta(block.text);
+          if (cleaned) {
+            textParts.push(cleaned);
+            blockCounts.text++;
+          }
+          // Если после strip остался пустой текст — блок был чисто meta,
+          // не считаем его как text-блок (важно для pure tool_result detection).
+        }
         break;
       case 'thinking':
         // Сохраняем текст для отдельной virtual thinking ноды.
         // В text родителя НЕ дублируем — иначе двойное отображение.
         if (typeof block.thinking === 'string' && block.thinking.trim()) {
           thinkings.push(block.thinking);
+          blockCounts.thinking++;
         }
         break;
       case 'tool_use':
@@ -38,6 +85,7 @@ function classifyContent(content) {
           name: typeof block.name === 'string' ? block.name : 'tool',
           input: block.input || {},
         });
+        blockCounts.toolUse++;
         break;
       case 'tool_result': {
         const rt = extractToolResultText(block.content);
@@ -49,17 +97,19 @@ function classifyContent(content) {
             isError: !!block.is_error,
           });
         }
+        blockCounts.toolResult++;
         break;
       }
       case 'image':
         textParts.push('[image]');
+        blockCounts.image++;
         break;
       default:
         // неизвестный тип — пропускаем
         break;
     }
   }
-  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings };
+  return { text: textParts.join('\n\n'), toolUses, toolResults, thinkings, blockCounts, hasCliMeta };
 }
 
 export function extractText(message) {
@@ -76,7 +126,7 @@ export function parseJSONL(text) {
   const lines = text.split(/\r?\n/);
   const nodes = [];
   const unknownTypes = new Map();
-  let parsed = 0, kept = 0, skipped = 0, errors = 0;
+  let parsed = 0, kept = 0, skipped = 0, errors = 0, compactions = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -86,13 +136,14 @@ export function parseJSONL(text) {
     try { obj = JSON.parse(trimmed); } catch { errors++; continue; }
 
     const t = obj.type;
+    if (t === 'summary') compactions++;
     if (t !== 'user' && t !== 'assistant') {
       if (t && !SERVICE_TYPES.has(t)) unknownTypes.set(t, (unknownTypes.get(t) || 0) + 1);
       skipped++;
       continue;
     }
 
-    const { text: msgText, toolUses, toolResults, thinkings } = classifyContent(obj.message && obj.message.content);
+    const { text: msgText, toolUses, toolResults, thinkings, blockCounts, hasCliMeta } = classifyContent(obj.message && obj.message.content);
     const baseId = obj.uuid || `gen-${nodes.length}`;
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
     const parentId = obj.parentUuid || null;
@@ -104,17 +155,30 @@ export function parseJSONL(text) {
       else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
     }
 
-    // На user-нодах сохраняем массив tool_use_id из tool_result блоков и
-    // флаг наличия error — для visualization pair-edges и red error-ring.
+    // Pure tool_result detection: user-message содержит ≥1 tool_result блок
+    // и НЕТ блоков text/thinking/image — это чистый «возврат от tool'а»,
+    // не реальный пользовательский ввод. Получает отдельную роль.
+    // (Mixed: user с текстом + tool_result — оставляем role='user', т.к.
+    // там есть и реальный комментарий пользователя.)
+    let role = t;
+    if (t === 'user' && toolResults.length > 0
+        && blockCounts.text === 0 && blockCounts.thinking === 0 && blockCounts.image === 0) {
+      role = 'tool_result';
+    }
+
+    // На user/tool_result нодах сохраняем массив tool_use_id из tool_result
+    // блоков и флаг наличия error — для visualization pair-edges и red ring
+    // на parent assistant'е (graph.js buildPairEdges использует n.hasError).
     // На assistant-нодах сохраняем usage (для метрик-бейджей).
     const node = {
       id: baseId,
       parentId,
-      role: t,
+      role,
       ts,
       text: finalText,
       textLen: finalText.length,
     };
+    if (hasCliMeta) node._hasCliMeta = true;
     if (t === 'user' && toolResults.length) {
       node.toolResultIds = toolResults.map(r => r.toolUseId);
       node.hasError = toolResults.some(r => r.isError);
@@ -168,11 +232,71 @@ export function parseJSONL(text) {
     if (kept >= CFG.maxMessages) break;
   }
 
+  // Post-pass: помечаем user-ноды которые на самом деле — subagent prompts.
+  // В Claude Code тред саб-агента начинается с user-message чей parentUuid
+  // указывает на virtual tool_use ID родительского ассистента (Task tool).
+  // Семантически это машинно-сгенерированный prompt от Lead-агента к
+  // саб-агенту, а не ввод человека — отображаем отдельным цветом.
+  markSubagentInputs(nodes);
+  // Post-pass: помечаем virtual tool_use ноды которые остались без ответа
+  // (нет matching tool_result в каком-либо tool_result-message).
+  // Может случаться при truncated сессиях или если CLI прервался.
+  markPendingToolUses(nodes);
+
   if (unknownTypes.size && typeof console !== 'undefined') {
     console.warn('[parseJSONL] skipped types:', JSON.stringify(Object.fromEntries(unknownTypes)));
   }
 
-  return { nodes, stats: { parsed, kept, skipped, errors } };
+  return { nodes, stats: { parsed, kept, skipped, errors, compactions } };
+}
+
+// Помечает user-ноды как 'subagent_input' если их parent — virtual tool_use
+// с toolName='Task'. Идемпотентна — может вызываться дважды без эффекта.
+// Экспортируется для appendRawNodes (live-mode incremental parsing) — после
+// добавления новых нод вызываем этот пост-проход чтобы перевести user→subagent_input.
+export function markSubagentInputs(nodes) {
+  const taskToolUseIds = new Set();
+  for (const n of nodes) {
+    if (n.role === 'tool_use' && n.toolName === 'Task') {
+      taskToolUseIds.add(n.id);
+    }
+  }
+  for (const n of nodes) {
+    if (n.role === 'user' && n.parentId && taskToolUseIds.has(n.parentId)) {
+      n.role = 'subagent_input';
+    }
+  }
+}
+
+/**
+ * Помечает virtual tool_use ноды флагом `_isPendingToolUse=true` если для
+ * их `toolUseId` нигде в графе нет matching tool_result (ни в одной user/
+ * tool_result ноде через `toolResultIds`).
+ *
+ * Бывает при:
+ *  - truncated JSONL (сессия оборвалась пока tool ещё работал)
+ *  - максимальный лимит CFG.maxMessages дошёл до tool_use, но не до result
+ *  - саб-агенский tool_use чья tool_result-нода обрезана
+ *
+ * Идемпотентна. Renderer'ы могут использовать флаг для приглушённого
+ * отображения (визуально «не закрытый вызов»), но это polish.
+ */
+export function markPendingToolUses(nodes) {
+  const respondedToolUseIds = new Set();
+  for (const n of nodes) {
+    if (n.toolResultIds) {
+      for (const tuid of n.toolResultIds) respondedToolUseIds.add(tuid);
+    }
+  }
+  for (const n of nodes) {
+    if (n.role === 'tool_use' && n.toolUseId && !respondedToolUseIds.has(n.toolUseId)) {
+      n._isPendingToolUse = true;
+    } else if (n.role === 'tool_use' && n._isPendingToolUse) {
+      // Если ранее был помечен, а теперь tool_result появился (live-mode) —
+      // снимаем флаг. Поддерживает идемпотентность при повторных вызовах.
+      n._isPendingToolUse = false;
+    }
+  }
 }
 
 function safeStringify(v) {
@@ -233,7 +357,7 @@ export function parseLine(line, seedCounter) {
   const t = obj.type;
   if (t !== 'user' && t !== 'assistant') return [];
 
-  const { text: msgText, toolUses, thinkings } = classifyContent(obj.message && obj.message.content);
+  const { text: msgText, toolUses, toolResults, thinkings, blockCounts, hasCliMeta } = classifyContent(obj.message && obj.message.content);
   const baseId = obj.uuid || `gen-${seedCounter != null ? seedCounter : Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const ts = obj.timestamp ? Date.parse(obj.timestamp) : Date.now();
   const parentId = obj.parentUuid || null;
@@ -243,14 +367,27 @@ export function parseLine(line, seedCounter) {
     else if (thinkings.length) finalText = '💭 ' + thinkings[0].slice(0, 80);
   }
 
-  const out = [{
+  // Pure tool_result detection (тот же критерий что в parseJSONL).
+  let role = t;
+  if (t === 'user' && toolResults && toolResults.length > 0
+      && blockCounts.text === 0 && blockCounts.thinking === 0 && blockCounts.image === 0) {
+    role = 'tool_result';
+  }
+
+  const baseNode = {
     id: baseId,
     parentId,
-    role: t,
+    role,
     ts,
     text: finalText,
     textLen: finalText.length,
-  }];
+  };
+  if (hasCliMeta) baseNode._hasCliMeta = true;
+  if (t === 'user' && toolResults && toolResults.length) {
+    baseNode.toolResultIds = toolResults.map(r => r.toolUseId);
+    baseNode.hasError = toolResults.some(r => r.isError);
+  }
+  const out = [baseNode];
   if (t === 'assistant') {
     for (let i = 0; i < thinkings.length; i++) {
       const tk = thinkings[i];

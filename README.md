@@ -1,27 +1,66 @@
 # ai-conversation-viz
 
-Force-directed visualization of human↔AI conversation sessions.
+> [🇷🇺 Русский](README.ru.md) · 🇬🇧 English
 
-[🌐 Live demo](https://andromanpro.github.io/ai-conversation-viz/) · [🌐 3D](https://andromanpro.github.io/ai-conversation-viz/3d.html) · [🤖 Multi-agent orchestration demo](https://andromanpro.github.io/ai-conversation-viz/?jsonl=samples/multi-agent-orchestration.jsonl)
+Force-directed visualization of human↔AI conversation sessions, including multi-agent orchestration with Task-tool spawned sub-agents.
 
-Parses Claude Code JSONL, ChatGPT exports (`conversations.json`) and Anthropic API `messages[]`. Zero dependencies. Canvas 2D primary + Three.js 3D alternative. RU / EN interface.
+[🌐 Live demo](https://andromanpro.github.io/ai-conversation-viz/) · [🌐 3D](https://andromanpro.github.io/ai-conversation-viz/3d.html) · [🤖 Multi-agent demo](https://andromanpro.github.io/ai-conversation-viz/?jsonl=samples/multi-agent-orchestration.jsonl) · [🤖🤖 Deep orchestration](https://andromanpro.github.io/ai-conversation-viz/?jsonl=samples/deep-orchestration.jsonl)
+
+![overview-2d](media/overview-2d.png)
+
+Parses Claude Code JSONL, ChatGPT exports (`conversations.json`) and Anthropic API `messages[]`. Zero dependencies. Canvas 2D primary + WebGL + Three.js 3D alternative. RU / EN interface.
 
 ## Features
 
-- **Force-directed layout** with D3-style alpha cooling, Velocity Verlet, adaptive centerPull, leaf-spring boost, soft-wall bounds, Barnes-Hut O(n log n)
+### Visualization
+- **Force-directed layout** with D3-style alpha cooling, Velocity Verlet, adaptive centerPull, leaf-spring boost, soft-wall bounds, Barnes-Hut O(n log n) in 2D
 - **3 layout modes** — force, radial sunburst, swim-lanes (time-as-river)
+- **3D mode** — Three.js with custom orb shaders (fresnel + specular highlight + breath-pulse), UnrealBloom post-processing, OrbitControls camera + drift, audio
+- **Adaptive scale for mega-graphs** — camera frustum / fog / soft-wall expand by `√N`
+
+### Semantic role distinction
+- **`user`** — real human input
+- **`assistant`** — AI replies
+- **`tool_use`** — virtual nodes per tool call (Bash/Grep/Read/Task/…)
+- **`tool_result`** — separate role for pure tool returns (was visually identical to `user` until v1.6)
+- **`subagent_input`** — Task-tool spawned sub-agent prompts (steel-blue, distinct from human user)
+- **`thinking`** — `<thinking>` blocks as virtual children of assistants
+
+### Interaction
 - **Timeline playback** — step-by-node with 0.5×/1×/2×/5× speed
 - **Phone mockup** — chat renders in iPhone-style bubble with typewriter
-- **Interactive** — drag nodes, pan/zoom, click details, Ctrl+F search, hover preview, keyboard shortcuts
+- **Drag nodes**, pan/zoom, click details, Ctrl+F search, hover preview (in 3D — toggle in Settings), keyboard shortcuts
 - **Hub highlight** (auto-detection of high-degree nodes)
-- **Orphans** — forest mode by default, optional re-connect via ts predecessor
 - **Branch collapse** — dbl-click assistant to hide its tool_use children
-- **Stats** — tokens, duration, top tools, longest
+- **Topics mode** — TF-IDF cluster colors
+
+### Data
+- **Multi-agent orchestration** — Task tool calls visualized as sub-agent threads via virtual `#tu<i>` parent links; sub-sub-agents up to N levels
 - **Live watch** — polling URL for growing JSONL files
+- **Diff mode** — compare two sessions side-by-side
+- **Stats** — tokens, duration, top tools, longest, compactions
 - **Export** — PNG / SVG snapshot, WebM MediaRecorder
 - **Ambient audio** — generative pad + chirp on node birth
+- **CLI-meta strip** — removes `<system-reminder>` / `<command-name>` / `<command-message>` from display text
 - **Auto performance degrade** at 400+ / 1500+ nodes
 - **Share URL** — `?jsonl=<url>&t=<0..100>&n=<nodeId>&hide=<roles>`
+
+## Gallery
+
+### 2D — playback + layout switch
+
+![2d-playback](media/2d-playback.webp)
+![2d-layout-switch](media/2d-layout-switch.webp)
+
+### 3D — orbit + birth animation + layout switch
+
+![3d-orbit](media/3d-orbit.webp)
+![3d-growth](media/3d-growth-1.webp)
+![3d-layout-switch](media/3d-layout-switch.webp)
+
+### Mega-structure — large session in 3D
+
+![mega-structure](media/mega-structure.webp)
 
 ## Install
 
@@ -89,8 +128,9 @@ Parser извлекает из каждого message: text, thinking (`💭`), 
 ## Build
 
 ```bash
-npm run build    # → dist/ai-conversation-viz.js (IIFE, ~140 KB)
-npm run test     # 91 unit tests
+npm run build    # → dist/ai-conversation-viz.js (IIFE, ~370 KB)
+npm run test     # 147 unit tests
+npm run sonar    # SonarQube scan (NAS @ 192.168.1.130:9000)
 ```
 
 ## Architecture

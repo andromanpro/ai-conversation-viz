@@ -81,7 +81,7 @@ export async function applyUrlParamsLate() {
   }
 
   // Whitelist ролей — не принимаем произвольный текст из ?hide=
-  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use']);
+  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use', 'tool_result', 'subagent_input', 'thinking']);
   if (Array.isArray(params.hide)) {
     for (const r of params.hide) {
       if (!KNOWN_ROLES.has(r)) continue;

@@ -1,10 +1,13 @@
 import { CFG } from './config.js';
 import { seedJitter } from './layout.js';
+import { markSubagentInputs, markPendingToolUses } from './parser.js';
 
 function computeRadius(n) {
   const baseR = CFG.minR + 2 * Math.log(n.textLen + 1);
   const clamped = Math.min(CFG.maxR, Math.max(CFG.minR, baseR));
-  if (n.role === 'tool_use') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
+  // tool_use и tool_result — оба вспомогательные ноды tool-цепочки,
+  // одинаковый scale чтобы pair выглядел сбалансированно.
+  if (n.role === 'tool_use' || n.role === 'tool_result') return Math.max(CFG.minR, clamped * CFG.toolNodeScale);
   // Thinking-ноды чуть меньше assistant'а — полупрозрачное «облако мыслей»
   if (n.role === 'thinking') return Math.max(CFG.minR, clamped * 0.7);
   return clamped;
@@ -89,6 +92,14 @@ export function appendRawNodes(state, rawNodes, viewport) {
     }
     added.push(node);
   }
+  // Live-mode: после добавления нод-инкремента переоцениваем subagent_input
+  // (parseLine не имеет полного контекста, ставит role='user', а здесь —
+  // имеем все накопленные ноды и можем найти связь user → Task tool_use).
+  markSubagentInputs(state.nodes);
+  // А также переоцениваем pending tool_use: если новый tool_result наконец
+  // пришёл, флаг _isPendingToolUse снимется. Если новый tool_use без ответа
+  // — пометится.
+  markPendingToolUses(state.nodes);
   recomputeRecency(state.nodes);
   computeDegreesAndHubs(state.nodes, state.edges);
   return added;

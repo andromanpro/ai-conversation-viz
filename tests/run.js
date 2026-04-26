@@ -1,4 +1,4 @@
-import { parseJSONL, extractText, parseLine } from '../src/core/parser.js';
+import { parseJSONL, extractText, parseLine, stripCliMeta, markPendingToolUses } from '../src/core/parser.js';
 import { detectFormat, chatgptToClaudeJsonl, anthropicMessagesToClaudeJsonl, normalizeToClaudeJsonl } from '../src/core/adapters.js';
 import { worldToScreen, screenToWorld, applyZoom } from '../src/view/camera.js';
 import { buildGraph, appendRawNodes } from '../src/core/graph.js';
@@ -110,6 +110,174 @@ test('parser: assistant without text — text синтезируется из to
 test('extractText: handles null message', () => {
   eq(extractText(null), '');
   eq(extractText(undefined), '');
+});
+
+// subagent_input — user-message чей parent = virtual tool_use 'Task'
+// (тред саб-агента в Claude Code). Должна получить отдельную роль.
+test('parser: subagent_input — user под Task tool_use → role=subagent_input', () => {
+  const lines = [
+    '{"type":"user","uuid":"u0","parentUuid":null,"message":{"role":"user","content":"start"}}',
+    '{"type":"assistant","uuid":"a0","parentUuid":"u0","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_x","name":"Task","input":{"description":"sub","subagent_type":"general-purpose","prompt":"Do X"}}]}}',
+    '{"type":"user","uuid":"sub_u","parentUuid":"a0#tu0","message":{"role":"user","content":"[Sub] Do X"}}',
+    '{"type":"assistant","uuid":"sub_a","parentUuid":"sub_u","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  // u0 — реальный пользователь
+  const u0 = r.nodes.find(n => n.id === 'u0');
+  eq(u0.role, 'user', 'real user message stays role=user');
+  // sub_u — саб-агентский prompt (parent = virtual tool_use Task)
+  const subU = r.nodes.find(n => n.id === 'sub_u');
+  eq(subU.role, 'subagent_input', 'user under Task tool_use → subagent_input');
+  // sub_a — assistant в саб-треде, остаётся assistant
+  const subA = r.nodes.find(n => n.id === 'sub_a');
+  eq(subA.role, 'assistant');
+});
+
+// User под не-Task tool_use не должен помечаться (но в реальности такого
+// не бывает — tool_result parentится на assistant. Тест защищает от
+// over-broad detection: нельзя помечать любую user-ноду под virtual tool_use).
+test('parser: user под Read tool_use НЕ помечается subagent_input', () => {
+  const lines = [
+    '{"type":"assistant","uuid":"a0","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r","name":"Read","input":{"file_path":"/x"}}]}}',
+    // искусственный кейс: user под Read tool_use (в реальности так не бывает)
+    '{"type":"user","uuid":"weird_u","parentUuid":"a0#tu0","message":{"role":"user","content":"strange"}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const weird = r.nodes.find(n => n.id === 'weird_u');
+  eq(weird.role, 'user', 'parent is Read, not Task → role stays user');
+});
+
+// tool_result — pure user-message без своего текста, только tool_result блоки
+test('parser: pure tool_result message → role=tool_result', () => {
+  const lines = [
+    '{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b","name":"Bash","input":{"command":"ls"}}]}}',
+    '{"type":"user","uuid":"u_res","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b","content":"file1.js\\nfile2.js"}]}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const res = r.nodes.find(n => n.id === 'u_res');
+  eq(res.role, 'tool_result', 'pure tool_result block → role=tool_result');
+  eq(res.toolResultIds.length, 1);
+  eq(res.toolResultIds[0], 'tu_b');
+});
+
+// Параллельные tool_use → один user-message с N tool_result блоков
+test('parser: multiple tool_results in one message → still role=tool_result', () => {
+  const lines = [
+    '{"type":"user","uuid":"u_multi","parentUuid":"a1","message":{"role":"user","content":[' +
+      '{"type":"tool_result","tool_use_id":"tu_a","content":"A"},' +
+      '{"type":"tool_result","tool_use_id":"tu_b","content":"B"}' +
+    ']}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const node = r.nodes.find(n => n.id === 'u_multi');
+  eq(node.role, 'tool_result');
+  eq(node.toolResultIds.length, 2);
+});
+
+// User-message с текстом + tool_result остаётся user (mixed — редкий случай,
+// но если человек добавил комментарий рядом с tool_result — это не pure)
+test('parser: mixed user message (text + tool_result) → role=user', () => {
+  const lines = [
+    '{"type":"user","uuid":"u_mix","parentUuid":"a1","message":{"role":"user","content":[' +
+      '{"type":"tool_result","tool_use_id":"tu_a","content":"42 lines"},' +
+      '{"type":"text","text":"please summarize this"}' +
+    ']}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const node = r.nodes.find(n => n.id === 'u_mix');
+  eq(node.role, 'user', 'mixed message keeps role=user');
+  // toolResultIds сохраняется для pair-edges
+  eq(node.toolResultIds.length, 1);
+});
+
+// hasError на tool_result-ноде (для error pair-edge)
+test('parser: tool_result with is_error → hasError=true', () => {
+  const lines = [
+    '{"type":"user","uuid":"u_err","parentUuid":"a1","message":{"role":"user","content":[' +
+      '{"type":"tool_result","tool_use_id":"tu_a","is_error":true,"content":"ENOENT"}' +
+    ']}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const node = r.nodes.find(n => n.id === 'u_err');
+  eq(node.role, 'tool_result');
+  eq(node.hasError, true);
+});
+
+// stripCliMeta — удаление CLI-meta тегов
+test('stripCliMeta: removes <system-reminder> tags', () => {
+  const input = 'real text\n<system-reminder>internal</system-reminder>\nmore text';
+  const out = stripCliMeta(input);
+  assert(!out.includes('system-reminder'), 'tag must be removed');
+  assert(out.includes('real text'), 'real text preserved');
+  assert(out.includes('more text'), 'after-text preserved');
+});
+
+test('stripCliMeta: removes <command-name>/<command-message>/<command-args>', () => {
+  const input = '<command-name>/compact</command-name><command-message>compact</command-message><command-args></command-args>real';
+  const out = stripCliMeta(input);
+  eq(out, 'real');
+});
+
+test('stripCliMeta: idempotent + handles null/empty', () => {
+  eq(stripCliMeta(''), '');
+  eq(stripCliMeta(null), '');
+  eq(stripCliMeta(undefined), '');
+  const t = 'plain text';
+  eq(stripCliMeta(stripCliMeta(t)), t);
+});
+
+test('parser: user-message с system-reminder → text очищен, _hasCliMeta=true', () => {
+  const lines = [
+    '{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"hello\\n<system-reminder>noise</system-reminder>\\nworld"}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const u = r.nodes[0];
+  assert(!u.text.includes('system-reminder'), 'CLI meta should be stripped');
+  assert(u.text.includes('hello'), 'real text preserved');
+  assert(u.text.includes('world'), 'after-text preserved');
+  eq(u._hasCliMeta, true);
+});
+
+// Compactions counter в stats
+test('parser: type=summary считается как compaction в stats', () => {
+  const lines = [
+    '{"type":"summary","summary":"Compacted previous conversation"}',
+    '{"type":"summary","summary":"Another compact"}',
+    '{"type":"user","uuid":"u","parentUuid":null,"message":{"role":"user","content":"hi"}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  eq(r.stats.compactions, 2);
+  eq(r.nodes.length, 1);
+});
+
+// markPendingToolUses — orphan virtual tool_use без tool_result
+test('parser: virtual tool_use без matching tool_result → _isPendingToolUse=true', () => {
+  const lines = [
+    '{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[' +
+      '{"type":"tool_use","id":"tu_done","name":"Bash","input":{"command":"ls"}},' +
+      '{"type":"tool_use","id":"tu_pending","name":"Bash","input":{"command":"sleep 100"}}' +
+    ']}}',
+    '{"type":"user","uuid":"u","parentUuid":"a1","message":{"role":"user","content":[' +
+      '{"type":"tool_result","tool_use_id":"tu_done","content":"done"}' +
+    ']}}',
+  ].join('\n');
+  const r = parseJSONL(lines);
+  const done = r.nodes.find(n => n.toolUseId === 'tu_done');
+  const pending = r.nodes.find(n => n.toolUseId === 'tu_pending');
+  assert(!done._isPendingToolUse, 'tu_done has matching result → not pending');
+  eq(pending._isPendingToolUse, true, 'tu_pending has no matching result → pending');
+});
+
+test('parser: markPendingToolUses idempotent — повторный вызов не меняет результата', () => {
+  const nodes = [
+    { id: 'a1', role: 'assistant', toolUseId: null },
+    { id: 'a1#tu0', role: 'tool_use', toolUseId: 'tu_x' },
+    // нет user-ноды с tool_result для tu_x → должна быть pending
+  ];
+  markPendingToolUses(nodes);
+  eq(nodes[1]._isPendingToolUse, true);
+  markPendingToolUses(nodes);
+  eq(nodes[1]._isPendingToolUse, true, 'second call same result');
 });
 
 // ==== CAMERA ====

@@ -2,7 +2,8 @@ import { state } from '../view/state.js';
 import { CFG } from '../core/config.js';
 import { computeRadialLayout, computeSwimLanes, easeInOutQuad, fitToView, reheat } from '../core/layout.js';
 
-let btns = []; // {mode, el}
+// btns — массив объектов с полями mode (string) и el (HTMLElement)
+let btns = [];
 let transition = null;
 let _ltGetViewport = () => ({
   width: window.innerWidth,

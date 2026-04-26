@@ -62,7 +62,7 @@ export function isLikelyIntranet(url) {
       || h === '127.0.0.1'
       || /^10\./.test(h)
       || /^192\.168\./.test(h)
-      || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
       || h.endsWith('.local');
   } catch {
     return false;

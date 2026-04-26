@@ -24,8 +24,10 @@ export const state = {
   topicsMode: false, // TF-IDF topic coloring
   topicFilter: null, // string | null — если задан, подсвечиваем только ноды с таким _topicWord
   diffMode: false,     // сравнение двух сессий
-  diffStats: null,     // { onlyA, onlyB, both }
-  sessions: [],        // [{ id, name, size, content, meta, remoteUrl? }]
+  // diffStats — объект со счётчиками: onlyA, onlyB, both
+  diffStats: null,
+  // sessions — массив объектов с полями id, name, size, content, meta, remoteUrl?
+  sessions: [],
   sessionsOpen: false, // панель session-picker открыта
   isPlaying: false,    // зеркало timeline.playing (для story-mode без циклических импортов)
   annotations: new Map(), // nodeId → { text, starred, ts } (пользовательские заметки/закладки)
@@ -37,6 +39,7 @@ export const state = {
   showMetrics: false,     // бейджи: tokens на assistant, ⏱ на долгих ожиданиях
   useCanvas2D: false,     // сила Canvas 2D fallback (продвинутая опция в Settings)
   timelineByCount: false, // play slider — равномерно по count нод (true) или по ts (false, default)
+  show3DHoverPreview: false, // в 3D — показывать tooltip при hover на ноду (по умолчанию off, чтобы не отвлекало при панорамировании)
 };
 
 export function resetInteractionState() {

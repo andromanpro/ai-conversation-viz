@@ -266,7 +266,8 @@ function updateStatsHUD() {
     ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
     : '';
   el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
-  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}\nperf: ${state.perfMode}`;
+  const compLine = s.compactions ? `\n${t('stats.compactions')}: ${s.compactions}` : '';
+  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}${compLine}\nperf: ${state.perfMode}`;
 }
 
 function setLoadFormat(fmt) {

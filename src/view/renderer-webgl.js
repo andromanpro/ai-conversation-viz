@@ -453,7 +453,9 @@ const ROLE_RGB = {
   user: [0.482, 0.666, 0.941],
   assistant: [0.313, 0.831, 0.709],
   tool_use: [0.925, 0.627, 0.250],
-  thinking: [0.71, 0.55, 1.0],   // фиолетовый — «облако мысли»
+  thinking: [0.71, 0.55, 1.0],          // фиолетовый — «облако мысли»
+  subagent_input: [0.549, 0.647, 0.784], // steel-blue — машинный prompt от Lead
+  tool_result: [0.784, 0.568, 0.313],   // приглушённый peach — возврат от tool'а
 };
 
 const DIFF_RGB = {
@@ -498,8 +500,12 @@ function edgeColor(e, state, out) {
     r = 0.78; g = 0.71; b = 0.47;
   } else if (e.b && e.b.role === 'tool_use') {
     r = 0.925; g = 0.627; b = 0.250;
+  } else if (e.b && e.b.role === 'tool_result') {
+    r = 0.784; g = 0.568; b = 0.313;
   } else if (e.b && e.b.role === 'thinking') {
     r = 0.71; g = 0.55; b = 1.0;
+  } else if (e.b && e.b.role === 'subagent_input') {
+    r = 0.549; g = 0.647; b = 0.784;
   } else {
     r = 0.0; g = 0.831; b = 1.0;
   }
@@ -716,7 +722,6 @@ function fillLineBuffer(state, nowMs) {
 function fillParticleBuffer(state) {
   const edges = state.edges;
   const hidden = state.hiddenRoles;
-  const connectOrphans = !!state.connectOrphans;
   const collapsed = state.collapsed;
   const topicFilter = state.topicFilter || null;
   const hasSearch = state.searchMatches && state.searchMatches.size > 0;
