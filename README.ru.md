@@ -130,7 +130,7 @@ npx serve .
 ```bash
 npm run build    # → dist/ai-conversation-viz.js (IIFE, ~370 KB)
 npm run test     # 147 unit-тестов
-npm run sonar    # SonarQube скан (NAS @ 192.168.1.130:9000)
+npm run sonar    # SonarQube скан (host/token через SONAR_HOST_URL + SONAR_TOKEN)
 ```
 
 ## Архитектура
