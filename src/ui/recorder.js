@@ -7,8 +7,12 @@ let chunks = [];
 let startedAt = 0;
 let _recBtnEl;
 let timerId = null;
+// Function returning the canvas to record. По умолчанию — 2D `#graph`,
+// в 3D пробрасываем Three.js renderer.domElement.
+let _getCanvas = () => document.getElementById('graph');
 
-export function initRecorder() {
+export function initRecorder(getCanvas) {
+  if (typeof getCanvas === 'function') _getCanvas = getCanvas;
   _recBtnEl = document.getElementById('btn-record');
   if (_recBtnEl) _recBtnEl.addEventListener('click', toggle);
 }
@@ -33,7 +37,7 @@ function toggle() {
 }
 
 function start() {
-  const canvas = document.getElementById('graph');
+  const canvas = _getCanvas();
   if (!canvas || !canvas.captureStream) {
     showToast('Recording not supported in this browser');
     return;

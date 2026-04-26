@@ -38,6 +38,8 @@ import { compute3DRadialLayout, compute3DSwimLanes } from './layouts3d.js';
 import { applySphericalScatter } from './scatter.js';
 import { initSettingsModal } from '../ui/settings-modal.js';
 import { initTooltip, showTooltip, hideTooltip } from '../ui/tooltip.js';
+import { initRecorder } from '../ui/recorder.js';
+import { initSnapshot } from '../ui/snapshot.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
@@ -86,7 +88,10 @@ scene.fog = new THREE.Fog(0x0a0e1a, 1800, 8000);
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 8000);
 camera.position.set(0, -300, 1200);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+// preserveDrawingBuffer:true нужен для PNG snapshot (canvas.toBlob) — иначе
+// после render буфер очищается и toBlob возвращает пустоту. Минорный perf-hit
+// (~5%), но критично для функции снимка экрана.
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1446,6 +1451,10 @@ initTopicsToggle();
 initOrphansToggle();
 initSettingsModal();
 initTooltip();
+// Recorder + Snapshot работают на Three.js canvas. SVG-snapshot отключён —
+// для 3D scene нет sensible vector representation.
+initRecorder(() => renderer.domElement);
+initSnapshot({ getCanvas: () => renderer.domElement, supportSvg: false });
 initAudio();
 initFpsCounter('fps-counter');
 init3DLayoutSwitch();

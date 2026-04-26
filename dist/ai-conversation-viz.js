@@ -7312,8 +7312,12 @@ let chunks = [];
 let startedAt = 0;
 let _recBtnEl;
 let timerId = null;
+// Function returning the canvas to record. По умолчанию — 2D `#graph`,
+// в 3D пробрасываем Three.js renderer.domElement.
+let _getCanvas = () => document.getElementById('graph');
 
-function initRecorder() {
+function initRecorder(getCanvas) {
+  if (typeof getCanvas === 'function') _getCanvas = getCanvas;
   _recBtnEl = document.getElementById('btn-record');
   if (_recBtnEl) _recBtnEl.addEventListener('click', toggle);
 }
@@ -7338,7 +7342,7 @@ function toggle() {
 }
 
 function start() {
-  const canvas = document.getElementById('graph');
+  const canvas = _getCanvas();
   if (!canvas || !canvas.captureStream) {
     showToast('Recording not supported in this browser');
     return;
@@ -7429,8 +7433,17 @@ function showToast(msg) {
 
 
 let _snapBtn;
+// Function returning the canvas to snapshot. По умолчанию — 2D `#graph`.
+// В 3D — Three.js renderer.domElement (требует preserveDrawingBuffer:true
+// в WebGLRenderer чтобы toBlob не вернул пустоту).
+let _getCanvas = () => document.getElementById('graph');
+// SVG-snapshot имеет смысл только для 2D (где есть state.nodes/edges с
+// плоскими x/y координатами). В 3D — отключаем пункт меню.
+let _supportSvg = true;
 
-function initSnapshot() {
+function initSnapshot(opts) {
+  if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
+  if (opts && typeof opts.supportSvg === 'boolean') _supportSvg = opts.supportSvg;
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
   _snapBtn.addEventListener('click', showMenu);
@@ -7466,7 +7479,7 @@ function showMenu() {
   };
   mkBtn(t('snapshot.png_1x'), () => savePng(1));
   mkBtn(t('snapshot.png_2x'), () => savePng(2));
-  mkBtn(t('snapshot.svg'), () => saveSvg());
+  if (_supportSvg) mkBtn(t('snapshot.svg'), () => saveSvg());
   document.body.appendChild(menu);
 
   // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)
@@ -7491,7 +7504,7 @@ function downloadBlob(blob, filename) {
 }
 
 function savePng(scale) {
-  const canvas = document.getElementById('graph');
+  const canvas = _getCanvas();
   if (!canvas) return;
   if (scale === 1) {
     canvas.toBlob((blob) => {
