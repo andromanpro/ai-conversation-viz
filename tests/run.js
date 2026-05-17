@@ -20,6 +20,7 @@ import { computeStats, formatDuration, formatTokens, initStats, recomputeStats }
 import { parseUrlParams } from '../src/ui/share.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
+import { deriveArchetype, buildCardModel } from '../src/core/session-archetype.js';
 import { setAnnotation, getAnnotation, toggleStar, listStarred, listAnnotated } from '../src/ui/annotations.js';
 import { t, setLanguage, getLanguage } from '../src/core/i18n.js';
 import { addRemoteSessions } from '../src/ui/session-picker.js';
@@ -792,6 +793,208 @@ test('stats: formatTokens uses k/M', () => {
   eq(formatTokens(500), '500');
   eq(formatTokens(1500), '1.5k');
   eq(formatTokens(2_500_000), '2.5M');
+});
+
+// ==== SESSION CARD / ARCHETYPE ====
+function archNode(id, role, idx, parentId, extra = {}) {
+  const text = extra.text != null ? extra.text : role + ' ' + id;
+  return {
+    id,
+    role,
+    parentId: parentId || null,
+    ts: 1000 + idx * 1000,
+    text,
+    textLen: text.length,
+    x: idx * 24,
+    y: (idx % 5) * 18,
+    r: 6,
+    ...extra,
+  };
+}
+
+function archStats(nodes) {
+  return computeStats(nodes) || {
+    tokens: 0,
+    durationSec: 0,
+    longest: null,
+    hubs: 0,
+    roleCounts: new Map(),
+    toolCounts: new Map(),
+    topTools: [],
+  };
+}
+
+test('archetype: linear_solve fallback for a simple spine', () => {
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    archNode('u2', 'user', 2, 'a1'),
+    archNode('a2', 'assistant', 3, 'u2'),
+  ];
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'linear_solve');
+});
+
+test('archetype: agent_swarm for Task fan-out and subagent prompts', () => {
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    archNode('t1', 'tool_use', 2, 'a1', { toolName: 'Task' }),
+    archNode('t2', 'tool_use', 3, 'a1', { toolName: 'Task' }),
+    archNode('t3', 'tool_use', 4, 'a1', { toolName: 'Task' }),
+    archNode('s1', 'subagent_input', 5, 't1'),
+    archNode('s2', 'subagent_input', 6, 't2'),
+    archNode('s3', 'subagent_input', 7, 't3'),
+  ];
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'agent_swarm');
+});
+
+test('archetype: debugging_spiral for repeated error tool loops', () => {
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    archNode('t1', 'tool_use', 2, 'a1', { toolName: 'Bash', _isErrorToolUse: true }),
+    archNode('r1', 'tool_result', 3, 'a1', { hasError: true }),
+    archNode('a2', 'assistant', 4, 'r1', { _hasErrorTool: true }),
+    archNode('t2', 'tool_use', 5, 'a2', { toolName: 'Bash', _isErrorToolUse: true }),
+    archNode('r2', 'tool_result', 6, 'a2', { hasError: true }),
+  ];
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'debugging_spiral');
+});
+
+test('archetype: tool_storm for dense broad tool usage', () => {
+  const tools = ['Bash', 'Read', 'Grep', 'Write', 'Edit', 'Glob', 'Find', 'Bash', 'Read'];
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    ...tools.map((tool, i) => archNode('t' + i, 'tool_use', i + 2, 'a1', { toolName: tool })),
+  ];
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'tool_storm');
+});
+
+test('archetype: review_loop for user-assistant back-and-forth', () => {
+  const roles = ['user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'user', 'assistant'];
+  const nodes = roles.map((role, i) => archNode('n' + i, role, i, i ? 'n' + (i - 1) : null));
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'review_loop');
+});
+
+test('archetype: research_dive for read/search tools on a deep chain', () => {
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    archNode('t1', 'tool_use', 2, 'a1', { toolName: 'Read' }),
+    archNode('r1', 'tool_result', 3, 't1'),
+    archNode('a2', 'assistant', 4, 'r1'),
+    archNode('t2', 'tool_use', 5, 'a2', { toolName: 'Grep' }),
+    archNode('r2', 'tool_result', 6, 't2'),
+    archNode('a3', 'assistant', 7, 'r2'),
+    archNode('t3', 'tool_use', 8, 'a3', { toolName: 'Glob' }),
+    archNode('r3', 'tool_result', 9, 't3'),
+    archNode('a4', 'assistant', 10, 'r3'),
+    archNode('t4', 'tool_use', 11, 'a4', { toolName: 'WebFetch' }),
+  ];
+  eq(deriveArchetype(archStats(nodes), nodes).key, 'research_dive');
+});
+
+test('archetype: default fallback and determinism', () => {
+  eq(deriveArchetype(null, []).key, 'linear_solve');
+  const nodes = [
+    archNode('u1', 'user', 0),
+    archNode('a1', 'assistant', 1, 'u1'),
+    archNode('t1', 'tool_use', 2, 'a1', { toolName: 'Bash' }),
+  ];
+  const first = deriveArchetype(archStats(nodes), nodes);
+  const second = deriveArchetype(archStats(nodes), nodes);
+  eq(first, second, 'same input gives same archetype');
+});
+
+test('session card model: redacts message text by default and strips paths/emails with snippets on', () => {
+  const sentinel = 'CARD_SENTINEL_8492';
+  const fakeWinPath = 'F:\\Clients\\Secret\\roadmap.md';
+  const fakePosixPath = '/home/alice/private/key.txt';
+  const email = 'owner@example.com';
+  const nodes = [
+    archNode('u1', 'user', 0, null, {
+      text: `${sentinel} user prompt ${fakeWinPath} ${email}`,
+      working_dir: fakeWinPath,
+      model: `gpt-5.5 ${email}`,
+    }),
+    archNode('a1', 'assistant', 1, 'u1', {
+      text: `${sentinel} assistant answer ${fakePosixPath} ${email} ` + 'x'.repeat(80),
+    }),
+    archNode('t1', 'tool_use', 2, 'a1', {
+      toolName: `Read ${fakeWinPath}`,
+      text: `file_path=${fakeWinPath}`,
+    }),
+  ];
+  const edges = [
+    { source: 'u1', target: 'a1' },
+    { source: 'a1', target: 't1' },
+  ];
+  const stats = archStats(nodes);
+  const redacted = buildCardModel({ nodes, edges }, {
+    stats,
+    includeSnippets: false,
+    shareUrl: 'https://example.com/viz?n=' + encodeURIComponent(fakeWinPath) + '&t=100',
+  });
+  const json = JSON.stringify(redacted);
+  assert(!json.includes(sentinel), 'default card model must not contain message text');
+  assert(!json.includes(email), 'default card model must not contain emails');
+  assert(!json.includes('F:'), 'default card model must not contain Windows paths');
+  assert(!json.includes('Clients'), 'default card model must not contain path fragments');
+  assert(!json.includes('/home/alice'), 'default card model must not contain POSIX paths');
+  assert(redacted.graph.nodes.every(n => n.snippet == null), 'default graph nodes must not expose snippets');
+
+  const withSnippets = buildCardModel({ nodes, edges }, {
+    stats,
+    includeSnippets: true,
+    snippetMaxChars: 32,
+  });
+  const jsonSnippets = JSON.stringify(withSnippets);
+  assert(jsonSnippets.includes(sentinel), 'opt-in snippets may contain non-path message text');
+  assert(!jsonSnippets.includes(email), 'snippet model must strip emails');
+  assert(!jsonSnippets.includes('F:'), 'snippet model must strip Windows paths');
+  assert(!jsonSnippets.includes('/home/alice'), 'snippet model must strip POSIX paths');
+  const snippets = withSnippets.graph.nodes.map(n => n.snippet).filter(Boolean);
+  assert(snippets.length > 0, 'opt-in snippets are present');
+  assert(snippets.every(s => s.length <= 35), 'snippets are clipped');
+});
+
+test('session card model: structural default excludes ALL adversarial strings (DeepSeek nit 5)', () => {
+  // DeepSeek flagged sanitizeCardText cannot regex-catch tokens/IPs/bare
+  // names/env-vars/relative paths. Default mode does not rely on regex — it
+  // excludes message text by construction; assert that holds for every one
+  // of those vectors. Snippet mode only guarantees path/email stripping;
+  // the rest is a documented limit (see SECURITY.md), asserted as such.
+  const adv = {
+    bareName: 'AcmeCorp',
+    envSecret: 'API_SECRET=ghp_AAAA1111BBBB2222',
+    relPath: '../config/secrets.env',
+    cyrPath: 'F:\\WorkAI\\1С\\Клиент\\план.md',
+    token: 'ghp_AAAA1111BBBB2222CCCC3333',
+    hostPort: 'db.internal:5432',
+    email: 'lead@client.example',
+  };
+  const blob = Object.values(adv).join(' ');
+  const nodes = [
+    archNode('u1', 'user', 0, null, { text: 'prompt ' + blob, working_dir: adv.cyrPath, model: 'gpt-5.5 ' + adv.token }),
+    archNode('a1', 'assistant', 1, 'u1', { text: 'answer ' + blob }),
+    archNode('t1', 'tool_use', 2, 'a1', { toolName: 'Read ' + adv.relPath, text: 'file=' + adv.cyrPath }),
+  ];
+  const edges = [{ source: 'u1', target: 'a1' }, { source: 'a1', target: 't1' }];
+  const stats = archStats(nodes);
+
+  const def = JSON.stringify(buildCardModel({ nodes, edges }, { stats, includeSnippets: false }));
+  for (const [k, v] of Object.entries(adv)) {
+    assert(!def.includes(v), 'default model must exclude adversarial ' + k + ' (structural, not regex)');
+  }
+
+  // Snippet mode: only path/email guarantees are contractual.
+  const snip = JSON.stringify(buildCardModel({ nodes, edges }, { stats, includeSnippets: true, snippetMaxChars: 64 }));
+  assert(!snip.includes(adv.email), 'snippet mode strips emails (contract)');
+  assert(!snip.includes(adv.relPath), 'snippet mode strips relative paths (contract)');
+  assert(!snip.includes('F:\\WorkAI'), 'snippet mode strips Windows/Cyrillic paths (contract)');
+  // NOT contractual (documented limit in SECURITY.md): bareName / token /
+  // hostPort may survive in snippet mode — intentionally not asserted absent.
 });
 
 // ==== SHARE URL ====

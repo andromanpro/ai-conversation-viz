@@ -70,6 +70,28 @@ but the fetch itself goes through the browser as a cross-origin request
 (subject to CORS). If the index you load is malicious, worst it can do
 is waste your quota or return junk that fails to parse.
 
+## Session card sharing (redaction model)
+
+The "session card" exports a PNG **built for public posting**, so redaction
+is part of the threat model.
+
+- **Default mode is structurally safe, not regex-safe.** When "Include text
+  snippets" is OFF (the default), message text never enters the card model
+  at all — only a numeric `textLen`, remapped node ids (`n0..nN`, original
+  UUIDs dropped), role/tool counts and aggregate stats. There is no message
+  text to leak, by construction.
+- **Opt-in snippet mode is best-effort.** When the user explicitly enables
+  snippets, text is passed through `sanitizeCardText`, which strips
+  Windows/POSIX/UNC file paths, emails and `working_dir=` values, and clips
+  length. It **does not and cannot reliably catch**: secrets / API tokens,
+  IP addresses, hostnames, bare client/person/codenames, base64 blobs, or
+  `KEY=value` env-style secrets. The UI shows a standing warning; users
+  must review the card before posting. This is a known, documented limit —
+  pattern-based PII stripping is inherently incomplete; the structural
+  default is the real guarantee.
+- The card is never uploaded anywhere — generation and download are fully
+  client-side (same no-network posture as the rest of the tool).
+
 ## Reporting
 
 Open an issue at <https://github.com/andromanpro/ai-conversation-viz/issues>
