@@ -2838,11 +2838,21 @@ function buildCardModel(session, opts = {}) {
   const includeSnippets = !!opts.includeSnippets;
   const snippetMaxChars = Math.max(12, Math.min(DEFAULT_SNIPPET_MAX, opts.snippetMaxChars || DEFAULT_SNIPPET_MAX));
   const roles = roleBreakdown(nodes);
-  const topTools = collectToolCounts(nodes, stats)
+  const toolPairs = collectToolCounts(nodes, stats);
+  const topTools = toolPairs
     .map(([name, count]) => ({ name: sanitizeCardText(name, { max: 36 }), count }))
     .filter(item => item.name && item.count > 0)
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
     .slice(0, 5);
+  // In Claude Code the `Task` tool IS the sub-agent spawn mechanism. When
+  // the parser produced no separate `subagent_input` nodes (some samples),
+  // raw subagent_input count is 0 even though N agents were spawned — which
+  // looked self-contradictory next to an "agent swarm" archetype. Report
+  // the truthful spawn count: max(explicit subagent nodes, Task calls).
+  const taskToolCount = toolPairs.reduce(
+    (sum, [name, count]) => sum + (normalizeToolName(name) === 'task' ? count : 0),
+    0,
+  );
   const roleCount = role => roles.find(r => r.role === role)?.count || 0;
   const longest = stats && stats.longest;
   const durationSec = stats && typeof stats.durationSec === 'number'
@@ -2862,7 +2872,7 @@ function buildCardModel(session, opts = {}) {
       tokens: stats && typeof stats.tokens === 'number' ? stats.tokens : 0,
       durationSec,
       toolUseTotal: roleCount('tool_use'),
-      subagentCount: roleCount('subagent_input'),
+      subagentCount: Math.max(roleCount('subagent_input'), taskToolCount),
       hubs: stats && typeof stats.hubs === 'number' ? stats.hubs : nodes.filter(n => n.isHub).length,
       longestTextLen: longest && typeof longest.textLen === 'number' ? longest.textLen : 0,
     },
