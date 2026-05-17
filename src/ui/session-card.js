@@ -40,10 +40,15 @@ export function initSessionCard(opts = {}) {
   if (typeof opts.getShareUrl === 'function') _getShareUrl = opts.getShareUrl;
   btnEl = document.getElementById('btn-session-card');
   if (!btnEl) return;
-  btnEl.addEventListener('click', openDialog);
+  btnEl.addEventListener('click', openSessionCard);
 }
 
-function openDialog() {
+/**
+ * Open the redacted session-card dialog.
+ *
+ * @returns {void}
+ */
+export function openSessionCard() {
   if (modalEl) { closeDialog(); return; }
   aspectKey = 'og';
   currentCanvas = null;
@@ -276,12 +281,6 @@ function drawBackground(ctx, W, H) {
     ctx.lineTo(W, y);
     ctx.stroke();
   }
-  ctx.strokeStyle = 'rgba(236, 160, 64, 0.18)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(W * 0.12, H);
-  ctx.lineTo(W * 0.58, 0);
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -300,11 +299,10 @@ function drawHeader(ctx, model, x, y) {
   ctx.moveTo(x, y + 34);
   ctx.lineTo(x + 260, y + 34);
   ctx.stroke();
-  if (model.shareUrl) {
-    ctx.font = '11px ui-monospace, Consolas, monospace';
-    ctx.fillStyle = 'rgba(207, 230, 255, 0.58)';
-    ctx.fillText(clipToWidth(ctx, model.shareUrl, 430), x + 292, y + 24);
-  }
+  // The share URL is intentionally NOT drawn on the card: it is almost
+  // always redacted to non-clickable noise ("https://[path]?t=..."), and
+  // the image itself is what gets shared, not a link. (model.shareUrl is
+  // still produced/sanitized for any non-card consumer.)
   ctx.restore();
 }
 

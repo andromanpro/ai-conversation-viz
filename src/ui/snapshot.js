@@ -18,6 +18,7 @@ let _singleClickPng = false;
 // "Start/Stop video recording". Не подтягиваем recorder напрямую как
 // import чтобы не плодить cross-deps; передаём через opts.
 let _videoRecorder = null;
+let _sessionCard = null;
 
 export function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
@@ -26,11 +27,14 @@ export function initSnapshot(opts) {
   if (opts && opts.videoRecorder && typeof opts.videoRecorder.toggle === 'function') {
     _videoRecorder = opts.videoRecorder;
   }
+  if (opts && opts.sessionCard && typeof opts.sessionCard.open === 'function') {
+    _sessionCard = opts.sessionCard;
+  }
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  // Если есть videoRecorder integration — singleClick не имеет смысла
-  // (нужен popup для выбора между PNG / video). Иначе — соблюдаем флаг.
-  const useSingleClick = _singleClickPng && !_videoRecorder;
+  // Если есть menu integrations — singleClick не имеет смысла
+  // (нужен popup для выбора между PNG / video / card). Иначе — соблюдаем флаг.
+  const useSingleClick = _singleClickPng && !_videoRecorder && !_sessionCard;
   _snapBtn.addEventListener('click', useSingleClick ? () => savePng(1) : showMenu);
 }
 
@@ -71,6 +75,7 @@ function showMenu() {
     const label = isRec ? t('snapshot.video_stop') : t('snapshot.video_start');
     mkBtn(label, () => _videoRecorder.toggle());
   }
+  if (_sessionCard) mkBtn(t('snapshot.session_card'), () => _sessionCard.open());
   document.body.appendChild(menu);
 
   // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)

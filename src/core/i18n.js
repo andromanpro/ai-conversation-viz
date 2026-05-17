@@ -230,6 +230,7 @@ const DICT = {
     'snapshot.svg': '⬇ SVG (nodes + edges)',
     'snapshot.video_start': '🎥 Start video recording',
     'snapshot.video_stop': '⏹ Stop video recording',
+    'snapshot.session_card': 'Session card (PNG)',
 
     // Session card
     'session_card.title': 'Session card',
@@ -460,6 +461,7 @@ const DICT = {
     'snapshot.svg': '⬇ SVG (ноды + рёбра)',
     'snapshot.video_start': '🎥 Начать запись видео',
     'snapshot.video_stop': '⏹ Остановить запись',
+    'snapshot.session_card': 'Карточка сессии (PNG)',
 
     'session_card.title': 'Карточка сессии',
     'session_card.redacted_topology': 'обезличенная топология · роли · инструменты · агрегаты',

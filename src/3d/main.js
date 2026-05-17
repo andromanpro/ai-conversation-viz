@@ -40,6 +40,7 @@ import { initSettingsModal } from '../ui/settings-modal.js';
 import { initTooltip, showTooltip, hideTooltip } from '../ui/tooltip.js';
 import { initRecorder, toggleRecord, isRecording } from '../ui/recorder.js';
 import { initSnapshot } from '../ui/snapshot.js';
+import { openSessionCard } from '../ui/session-card.js';
 
 const ROLE_COLORS = {
   user: 0x7baaf0,
@@ -1461,6 +1462,7 @@ initSnapshot({
   supportSvg: false,
   singleClickPng: true, // прячем PNG 2× (один пункт PNG достаточно)
   videoRecorder: { toggle: toggleRecord, isActive: isRecording },
+  sessionCard: { open: openSessionCard },
 });
 initAudio();
 initFpsCounter('fps-counter');
