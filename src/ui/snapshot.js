@@ -82,7 +82,7 @@ function showMenu() {
   }, 0);
 }
 
-function downloadBlob(blob, filename) {
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -91,19 +91,24 @@ function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
-  showToast(`Saved ${filename}`);
+  showToast(t('toast.saved', { filename }));
 }
 
-function savePng(scale) {
-  const canvas = _getCanvas();
-  if (!canvas) return;
-  if (scale === 1) {
-    canvas.toBlob((blob) => {
-      if (blob) downloadBlob(blob, `conversation-viz-${ts()}.png`);
-    }, 'image/png');
-    return;
-  }
-  // 2× — пересэмплируем через off-screen canvas
+export function canvasToPngBlob(canvas, scale = 1) {
+  if (!canvas) return Promise.resolve(null);
+  const source = scale === 1 ? canvas : scaleCanvas(canvas, scale);
+  return new Promise(resolve => {
+    source.toBlob(blob => resolve(blob || null), 'image/png');
+  });
+}
+
+export async function downloadCanvasPng(canvas, filename, scale = 1) {
+  const blob = await canvasToPngBlob(canvas, scale);
+  if (blob) downloadBlob(blob, filename);
+  return blob;
+}
+
+function scaleCanvas(canvas, scale) {
   const off = document.createElement('canvas');
   off.width = canvas.width * scale;
   off.height = canvas.height * scale;
@@ -111,9 +116,14 @@ function savePng(scale) {
   octx.imageSmoothingEnabled = true;
   octx.imageSmoothingQuality = 'high';
   octx.drawImage(canvas, 0, 0, off.width, off.height);
-  off.toBlob((blob) => {
-    if (blob) downloadBlob(blob, `conversation-viz-${ts()}@${scale}x.png`);
-  }, 'image/png');
+  return off;
+}
+
+function savePng(scale) {
+  const canvas = _getCanvas();
+  if (!canvas) return;
+  const suffix = scale === 1 ? '' : `@${scale}x`;
+  downloadCanvasPng(canvas, `conversation-viz-${ts()}${suffix}.png`, scale);
 }
 
 function saveSvg() {
@@ -182,10 +192,12 @@ function saveSvg() {
   downloadBlob(blob, `conversation-viz-${ts()}.svg`);
 }
 
-function ts() {
+export function snapshotTimestamp() {
   const d = new Date();
   return d.toISOString().replace(/[:T]/g, '-').slice(0, 19);
 }
+
+function ts() { return snapshotTimestamp(); }
 
 function showToast(msg) {
   const el = document.getElementById('toast');

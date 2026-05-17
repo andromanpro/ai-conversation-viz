@@ -111,6 +111,28 @@
   .diff-legend .sw-a { background: #ff60af; box-shadow: 0 0 8px rgba(255,96,175,0.5); }
   .diff-legend .sw-b { background: #5ad2ff; box-shadow: 0 0 8px rgba(90,210,255,0.5); }
   .diff-legend .sw-both { background: #c8c8d6; }
+  .session-card-modal { position: fixed; inset: 0; z-index: 65; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 16, 0.68); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+  .session-card-body { width: min(920px, 94vw); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px; box-shadow: 0 20px 60px rgba(0,0,0,0.65); }
+  .session-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; color: var(--text); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .session-card-close { background: transparent; border: 0; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
+  .session-card-close:hover { color: var(--accent); }
+  .session-card-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .session-card-field { display: flex; align-items: center; gap: 8px; }
+  .session-card-label { color: var(--muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .session-card-segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .session-card-segmented button { background: transparent; border: 0; border-right: 1px solid var(--border); color: var(--muted); padding: 7px 10px; font-family: inherit; font-size: 10px; letter-spacing: 0.06em; cursor: pointer; }
+  .session-card-segmented button:last-child { border-right: 0; }
+  .session-card-segmented button.active { color: var(--assistant); background: rgba(80, 212, 181, 0.12); }
+  .session-card-check { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 11px; letter-spacing: 0.04em; cursor: pointer; }
+  .session-card-check input { width: 16px; height: 16px; accent-color: var(--assistant); cursor: pointer; }
+  .session-card-preview { min-height: 220px; max-height: 52vh; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 12px; background: rgba(5, 8, 16, 0.55); border: 1px solid rgba(123, 170, 240, 0.16); border-radius: 6px; }
+  .session-card-preview-canvas { width: 100%; max-width: 800px; height: auto; display: block; }
+  .session-card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  @media (max-width: 720px) {
+    .session-card-body { width: 96vw; padding: 14px; }
+    .session-card-actions { justify-content: stretch; }
+    .session-card-actions .btn { flex: 1; padding-left: 8px; padding-right: 8px; }
+  }
   .settings-modal { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.5); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
   .settings-body { max-width: 540px; width: 90vw; max-height: 85vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
   .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 14px; letter-spacing: 0.08em; color: var(--text); }
@@ -261,6 +283,7 @@
     <button class="btn btn-icon" id="btn-audio" data-i18n-title="tip.audio" data-i18n-aria="aria.audio">♪</button>
     <button class="btn btn-icon" id="btn-record" data-i18n-title="tip.record" data-i18n-aria="aria.record">●</button>
     <button class="btn btn-icon" id="btn-snapshot" data-i18n-title="tip.snapshot" data-i18n-aria="aria.snapshot">📷</button>
+    <button class="btn btn-icon" id="btn-session-card" data-i18n-title="tip.session_card" data-i18n-aria="aria.session_card">▣</button>
     <span class="toolbar-sep" aria-hidden="true"></span>
     <button class="btn btn-icon" id="btn-freeze" data-i18n-title="tip.freeze_on" data-i18n-aria="aria.freeze">❄</button>
     <button class="btn btn-icon" id="btn-orphans" data-i18n-title="tip.orphans_off" data-i18n-aria="aria.orphans">🔗</button>

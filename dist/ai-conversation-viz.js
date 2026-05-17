@@ -1954,6 +1954,7 @@ const DICT = {
     'btn.file': 'Open JSONL…',
     'btn.reset': 'Reset view',
     'btn.share': '🔗 Share',
+    'btn.session_card': 'Session card',
     'btn.3d': '🌐 3D →',
     'btn.back_2d': '← 2D mode',
     'btn.watch': 'Watch',
@@ -1970,6 +1971,7 @@ const DICT = {
     'tip.audio': 'Ambient sound',
     'tip.record': 'Record canvas to WebM',
     'tip.snapshot': 'PNG / SVG snapshot',
+    'tip.session_card': 'Redacted shareable session card',
     'tip.freeze_on': 'Freeze physics (F)',
     'tip.freeze_off': 'Unfreeze physics (F)',
     'tip.orphans_off': 'Connect orphans (O) — currently disconnected',
@@ -1998,6 +2000,7 @@ const DICT = {
     'aria.audio': 'Toggle ambient sound',
     'aria.record': 'Start or stop WebM recording',
     'aria.snapshot': 'Save PNG or SVG snapshot',
+    'aria.session_card': 'Export redacted session card',
     'aria.freeze': 'Freeze or unfreeze graph physics',
     'aria.orphans': 'Toggle orphan connectivity',
     'aria.topics': 'Toggle TF-IDF topic coloring',
@@ -2135,6 +2138,39 @@ const DICT = {
     'snapshot.video_start': '🎥 Start video recording',
     'snapshot.video_stop': '⏹ Stop video recording',
 
+    // Session card
+    'session_card.title': 'Session card',
+    'session_card.redacted_topology': 'redacted topology · roles · tools · aggregate stats',
+    'session_card.aspect': 'Aspect',
+    'session_card.aspect_og': '1200×630',
+    'session_card.aspect_square': '1080×1080',
+    'session_card.include_snippets': 'Include text snippets',
+    'session_card.snippet_warn': '⚠ Best-effort redaction only. File paths & emails are stripped, but secrets, API tokens, IPs, hostnames and names may remain in snippets. Review the card before posting publicly.',
+    'session_card.generate': 'Generate',
+    'session_card.copy': 'Copy',
+    'session_card.download': 'Download',
+    'session_card.empty': 'Load a session first',
+    'session_card.generated': 'Session card generated',
+    'session_card.copied': 'Session card copied',
+    'session_card.copy_unsupported': 'Image copy is not supported in this browser',
+    'session_card.archetype': 'archetype',
+    'session_card.events': 'events',
+    'session_card.duration': 'duration',
+    'session_card.tokens': 'tokens',
+    'session_card.tool_use': 'tool_use',
+    'session_card.subagents': 'subagents',
+    'session_card.hubs': 'hubs',
+    'session_card.roles': 'roles',
+    'session_card.top_tools': 'top tools',
+    'session_card.no_tools': 'no tools',
+    'session_card.models': 'models',
+    'archetype.linear_solve': 'Linear solve',
+    'archetype.tool_storm': 'Tool storm',
+    'archetype.agent_swarm': 'Agent swarm',
+    'archetype.debugging_spiral': 'Debugging spiral',
+    'archetype.review_loop': 'Review loop',
+    'archetype.research_dive': 'Research dive',
+
     // Toasts / errors
     'toast.link_copied': 'Link copied to clipboard',
     'toast.webgl_on': 'WebGL mode enabled',
@@ -2162,6 +2198,7 @@ const DICT = {
     'btn.file': 'Открыть JSONL…',
     'btn.reset': 'Сбросить вид',
     'btn.share': '🔗 Поделиться',
+    'btn.session_card': 'Карточка сессии',
     'btn.3d': '🌐 3D →',
     'btn.back_2d': '← 2D режим',
     'btn.watch': 'Следить',
@@ -2177,6 +2214,7 @@ const DICT = {
     'tip.audio': 'Фоновый звук',
     'tip.record': 'Запись canvas в WebM',
     'tip.snapshot': 'Снимок PNG / SVG',
+    'tip.session_card': 'Обезличенная карточка сессии для публикации',
     'tip.freeze_on': 'Заморозить физику (F)',
     'tip.freeze_off': 'Разморозить физику (F)',
     'tip.orphans_off': 'Соединить сиротки (O) — сейчас разрознены',
@@ -2205,6 +2243,7 @@ const DICT = {
     'aria.audio': 'Переключить фоновый звук',
     'aria.record': 'Начать/остановить запись WebM',
     'aria.snapshot': 'Сохранить снимок PNG или SVG',
+    'aria.session_card': 'Экспортировать обезличенную карточку сессии',
     'aria.freeze': 'Заморозить или разморозить физику',
     'aria.orphans': 'Переключить связь сиротских нод',
     'aria.topics': 'Переключить кластеризацию тем',
@@ -2329,6 +2368,38 @@ const DICT = {
     'snapshot.video_start': '🎥 Начать запись видео',
     'snapshot.video_stop': '⏹ Остановить запись',
 
+    'session_card.title': 'Карточка сессии',
+    'session_card.redacted_topology': 'обезличенная топология · роли · инструменты · агрегаты',
+    'session_card.aspect': 'Формат',
+    'session_card.aspect_og': '1200×630',
+    'session_card.aspect_square': '1080×1080',
+    'session_card.include_snippets': 'Включить фрагменты текста',
+    'session_card.snippet_warn': '⚠ Обезличивание best-effort. Пути к файлам и email вырезаются, но секреты, API-токены, IP, хостнеймы и имена могут остаться во фрагментах. Проверьте карточку перед публикацией.',
+    'session_card.generate': 'Сгенерировать',
+    'session_card.copy': 'Копировать',
+    'session_card.download': 'Скачать',
+    'session_card.empty': 'Сначала загрузите сессию',
+    'session_card.generated': 'Карточка сгенерирована',
+    'session_card.copied': 'Карточка скопирована',
+    'session_card.copy_unsupported': 'Копирование изображения не поддерживается в этом браузере',
+    'session_card.archetype': 'архетип',
+    'session_card.events': 'событий',
+    'session_card.duration': 'длительность',
+    'session_card.tokens': 'токены',
+    'session_card.tool_use': 'tool_use',
+    'session_card.subagents': 'субагенты',
+    'session_card.hubs': 'хабы',
+    'session_card.roles': 'роли',
+    'session_card.top_tools': 'топ инструментов',
+    'session_card.no_tools': 'нет инструментов',
+    'session_card.models': 'модели',
+    'archetype.linear_solve': 'Линейное решение',
+    'archetype.tool_storm': 'Шторм инструментов',
+    'archetype.agent_swarm': 'Рой агентов',
+    'archetype.debugging_spiral': 'Отладочная спираль',
+    'archetype.review_loop': 'Цикл ревью',
+    'archetype.research_dive': 'Глубокое исследование',
+
     'toast.link_copied': 'Ссылка скопирована',
     'toast.webgl_on': 'WebGL режим включён',
     'toast.canvas2d_on': 'Canvas 2D режим',
@@ -2406,6 +2477,414 @@ function applyTranslations(root) {
 }
 
     return { initI18n, getLanguage, setLanguage, t, applyTranslations };
+  })();
+
+  // --- src/core/session-archetype.js ---
+  __M["src/core/session-archetype.js"] = (function () {
+    const { CFG } = __M["src/core/config.js"];
+
+const ARCHETYPES = new Set([
+  'linear_solve',
+  'tool_storm',
+  'agent_swarm',
+  'debugging_spiral',
+  'review_loop',
+  'research_dive',
+]);
+
+const ROLE_ORDER = ['user', 'assistant', 'tool_use', 'tool_result', 'subagent_input', 'thinking'];
+const RESEARCH_TOOLS = new Set(['read', 'grep', 'glob', 'find', 'webfetch', 'websearch', 'search', 'fetch']);
+const DEFAULT_SNIPPET_MAX = CFG.storyMaxChars || 360;
+
+function archetype(key) {
+  const safeKey = ARCHETYPES.has(key) ? key : 'linear_solve';
+  return { key: safeKey, labelKey: 'archetype.' + safeKey };
+}
+
+function safeRole(role) {
+  const value = String(role || 'assistant').trim();
+  if (ROLE_ORDER.includes(value)) return value;
+  return sanitizeCardText(value, { max: 32 }) || 'assistant';
+}
+
+function normalizeToolName(name) {
+  return String(name || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+}
+
+function mapCount(mapLike, key) {
+  if (!mapLike) return 0;
+  if (typeof mapLike.get === 'function') return mapLike.get(key) || 0;
+  return mapLike[key] || 0;
+}
+
+function entriesOf(mapLike) {
+  if (!mapLike) return [];
+  if (typeof mapLike.entries === 'function') return [...mapLike.entries()];
+  if (Array.isArray(mapLike)) return mapLike;
+  return Object.entries(mapLike);
+}
+
+function computeDepths(nodes) {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const memo = new Map();
+  const visiting = new Set();
+  const depthOf = (node) => {
+    if (!node || !node.id) return 0;
+    if (memo.has(node.id)) return memo.get(node.id);
+    if (visiting.has(node.id)) return 0;
+    visiting.add(node.id);
+    const parent = node.parentId ? byId.get(node.parentId) : null;
+    const depth = parent ? depthOf(parent) + 1 : 0;
+    visiting.delete(node.id);
+    memo.set(node.id, depth);
+    return depth;
+  };
+  let maxDepth = 0;
+  for (const n of nodes) maxDepth = Math.max(maxDepth, depthOf(n));
+  return maxDepth;
+}
+
+function computeBranching(nodes) {
+  const childCounts = new Map();
+  for (const n of nodes) {
+    if (!n.parentId) continue;
+    childCounts.set(n.parentId, (childCounts.get(n.parentId) || 0) + 1);
+  }
+  let maxChildren = 0;
+  let branchNodes = 0;
+  for (const count of childCounts.values()) {
+    maxChildren = Math.max(maxChildren, count);
+    if (count >= 3) branchNodes++;
+  }
+  return { maxChildren, branchNodes };
+}
+
+function dialogueSwitchRatio(nodes) {
+  const sorted = [...nodes].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  let previous = null;
+  let pairs = 0;
+  let switches = 0;
+  for (const n of sorted) {
+    const role = n.role === 'subagent_input' ? 'user' : n.role;
+    if (role !== 'user' && role !== 'assistant') continue;
+    if (previous) {
+      pairs++;
+      if (previous !== role) switches++;
+    }
+    previous = role;
+  }
+  return { switches, ratio: pairs ? switches / pairs : 0 };
+}
+
+function computeFeatures(stats, nodes) {
+  const roleCounts = stats && stats.roleCounts;
+  const toolCounts = stats && stats.toolCounts;
+  let toolUseCount = mapCount(roleCounts, 'tool_use');
+  let toolResultCount = mapCount(roleCounts, 'tool_result');
+  let subagentCount = mapCount(roleCounts, 'subagent_input');
+  let userCount = mapCount(roleCounts, 'user');
+  let assistantCount = mapCount(roleCounts, 'assistant');
+  let thinkingCount = mapCount(roleCounts, 'thinking');
+  let taskToolCount = 0;
+  let researchToolCount = 0;
+  let errorCount = 0;
+
+  const localToolCounts = new Map();
+  for (const n of nodes) {
+    const role = n.role || 'assistant';
+    if (!roleCounts) {
+      if (role === 'tool_use') toolUseCount++;
+      else if (role === 'tool_result') toolResultCount++;
+      else if (role === 'subagent_input') subagentCount++;
+      else if (role === 'user') userCount++;
+      else if (role === 'thinking') thinkingCount++;
+      else if (role === 'assistant') assistantCount++;
+    }
+    if (n.hasError || n._hasErrorTool || n._isErrorToolUse) errorCount++;
+    if (role === 'tool_use' && n.toolName) {
+      const key = normalizeToolName(n.toolName);
+      localToolCounts.set(key, (localToolCounts.get(key) || 0) + 1);
+    }
+  }
+
+  const toolEntries = toolCounts ? entriesOf(toolCounts) : [...localToolCounts.entries()];
+  const uniqueToolCount = toolEntries.length;
+  for (const [name, count] of toolEntries) {
+    const key = normalizeToolName(name);
+    if (key === 'task') taskToolCount += count;
+    if (RESEARCH_TOOLS.has(key)) researchToolCount += count;
+  }
+
+  const { maxChildren, branchNodes } = computeBranching(nodes);
+  const { switches, ratio } = dialogueSwitchRatio(nodes);
+  return {
+    total: nodes.length,
+    toolUseCount,
+    toolResultCount,
+    subagentCount,
+    userCount,
+    assistantCount,
+    thinkingCount,
+    taskToolCount,
+    researchToolCount,
+    uniqueToolCount,
+    errorCount,
+    hubs: stats && typeof stats.hubs === 'number' ? stats.hubs : nodes.filter(n => n.isHub).length,
+    maxDepth: computeDepths(nodes),
+    maxChildren,
+    branchNodes,
+    dialogueSwitches: switches,
+    backAndForthRatio: ratio,
+  };
+}
+
+/**
+ * Derive a deterministic visual archetype from graph shape and aggregate counts.
+ * No message text is inspected here; only roles, tool names, errors, depth, and branching.
+ *
+ * @param {object|null} stats Aggregate stats, preferably from computeStats(nodes).
+ * @param {Array<object>} nodes Conversation graph nodes.
+ * @returns {{key:string,labelKey:string}} Archetype key and i18n label key.
+ */
+function deriveArchetype(stats, nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  if (!list.length) return archetype('linear_solve');
+
+  const f = computeFeatures(stats, list);
+  const toolShare = f.total ? f.toolUseCount / f.total : 0;
+
+  // Agent swarm: explicit Task fan-out or multiple subagent prompts dominate the shape.
+  if (f.subagentCount >= 3 || f.taskToolCount >= 3 || (f.subagentCount >= 2 && f.branchNodes >= 2)) {
+    return archetype('agent_swarm');
+  }
+
+  // Debugging spiral: repeated failing tool loops create error rings and tool_result churn.
+  if (f.errorCount >= 2 || (f.toolResultCount >= 4 && f.toolUseCount >= 3 && f.backAndForthRatio >= 0.5 && f.hubs >= 1)) {
+    return archetype('debugging_spiral');
+  }
+
+  // Tool storm: many tool calls or a broad tool palette outnumber the dialogue spine.
+  if ((f.toolUseCount >= 8 && toolShare >= 0.28) || (f.uniqueToolCount >= 5 && f.toolUseCount >= 6)) {
+    return archetype('tool_storm');
+  }
+
+  // Review loop: dense user/assistant alternation with little tool activity.
+  if (f.dialogueSwitches >= 6 && f.backAndForthRatio >= 0.72 && f.toolUseCount <= Math.max(2, f.total * 0.12)) {
+    return archetype('review_loop');
+  }
+
+  // Research dive: read/search/glob style tools on a deeper investigation chain.
+  if (f.researchToolCount >= 4 && f.maxDepth >= 3) {
+    return archetype('research_dive');
+  }
+
+  // Linear solve: a mostly single-spine session or the safe fallback for ambiguous input.
+  return archetype('linear_solve');
+}
+
+/**
+ * Strip identity-heavy strings before they reach the session-card renderer.
+ *
+ * @param {unknown} value Raw value.
+ * @param {{max?:number}=} opts Sanitization options.
+ * @returns {string} Sanitized and clipped string.
+ */
+function sanitizeCardText(value, opts = {}) {
+  const max = opts.max == null ? 120 : opts.max;
+  let s = String(value == null ? '' : value);
+  if (!s) return '';
+  s = s.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]');
+  s = s.replace(/\b[A-Za-z]:[\\/][^\s"'<>|]+/g, '[path]');
+  s = s.replace(/\\\\[^\\/\s]+\\[^\s"'<>|]+/g, '[path]');
+  s = s.replace(/(^|[\s("'=])\/(?:Users|home|mnt|var|etc|tmp|Volumes|workspaces|workspace|repo|root|private|data|opt)[^\s"',;)]*/g, '$1[path]');
+  s = s.replace(/\b[\w.-]+(?:[\\/][\w .@()+-]+)+\.[A-Za-z0-9]{1,10}\b/g, '[path]');
+  s = s.replace(/\bworking[_-]?dir\s*[:=]\s*[^\s,;}]+/gi, 'working_dir=[path]');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (max > 0 && s.length > max) return s.slice(0, Math.max(0, max - 3)).trimEnd() + '...';
+  return s;
+}
+
+function sanitizeShareUrl(value) {
+  if (!value) return '';
+  let s = String(value);
+  try {
+    const url = new URL(s, 'https://ai-conversation-viz.local');
+    url.searchParams.delete('jsonl');
+    url.searchParams.delete('n');
+    if (url.origin === 'https://ai-conversation-viz.local') {
+      s = url.pathname + (url.search ? url.search : '');
+    } else {
+      s = url.origin + url.pathname + (url.search ? url.search : '');
+    }
+  } catch {}
+  let decoded = s;
+  try { decoded = decodeURIComponent(s); } catch {}
+  return sanitizeCardText(decoded, { max: 160 });
+}
+
+function roleBreakdown(nodes) {
+  const counts = new Map();
+  for (const n of nodes) {
+    const role = safeRole(n.role);
+    counts.set(role, (counts.get(role) || 0) + 1);
+  }
+  const ordered = [];
+  for (const role of ROLE_ORDER) {
+    const count = counts.get(role) || 0;
+    if (count) ordered.push({ role, count });
+    counts.delete(role);
+  }
+  for (const [role, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    ordered.push({ role, count });
+  }
+  return ordered;
+}
+
+function collectToolCounts(nodes, stats) {
+  const source = stats && stats.toolCounts;
+  if (source) return entriesOf(source);
+  const counts = new Map();
+  for (const n of nodes) {
+    if (n.role !== 'tool_use' || !n.toolName) continue;
+    const name = sanitizeCardText(n.toolName, { max: 36 });
+    if (!name) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return [...counts.entries()];
+}
+
+// A model identifier has a known narrow shape (claude-opus-4-7, gpt-5.5,
+// deepseek/deepseek-v4-pro, anthropic:claude-3). sanitizeCardText only
+// strips paths/emails — a polluted field like "gpt-5.5 ghp_<token>" would
+// otherwise surface the token into the PUBLIC default card. So whitelist
+// the model-id shape instead of sanitize-and-pass: take the first
+// whitespace-delimited token and accept it only if it matches the shape;
+// otherwise drop entirely (better to show no model than leak).
+function safeModelId(raw) {
+  if (raw == null) return '';
+  const first = String(raw).trim().split(/\s+/)[0] || '';
+  return /^[A-Za-z0-9][\w.:/-]{1,46}$/.test(first) ? first : '';
+}
+
+function collectModels(nodes) {
+  const out = new Set();
+  for (const n of nodes) {
+    const candidates = [
+      n.model,
+      n.modelName,
+      n.model_name,
+      n.assistant_model,
+      n.providerModel,
+      n.message && n.message.model,
+      n.raw && n.raw.model,
+    ];
+    for (const candidate of candidates) {
+      const value = safeModelId(candidate);
+      if (value) out.add(value);
+    }
+  }
+  return [...out].slice(0, 3);
+}
+
+function makeGraphPayload(nodes, edges, includeSnippets, snippetMaxChars) {
+  const sorted = [...nodes].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const idMap = new Map();
+  sorted.forEach((n, i) => idMap.set(n.id, 'n' + i));
+  const graphNodes = sorted.map((n, i) => {
+    const item = {
+      id: 'n' + i,
+      role: safeRole(n.role),
+      x: Number.isFinite(n.x) ? n.x : 0,
+      y: Number.isFinite(n.y) ? n.y : 0,
+      r: Number.isFinite(n.r) ? n.r : 5,
+      textLen: typeof n.textLen === 'number' ? n.textLen : String(n.text || '').length,
+      isHub: !!n.isHub,
+      hasError: !!(n.hasError || n._hasErrorTool || n._isErrorToolUse),
+    };
+    if (n.role === 'tool_use' && n.toolName) item.toolName = sanitizeCardText(n.toolName, { max: 36 });
+    if (includeSnippets) item.snippet = sanitizeCardText(n.text || '', { max: snippetMaxChars });
+    return item;
+  });
+  const graphEdges = [];
+  for (const e of edges || []) {
+    const source = idMap.get(e.source || (e.a && e.a.id));
+    const target = idMap.get(e.target || (e.b && e.b.id));
+    if (!source || !target) continue;
+    graphEdges.push({ source, target, adopted: !!e.adopted });
+  }
+  if (!graphEdges.length) {
+    for (const n of sorted) {
+      if (!n.parentId || !idMap.has(n.parentId)) continue;
+      graphEdges.push({ source: idMap.get(n.parentId), target: idMap.get(n.id), adopted: false });
+    }
+  }
+  return { nodes: graphNodes, edges: graphEdges };
+}
+
+/**
+ * Build the structured payload consumed by the session-card canvas renderer.
+ * Message text is excluded by default; opt-in snippets are sanitized and clipped.
+ *
+ * @param {{nodes?:Array<object>,edges?:Array<object>,stats?:object}} session Session-like state.
+ * @param {{includeSnippets?:boolean,stats?:object,shareUrl?:string,snippetMaxChars?:number}=} opts Options.
+ * @returns {object} Redaction-safe card model.
+ */
+function buildCardModel(session, opts = {}) {
+  const nodes = Array.isArray(session && session.nodes) ? session.nodes : [];
+  const edges = Array.isArray(session && session.edges) ? session.edges : [];
+  const stats = opts.stats || (session && session.stats) || null;
+  const includeSnippets = !!opts.includeSnippets;
+  const snippetMaxChars = Math.max(12, Math.min(DEFAULT_SNIPPET_MAX, opts.snippetMaxChars || DEFAULT_SNIPPET_MAX));
+  const roles = roleBreakdown(nodes);
+  const topTools = collectToolCounts(nodes, stats)
+    .map(([name, count]) => ({ name: sanitizeCardText(name, { max: 36 }), count }))
+    .filter(item => item.name && item.count > 0)
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  const roleCount = role => roles.find(r => r.role === role)?.count || 0;
+  const longest = stats && stats.longest;
+  const durationSec = stats && typeof stats.durationSec === 'number'
+    ? stats.durationSec
+    : durationFromNodes(nodes);
+
+  return {
+    version: 1,
+    brand: 'ai-conversation-viz',
+    coBrand: 'andromanpro',
+    includeSnippets,
+    archetype: deriveArchetype(stats, nodes),
+    counts: {
+      events: nodes.length,
+      nodes: nodes.length,
+      edges: edges.length,
+      tokens: stats && typeof stats.tokens === 'number' ? stats.tokens : 0,
+      durationSec,
+      toolUseTotal: roleCount('tool_use'),
+      subagentCount: roleCount('subagent_input'),
+      hubs: stats && typeof stats.hubs === 'number' ? stats.hubs : nodes.filter(n => n.isHub).length,
+      longestTextLen: longest && typeof longest.textLen === 'number' ? longest.textLen : 0,
+    },
+    roles,
+    topTools,
+    models: collectModels(nodes),
+    shareUrl: sanitizeShareUrl(opts.shareUrl || ''),
+    graph: makeGraphPayload(nodes, edges, includeSnippets, snippetMaxChars),
+  };
+}
+
+function durationFromNodes(nodes) {
+  if (!nodes.length) return 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const n of nodes) {
+    if (typeof n.ts !== 'number') continue;
+    min = Math.min(min, n.ts);
+    max = Math.max(max, n.ts);
+  }
+  return isFinite(min) && isFinite(max) ? Math.max(0, (max - min) / 1000) : 0;
+}
+
+    return { deriveArchetype, sanitizeCardText, buildCardModel };
   })();
 
   // --- src/view/state.js ---
@@ -6892,7 +7371,9 @@ function computeStats(nodes) {
   let longest = null;
   let hubs = 0;
   const toolCounts = new Map();
+  const roleCounts = new Map();
   for (const n of nodes) {
+    roleCounts.set(n.role, (roleCounts.get(n.role) || 0) + 1);
     if (typeof n.textLen === 'number') totalChars += n.textLen;
     if (n.ts < tsMin) tsMin = n.ts;
     if (n.ts > tsMax) tsMax = n.ts;
@@ -6907,6 +7388,8 @@ function computeStats(nodes) {
     durationSec: (tsMax - tsMin) / 1000,
     longest,
     hubs,
+    roleCounts,
+    toolCounts,
     topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
   };
 }
@@ -7571,19 +8054,24 @@ function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
-  showToast(`Saved ${filename}`);
+  showToast(t('toast.saved', { filename }));
 }
 
-function savePng(scale) {
-  const canvas = _getCanvas();
-  if (!canvas) return;
-  if (scale === 1) {
-    canvas.toBlob((blob) => {
-      if (blob) downloadBlob(blob, `conversation-viz-${ts()}.png`);
-    }, 'image/png');
-    return;
-  }
-  // 2× — пересэмплируем через off-screen canvas
+function canvasToPngBlob(canvas, scale = 1) {
+  if (!canvas) return Promise.resolve(null);
+  const source = scale === 1 ? canvas : scaleCanvas(canvas, scale);
+  return new Promise(resolve => {
+    source.toBlob(blob => resolve(blob || null), 'image/png');
+  });
+}
+
+async function downloadCanvasPng(canvas, filename, scale = 1) {
+  const blob = await canvasToPngBlob(canvas, scale);
+  if (blob) downloadBlob(blob, filename);
+  return blob;
+}
+
+function scaleCanvas(canvas, scale) {
   const off = document.createElement('canvas');
   off.width = canvas.width * scale;
   off.height = canvas.height * scale;
@@ -7591,9 +8079,14 @@ function savePng(scale) {
   octx.imageSmoothingEnabled = true;
   octx.imageSmoothingQuality = 'high';
   octx.drawImage(canvas, 0, 0, off.width, off.height);
-  off.toBlob((blob) => {
-    if (blob) downloadBlob(blob, `conversation-viz-${ts()}@${scale}x.png`);
-  }, 'image/png');
+  return off;
+}
+
+function savePng(scale) {
+  const canvas = _getCanvas();
+  if (!canvas) return;
+  const suffix = scale === 1 ? '' : `@${scale}x`;
+  downloadCanvasPng(canvas, `conversation-viz-${ts()}${suffix}.png`, scale);
 }
 
 function saveSvg() {
@@ -7662,10 +8155,12 @@ function saveSvg() {
   downloadBlob(blob, `conversation-viz-${ts()}.svg`);
 }
 
-function ts() {
+function snapshotTimestamp() {
   const d = new Date();
   return d.toISOString().replace(/[:T]/g, '-').slice(0, 19);
 }
+
+function ts() { return snapshotTimestamp(); }
 
 function showToast(msg) {
   const el = document.getElementById('toast');
@@ -7675,7 +8170,1326 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 2200);
 }
 
-    return { initSnapshot };
+    return { initSnapshot, downloadBlob, canvasToPngBlob, snapshotTimestamp, downloadCanvasPng };
+  })();
+
+  // --- src/ui/session-picker.js ---
+  __M["src/ui/session-picker.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { parseJSONL } = __M["src/core/parser.js"];
+    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
+    const { safeFetch } = __M["src/core/url-safety.js"];
+    const { t } = __M["src/core/i18n.js"];
+// Session picker — in-memory список JSONL-сессий. Пользователь кидает
+// несколько файлов одновременно (или указывает ?sessions=<index.json>),
+// и может переключаться между ними через боковую панель.
+//
+// Локальный режим: каждая загруженная сессия хранится в state.sessions как
+//   { id, name, size, content, meta: { nodes?, edges?, firstTs?, lastTs? } }
+// Контент храним прямо в памяти — это JSONL-строка, после parseJSONL её
+// можно заново превращать в граф. Для 30MB сессии это ~30MB в RAM,
+// на 5 сессий = 150MB — приемлемо для браузерного UX.
+//
+// Remote режим: URL параметр ?sessions=<url> указывает на JSON-индекс
+//   { sessions: [{ id, title, url, mtime?, size? }, ...] }
+// Контент подгружается по требованию (fetch() при клике на элемент).
+
+
+let _loadText = null;
+let _panel = null;
+let _toggleBtn = null;
+let _activeId = null;
+
+/**
+ * @param {(text: string) => void} loadTextFn — колбэк из loader.js
+ */
+function initSessionPicker(loadTextFn) {
+  _loadText = loadTextFn;
+  _panel = document.getElementById('sessions-panel');
+  _toggleBtn = document.getElementById('btn-sessions');
+  if (_toggleBtn) _toggleBtn.addEventListener('click', togglePanel);
+  if (!state.sessions) state.sessions = [];
+  render();
+}
+
+function toggleSessions() { togglePanel(); }
+
+function togglePanel() {
+  if (!_panel) return;
+  state.sessionsOpen = !state.sessionsOpen;
+  _panel.classList.toggle('open', !!state.sessionsOpen);
+  if (_toggleBtn) _toggleBtn.classList.toggle('active-sessions', !!state.sessionsOpen);
+}
+
+/**
+ * Добавить локальные файлы в список сессий (вызывается из loader.js
+ * при drag-drop или file-input с multi).
+ *
+ * @param {FileList | Array<File>} files
+ * @param {{ autoLoadFirst?: boolean }} opts
+ */
+// Лимит на количество сессий с content в памяти. Выше — старые теряют
+// .content (meta остаётся, при клике re-load из File если локальная или
+// из remoteUrl если удалённая). Не даст 50-ти 30MB-файлам съесть 1.5GB RAM.
+const MAX_SESSIONS_WITH_CONTENT = 20;
+
+function evictOldestContent(keepId) {
+  // Простой LRU по touchedAt — но мы его не храним. Альтернатива:
+  // сохраняем порядок добавления (индекс массива) и сбрасываем content
+  // у самых старых (кроме активной).
+  const withContent = state.sessions.filter(s => s.content && s.id !== keepId);
+  while (withContent.length > MAX_SESSIONS_WITH_CONTENT - 1 && withContent.length) {
+    const victim = withContent.shift();
+    victim.content = null; // meta остаётся
+  }
+}
+
+async function addSessionFiles(files, opts = {}) {
+  if (!files || !files.length) return;
+  const added = [];
+  for (const f of Array.from(files)) {
+    if (!f) continue;
+    // Читаем как текст
+    const content = await f.text();
+    const session = createSession({
+      id: 'local:' + f.name + ':' + f.size + ':' + (f.lastModified || 0),
+      name: f.name,
+      size: f.size,
+      content,
+    });
+    added.push(session);
+  }
+  // Дедуп по id — если повторно тот же файл
+  for (const s of added) {
+    const existing = state.sessions.findIndex(x => x.id === s.id);
+    if (existing >= 0) state.sessions[existing] = s;
+    else state.sessions.push(s);
+  }
+  // LRU eviction — держим в памяти только MAX_SESSIONS_WITH_CONTENT
+  evictOldestContent(added.length ? added[0].id : null);
+  render();
+  if (opts.autoLoadFirst && added.length) {
+    selectSession(added[0].id);
+    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel();
+  }
+}
+
+/**
+ * Добавить удалённые сессии из index.json.
+ * @param {Array<{id, title, url, mtime?, size?}>} items
+ */
+function addRemoteSessions(items) {
+  if (!Array.isArray(items)) return;
+  for (const it of items) {
+    if (!it || !it.url) continue;
+    const id = 'remote:' + (it.id || it.url);
+    if (state.sessions.some(s => s.id === id)) continue;
+    state.sessions.push({
+      id,
+      name: it.title || it.id || it.url,
+      size: it.size || 0,
+      content: null, // lazy load
+      remoteUrl: it.url,
+      mtime: it.mtime || null,
+    });
+  }
+  render();
+}
+
+/**
+ * Загрузить индекс с сервера и добавить сессии.
+ * @param {string} url
+ */
+async function loadSessionIndex(url) {
+  try {
+    const res = await safeFetch(url, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.sessions || []);
+    addRemoteSessions(items);
+    // Показать панель чтобы пользователь сразу увидел
+    if (!state.sessionsOpen) togglePanel();
+  } catch (e) {
+    console.warn('[sessions] не смог загрузить индекс', url, e.message);
+  }
+}
+
+function createSession({ id, name, size, content }) {
+  const meta = computeMeta(content);
+  return { id, name, size, content, meta };
+}
+
+function computeMeta(content) {
+  try {
+    const norm = normalizeToClaudeJsonl(content || '');
+    const parsed = parseJSONL(norm.text);
+    const tsList = parsed.nodes.map(n => n.ts).filter(Number.isFinite).sort((a, b) => a - b);
+    return {
+      format: norm.format,
+      nodes: parsed.nodes.length,
+      firstTs: tsList[0] || null,
+      lastTs: tsList[tsList.length - 1] || null,
+    };
+  } catch (e) {
+    return { format: 'unknown', nodes: 0, firstTs: null, lastTs: null };
+  }
+}
+
+async function selectSession(id) {
+  const s = state.sessions.find(x => x.id === id);
+  if (!s || !_loadText) return;
+  // Ленивая загрузка удалённых сессий
+  if (!s.content && s.remoteUrl) {
+    try {
+      const res = await safeFetch(s.remoteUrl, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      s.content = await res.text();
+      s.meta = computeMeta(s.content);
+    } catch (e) {
+      console.warn('[sessions] не могу загрузить', s.remoteUrl, e.message);
+      return;
+    }
+  }
+  if (s.content) {
+    _activeId = id;
+    _loadText(s.content);
+    render();
+  }
+}
+
+function removeSession(id) {
+  state.sessions = state.sessions.filter(s => s.id !== id);
+  if (_activeId === id) _activeId = null;
+  render();
+}
+
+function render() {
+  if (!_panel) return;
+  const listEl = _panel.querySelector('.sessions-list');
+  const hintEl = _panel.querySelector('.sessions-hint');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  if (!state.sessions.length) {
+    if (hintEl) hintEl.style.display = '';
+    if (_toggleBtn) updateBadge();
+    return;
+  }
+  if (hintEl) hintEl.style.display = 'none';
+  for (const s of state.sessions) {
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.id === _activeId ? ' active' : '');
+    const title = document.createElement('div');
+    title.className = 'session-title';
+    title.textContent = s.name;
+    const meta = document.createElement('div');
+    meta.className = 'session-meta';
+    const parts = [];
+    if (s.meta?.nodes) parts.push(`${s.meta.nodes} nodes`);
+    if (s.meta?.format && s.meta.format !== 'claude-jsonl') parts.push(s.meta.format);
+    if (s.size) parts.push(formatBytes(s.size));
+    if (s.meta?.firstTs) parts.push(formatShortDate(s.meta.firstTs));
+    meta.textContent = parts.join(' · ');
+    const rm = document.createElement('button');
+    rm.className = 'session-remove';
+    rm.textContent = '×';
+    rm.title = 'Удалить из списка';
+    rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeSession(s.id); });
+    item.appendChild(title);
+    item.appendChild(meta);
+    item.appendChild(rm);
+    item.addEventListener('click', () => selectSession(s.id));
+    listEl.appendChild(item);
+  }
+  updateBadge();
+}
+
+function updateBadge() {
+  if (!_toggleBtn) return;
+  const n = state.sessions.length;
+  _toggleBtn.textContent = '📚';
+  _toggleBtn.title = n ? t('tip.sessions_loaded', { n }) : t('tip.sessions_empty');
+  if (n > 0) _toggleBtn.dataset.badge = String(n);
+  else delete _toggleBtn.dataset.badge;
+}
+
+if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBadge);
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function formatShortDate(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return '';
+  }
+}
+
+    return { initSessionPicker, toggleSessions, addRemoteSessions, addSessionFiles, loadSessionIndex };
+  })();
+
+  // --- src/ui/loader.js ---
+  __M["src/ui/loader.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { CFG } = __M["src/core/config.js"];
+    const { parseJSONL } = __M["src/core/parser.js"];
+    const { buildGraph, detectTreeShape } = __M["src/core/graph.js"];
+    const { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } = __M["src/core/layout.js"];
+    const { SAMPLE_JSONL } = __M["src/core/sample.js"];
+    const { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } = __M["src/core/samples-embedded.js"];
+    const { t } = __M["src/core/i18n.js"];
+    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
+    const { hideDetail } = __M["src/ui/detail-panel.js"];
+    const { hideTooltip } = __M["src/ui/tooltip.js"];
+    const { resetTimeline } = __M["src/ui/timeline.js"];
+    const { addSessionFiles } = __M["src/ui/session-picker.js"];
+    const { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } = __M["src/core/session-bridge.js"];
+    const { loadAnnotationsForSession } = __M["src/ui/annotations.js"];
+    const { updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
+
+// Sample, который грузится по умолчанию при первом открытии страницы.
+// Раньше был SAMPLE_JSONL (basic, ~40 линейных нод) — он не показывает
+// ни ветвление графа, ни 3D-объём. Deep orchestration с 60 нодами и
+// 2-уровневым subagent spawn — самый наглядный для wow-эффекта.
+const DEFAULT_SAMPLE = DEEP_ORCHESTRATION_JSONL;
+
+let _getViewport;
+let _onReady = () => {};
+
+// ==== Examples ▾ dropdown menu ====
+
+const SAMPLE_OPTIONS = [
+  { id: 'basic', i18n: 'sample.basic', text: () => SAMPLE_JSONL },
+  { id: 'orchestration', i18n: 'sample.orchestration', text: () => MULTI_AGENT_ORCHESTRATION_JSONL },
+  { id: 'deep_orchestration', i18n: 'sample.deep_orchestration', text: () => DEEP_ORCHESTRATION_JSONL },
+];
+
+function toggleSamplesMenu(anchor) {
+  const existing = document.getElementById('samples-menu');
+  if (existing) { existing.remove(); anchor.setAttribute('aria-expanded', 'false'); return; }
+  const menu = document.createElement('div');
+  menu.id = 'samples-menu';
+  menu.className = 'samples-menu';
+  menu.setAttribute('role', 'menu');
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  let outsideHandler = null;
+  const closeMenu = () => {
+    menu.remove();
+    anchor.setAttribute('aria-expanded', 'false');
+    if (outsideHandler) {
+      document.removeEventListener('click', outsideHandler);
+      document.removeEventListener('keydown', escHandler);
+      outsideHandler = null;
+    }
+  };
+  const escHandler = (ev) => { if (ev.key === 'Escape') closeMenu(); };
+
+  for (const opt of SAMPLE_OPTIONS) {
+    const item = document.createElement('button');
+    item.className = 'samples-menu-item';
+    item.setAttribute('role', 'menuitem');
+    item.textContent = t(opt.i18n);
+    item.addEventListener('click', () => {
+      closeMenu();
+      clearSessionForHandoff();
+      loadText(opt.text());
+    });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+  anchor.setAttribute('aria-expanded', 'true');
+
+  setTimeout(() => {
+    outsideHandler = (ev) => {
+      if (!menu.contains(ev.target) && ev.target !== anchor) closeMenu();
+    };
+    document.addEventListener('click', outsideHandler);
+    document.addEventListener('keydown', escHandler);
+  }, 0);
+}
+
+function initLoader(getViewportFn, onReady) {
+  _getViewport = getViewportFn;
+  if (onReady) _onReady = onReady;
+
+  const fileInput = document.getElementById('file-input');
+  // multiple=true ставится динамически, чтобы можно было выбирать несколько
+  if (fileInput) fileInput.setAttribute('multiple', 'true');
+  document.getElementById('btn-file').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (ev) => {
+    const files = ev.target.files;
+    if (files && files.length) handleFiles(files);
+    fileInput.value = '';
+  });
+
+  // Examples ▾ dropdown — на клик открывает меню с тремя примерами.
+  // Закрытие при клике вне или повторном клике по кнопке. Hover/focus
+  // не используется — только явный клик, чтобы не мешать туториал-скриншотам.
+  const sampleBtn = document.getElementById('btn-sample');
+  if (sampleBtn) {
+    sampleBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleSamplesMenu(sampleBtn);
+    });
+  }
+  document.getElementById('btn-reset').addEventListener('click', resetView);
+
+  initDragDrop();
+
+  // Если пришли из 3D режима с уже загруженным файлом — восстановим его
+  const handoff = loadSessionForHandoff();
+  if (handoff && handoff.text) {
+    loadText(handoff.text);
+  } else {
+    loadText(DEFAULT_SAMPLE);
+  }
+}
+
+function initDragDrop() {
+  const dropHint = document.getElementById('drop-hint');
+  let depth = 0;
+  window.addEventListener('dragenter', (ev) => { ev.preventDefault(); depth++; dropHint.classList.add('show'); });
+  window.addEventListener('dragover', (ev) => ev.preventDefault());
+  window.addEventListener('dragleave', (ev) => {
+    ev.preventDefault();
+    depth--;
+    if (depth <= 0) { depth = 0; dropHint.classList.remove('show'); }
+  });
+  window.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    depth = 0;
+    dropHint.classList.remove('show');
+    const files = ev.dataTransfer && ev.dataTransfer.files;
+    if (files && files.length) handleFiles(files);
+  });
+}
+
+/**
+ * Обрабатывает один или несколько файлов: все кладём в session-picker,
+ * а первый сразу загружаем для отображения.
+ */
+function handleFiles(files) {
+  if (files.length === 1) {
+    const f = files[0];
+    loadFile(f);
+    // также добавить в список сессий без autoLoad (уже загружается)
+    addSessionFiles([f], { autoLoadFirst: false });
+    return;
+  }
+  // Multi: все в picker, первый авто-загружается
+  addSessionFiles(files, { autoLoadFirst: true });
+}
+
+function loadText(text) {
+  try {
+    hideError();
+    const norm = normalizeToClaudeJsonl(text);
+    if (norm.format !== 'claude-jsonl' && norm.format !== 'unknown') {
+      setLoadFormat(norm.format);
+    } else {
+      setLoadFormat(null);
+    }
+    const parsed = parseJSONL(norm.text);
+    if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
+    const vp = _getViewport();
+    const g = buildGraph(parsed, vp);
+    // Auto-degrade: при больших графах уменьшаем prewarm чтобы не зафризить UI
+    const n = g.nodes.length;
+    if (n >= CFG.perfHeavyThreshold) state.perfMode = 'minimal';
+    else if (n >= CFG.perfDegradeThreshold) state.perfMode = 'degraded';
+    else state.perfMode = 'normal';
+    const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
+      : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
+      : CFG.prewarmIterations;
+    // В minimal режиме — более быстрое охлаждение (physics быстрее дойдёт до settled)
+    const simOpts = state.perfMode === 'minimal' ? { alphaDecay: CFG.perfMinimalAlphaDecay } : {};
+    state.sim = createSim(simOpts);
+    prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
+    state.nodes = g.nodes;
+    state.edges = g.edges;
+    state.pairEdges = g.pairEdges || [];
+    state.byId = g.byId;
+    state.selected = null;
+    state.hover = null;
+    state.pathSet = new Set();
+    state.cameraTarget = null;
+    state.searchMatches = new Set();
+    state.searchActive = null;
+    state.collapsed = new Set();
+    state.stats = parsed.stats;
+    // Auto-detect tree-shape — если граф похож на дерево с 2+ fan-out
+    // точками и глубиной >=3, переключаемся в radial. Только при первом
+    // load (или если пользователь не закрепил выбор через localStorage).
+    const userPickedLayout = (() => {
+      try { return localStorage.getItem('viz:layoutMode'); } catch { return null; }
+    })();
+    if (!userPickedLayout && detectTreeShape(state.nodes, state.edges)) {
+      state.layoutMode = 'radial';
+    }
+    // Если активен не-force layout — применяем его сразу к новым нодам
+    if (state.layoutMode === 'swim') {
+      const pos = computeSwimLanes(state.nodes, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    } else if (state.layoutMode === 'radial') {
+      const pos = computeRadialLayout(state.nodes, state.byId, vp);
+      for (const [id, p] of pos) {
+        const n = state.byId.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      }
+    }
+    const cam = fitToView(state.nodes, vp);
+    state.camera.scale = cam.scale;
+    state.camera.x = cam.x;
+    state.camera.y = cam.y;
+    resetTimeline();
+    hideDetail();
+    hideTooltip();
+    updateStatsHUD();
+    // Восстановим сохранённые аннотации (звёзды и заметки) для этой сессии
+    loadAnnotationsForSession();
+    updateBookmarksBadge();
+    _onReady();
+    // Запомним текст для возможного перехода в 3D. Sample-ы не сохраняем —
+    // пусть 3D при первом открытии тоже покажет default sample.
+    const isSample = text === SAMPLE_JSONL || text === MULTI_AGENT_ORCHESTRATION_JSONL || text === DEEP_ORCHESTRATION_JSONL;
+    if (!isSample) saveSessionForHandoff(text);
+  } catch (e) {
+    showError('Parse error: ' + e.message);
+    console.error(e);
+  }
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => loadText(String(reader.result));
+  reader.onerror = () => showError('Read error: ' + reader.error);
+  reader.readAsText(file);
+}
+
+function resetView() {
+  if (!state.nodes.length) return;
+  const cam = fitToView(state.nodes, _getViewport());
+  state.camera.scale = cam.scale;
+  state.camera.x = cam.x;
+  state.camera.y = cam.y;
+}
+
+// Перерисовываем stats при переключении языка
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (state.stats) updateStatsHUD();
+  });
+}
+
+function updateStatsHUD() {
+  const s = state.stats;
+  const el = document.getElementById('stats');
+  if (!s) { el.textContent = '—'; return; }
+  const fmtEl = document.getElementById('load-format');
+  const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
+  const perfSuffix = state.perfMode && state.perfMode !== 'normal'
+    ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
+    : '';
+  el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
+  const compLine = s.compactions ? `\n${t('stats.compactions')}: ${s.compactions}` : '';
+  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}${compLine}\nperf: ${state.perfMode}`;
+}
+
+function setLoadFormat(fmt) {
+  let el = document.getElementById('load-format');
+  if (!el) {
+    el = document.createElement('span');
+    el.id = 'load-format';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  el.textContent = fmt || '';
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(hideError, 5000);
+}
+function hideError() {
+  const el = document.getElementById('error');
+  if (el) el.classList.remove('show');
+}
+
+    return { initLoader, loadText };
+  })();
+
+  // --- src/ui/share.js ---
+  __M["src/ui/share.js"] = (function () {
+    const { state } = __M["src/view/state.js"];
+    const { loadText } = __M["src/ui/loader.js"];
+    const { safeFetch, isSafeHttpUrl } = __M["src/core/url-safety.js"];
+
+let toastEl, btnShare;
+
+function initShare() {
+  btnShare = document.getElementById('btn-share');
+  toastEl = document.getElementById('toast');
+  if (btnShare) btnShare.addEventListener('click', shareCurrent);
+}
+
+function buildShareUrl() {
+  const params = new URLSearchParams();
+  params.set('t', String(Math.round(state.timelineMax * 100)));
+  if (state.selected && state.selected.id) params.set('n', state.selected.id);
+  const hidden = [...state.hiddenRoles];
+  if (hidden.length) params.set('hide', hidden.join(','));
+  return window.location.origin + window.location.pathname + '?' + params.toString();
+}
+
+function parseUrlParams(search) {
+  const out = {};
+  const p = new URLSearchParams(search || '');
+  if (p.has('jsonl')) out.jsonl = p.get('jsonl');
+  if (p.has('t')) {
+    const t = parseFloat(p.get('t'));
+    if (!isNaN(t)) out.t = Math.max(0, Math.min(1, t / 100));
+  }
+  if (p.has('n')) out.nodeId = p.get('n');
+  if (p.has('hide')) {
+    out.hide = p.get('hide').split(',').map(r => r.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+async function shareCurrent() {
+  const url = buildShareUrl();
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied to clipboard');
+  } catch {
+    prompt('Copy URL:', url);
+  }
+}
+
+function showToast(msg) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2000);
+}
+
+async function applyUrlParamsLate() {
+  const params = parseUrlParams(window.location.search);
+
+  if (params.jsonl) {
+    try {
+      if (!isSafeHttpUrl(params.jsonl)) {
+        console.warn('[share] отклонён небезопасный URL:', params.jsonl);
+        return;
+      }
+      const resp = await safeFetch(params.jsonl, { cache: 'no-store' });
+      if (resp.ok) {
+        const text = await resp.text();
+        loadText(text);
+      }
+    } catch (e) {
+      console.warn('[share] failed to fetch jsonl param:', e.message);
+    }
+  }
+
+  if (params.t != null) {
+    state.timelineMax = params.t;
+    const slider = document.getElementById('timeline');
+    if (slider) {
+      slider.value = String(Math.round(state.timelineMax * 100));
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  // Whitelist ролей — не принимаем произвольный текст из ?hide=
+  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use', 'tool_result', 'subagent_input', 'thinking']);
+  if (Array.isArray(params.hide)) {
+    for (const r of params.hide) {
+      if (!KNOWN_ROLES.has(r)) continue;
+      state.hiddenRoles.add(r);
+      const btn = document.querySelector(`.btn-role[data-role="${r}"]`);
+      if (btn) btn.classList.remove('active');
+    }
+  }
+
+  if (params.nodeId && state.byId) {
+    const node = state.byId.get(params.nodeId);
+    if (node) state.selected = node;
+  }
+}
+
+    return { initShare, buildShareUrl, parseUrlParams, applyUrlParamsLate };
+  })();
+
+  // --- src/ui/session-card.js ---
+  __M["src/ui/session-card.js"] = (function () {
+    const { t } = __M["src/core/i18n.js"];
+    const { buildCardModel } = __M["src/core/session-archetype.js"];
+    const { state } = __M["src/view/state.js"];
+    const { toolIcon } = __M["src/view/tool-icons.js"];
+    const { computeStats, formatDuration, formatTokens } = __M["src/ui/stats-hud.js"];
+    const { buildShareUrl } = __M["src/ui/share.js"];
+    const { canvasToPngBlob, downloadCanvasPng, snapshotTimestamp } = __M["src/ui/snapshot.js"];
+
+const ASPECTS = {
+  og: { width: 1200, height: 630, labelKey: 'session_card.aspect_og' },
+  square: { width: 1080, height: 1080, labelKey: 'session_card.aspect_square' },
+};
+
+const ROLE_COLORS = {
+  user: '#7BAAF0',
+  assistant: '#50D4B5',
+  tool_use: '#ECA040',
+  tool_result: '#C89150',
+  subagent_input: '#8CA5C8',
+  thinking: '#B58CFF',
+};
+
+let btnEl;
+let modalEl;
+let previewWrapEl;
+let includeSnippetsEl;
+let aspectKey = 'og';
+let currentCanvas = null;
+let dirty = true;
+let _getState = () => state;
+let _getShareUrl = () => buildShareUrl();
+
+/**
+ * Wire the redacted session-card export button.
+ *
+ * @param {{getState?:Function,getShareUrl?:Function}=} opts Initialization options.
+ */
+function initSessionCard(opts = {}) {
+  if (typeof opts.getState === 'function') _getState = opts.getState;
+  if (typeof opts.getShareUrl === 'function') _getShareUrl = opts.getShareUrl;
+  btnEl = document.getElementById('btn-session-card');
+  if (!btnEl) return;
+  btnEl.addEventListener('click', openDialog);
+}
+
+function openDialog() {
+  if (modalEl) { closeDialog(); return; }
+  aspectKey = 'og';
+  currentCanvas = null;
+  dirty = true;
+
+  modalEl = document.createElement('div');
+  modalEl.id = 'session-card-modal';
+  modalEl.className = 'session-card-modal';
+
+  const body = document.createElement('div');
+  body.className = 'session-card-body';
+  modalEl.appendChild(body);
+
+  const header = document.createElement('div');
+  header.className = 'session-card-header';
+  const title = document.createElement('span');
+  title.textContent = t('session_card.title');
+  header.appendChild(title);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'session-card-close';
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', t('aria.close'));
+  closeBtn.addEventListener('click', closeDialog);
+  header.appendChild(closeBtn);
+  body.appendChild(header);
+
+  const controls = document.createElement('div');
+  controls.className = 'session-card-controls';
+  controls.appendChild(buildAspectControl());
+  controls.appendChild(buildSnippetToggle());
+  body.appendChild(controls);
+
+  previewWrapEl = document.createElement('div');
+  previewWrapEl.className = 'session-card-preview';
+  body.appendChild(previewWrapEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'session-card-actions';
+  actions.appendChild(makeActionButton(t('session_card.generate'), generatePreview));
+  actions.appendChild(makeActionButton(t('session_card.copy'), copyCurrent));
+  const downloadBtn = makeActionButton(t('session_card.download'), downloadCurrent);
+  downloadBtn.classList.add('accent');
+  actions.appendChild(downloadBtn);
+  body.appendChild(actions);
+
+  modalEl.addEventListener('click', ev => { if (ev.target === modalEl) closeDialog(); });
+  document.body.appendChild(modalEl);
+  generatePreview({ silent: true });
+}
+
+function buildAspectControl() {
+  const wrap = document.createElement('div');
+  wrap.className = 'session-card-field';
+  const label = document.createElement('span');
+  label.className = 'session-card-label';
+  label.textContent = t('session_card.aspect');
+  wrap.appendChild(label);
+
+  const group = document.createElement('div');
+  group.className = 'session-card-segmented';
+  for (const key of Object.keys(ASPECTS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t(ASPECTS[key].labelKey);
+    b.className = key === aspectKey ? 'active' : '';
+    b.addEventListener('click', () => {
+      aspectKey = key;
+      dirty = true;
+      for (const item of group.querySelectorAll('button')) item.classList.toggle('active', item === b);
+      generatePreview({ silent: true });
+    });
+    group.appendChild(b);
+  }
+  wrap.appendChild(group);
+  return wrap;
+}
+
+function buildSnippetToggle() {
+  const box = document.createElement('div');
+  box.className = 'session-card-snippet';
+  const wrap = document.createElement('label');
+  wrap.className = 'session-card-check';
+  includeSnippetsEl = document.createElement('input');
+  includeSnippetsEl.type = 'checkbox';
+  includeSnippetsEl.checked = false;
+  const warn = document.createElement('p');
+  warn.className = 'session-card-warn';
+  warn.textContent = t('session_card.snippet_warn');
+  // Always visible but emphasised only while snippets are on — the user
+  // must see the best-effort caveat BEFORE opting in (public-share safety).
+  warn.style.cssText = 'margin:6px 0 0;font-size:11px;line-height:1.4;color:#e0a040;opacity:0.7;';
+  const syncWarn = () => { warn.style.opacity = includeSnippetsEl.checked ? '1' : '0.7'; };
+  includeSnippetsEl.addEventListener('change', () => {
+    syncWarn();
+    dirty = true;
+    generatePreview({ silent: true });
+  });
+  const text = document.createElement('span');
+  text.textContent = t('session_card.include_snippets');
+  wrap.appendChild(includeSnippetsEl);
+  wrap.appendChild(text);
+  box.appendChild(wrap);
+  box.appendChild(warn);
+  return box;
+}
+
+function makeActionButton(label, handler) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn';
+  b.textContent = label;
+  b.addEventListener('click', handler);
+  return b;
+}
+
+function closeDialog() {
+  if (!modalEl) return;
+  modalEl.remove();
+  modalEl = null;
+  previewWrapEl = null;
+  includeSnippetsEl = null;
+  currentCanvas = null;
+}
+
+function buildCurrentModel() {
+  const s = _getState();
+  if (!s || !Array.isArray(s.nodes) || !s.nodes.length) return null;
+  let shareUrl = '';
+  try { shareUrl = _getShareUrl(); } catch {}
+  return buildCardModel(s, {
+    stats: computeStats(s.nodes),
+    includeSnippets: !!(includeSnippetsEl && includeSnippetsEl.checked),
+    shareUrl,
+  });
+}
+
+function generatePreview(opts = {}) {
+  const model = buildCurrentModel();
+  if (!model) {
+    showToast(t('session_card.empty'));
+    return null;
+  }
+  const size = ASPECTS[aspectKey] || ASPECTS.og;
+  currentCanvas = renderSessionCardCanvas(model, size);
+  currentCanvas.className = 'session-card-preview-canvas';
+  if (previewWrapEl) {
+    previewWrapEl.innerHTML = '';
+    previewWrapEl.appendChild(currentCanvas);
+  }
+  dirty = false;
+  if (!opts.silent) showToast(t('session_card.generated'));
+  return currentCanvas;
+}
+
+function ensureCanvas() {
+  if (!currentCanvas || dirty) return generatePreview({ silent: true });
+  return currentCanvas;
+}
+
+async function copyCurrent() {
+  const canvas = ensureCanvas();
+  if (!canvas) return;
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard || !navigator.clipboard.write) {
+    showToast(t('session_card.copy_unsupported'));
+    return;
+  }
+  const blob = await canvasToPngBlob(canvas, 1);
+  if (!blob) return;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    showToast(t('session_card.copied'));
+  } catch {
+    showToast(t('session_card.copy_unsupported'));
+  }
+}
+
+async function downloadCurrent() {
+  const canvas = ensureCanvas();
+  if (!canvas) return;
+  await downloadCanvasPng(canvas, `conversation-card-${snapshotTimestamp()}.png`, 1);
+}
+
+/**
+ * Render a redacted session-card PNG canvas from a structured, sanitized model.
+ *
+ * @param {object} model Redaction-safe card model.
+ * @param {{width:number,height:number}} size Output size.
+ * @returns {HTMLCanvasElement} Rendered canvas.
+ */
+function renderSessionCardCanvas(model, size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const ctx = canvas.getContext('2d');
+  const W = size.width;
+  const H = size.height;
+
+  drawBackground(ctx, W, H);
+  const panelW = W > H ? Math.min(410, Math.round(W * 0.35)) : Math.min(390, Math.round(W * 0.36));
+  const panel = { x: W - panelW - 36, y: 40, w: panelW, h: H - 80 };
+  const graph = { x: 42, y: 72, w: panel.x - 74, h: H - 132 };
+
+  drawHeader(ctx, model, graph.x, 36);
+  drawGraph(ctx, model, graph);
+  drawPanel(ctx, model, panel);
+  drawWatermark(ctx, W, H);
+  return canvas;
+}
+
+function drawBackground(ctx, W, H) {
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#08101f');
+  grad.addColorStop(0.46, '#0b1328');
+  grad.addColorStop(1, '#050812');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(123, 170, 240, 0.08)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 48) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 48) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(236, 160, 64, 0.18)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W * 0.12, H);
+  ctx.lineTo(W * 0.58, 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawHeader(ctx, model, x, y) {
+  ctx.save();
+  ctx.font = '700 28px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = '#e8f7ff';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('AI CONVERSATION VIZ', x, y);
+  ctx.font = '12px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(123, 170, 240, 0.84)';
+  ctx.fillText(t('session_card.redacted_topology'), x, y + 24);
+  ctx.strokeStyle = 'rgba(80, 212, 181, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 34);
+  ctx.lineTo(x + 260, y + 34);
+  ctx.stroke();
+  if (model.shareUrl) {
+    ctx.font = '11px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = 'rgba(207, 230, 255, 0.58)';
+    ctx.fillText(clipToWidth(ctx, model.shareUrl, 430), x + 292, y + 24);
+  }
+  ctx.restore();
+}
+
+function drawGraph(ctx, model, rect) {
+  const nodes = model.graph.nodes || [];
+  const edges = model.graph.edges || [];
+  ctx.save();
+  roundedFill(ctx, rect.x, rect.y, rect.w, rect.h, 10, 'rgba(5, 8, 16, 0.28)');
+  ctx.strokeStyle = 'rgba(80, 212, 181, 0.16)';
+  ctx.lineWidth = 1;
+  roundedPath(ctx, rect.x, rect.y, rect.w, rect.h, 10);
+  ctx.stroke();
+
+  if (!nodes.length) {
+    ctx.fillStyle = 'rgba(207, 230, 255, 0.55)';
+    ctx.font = '16px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(t('session_card.empty'), rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.restore();
+    return;
+  }
+
+  const tx = graphTransform(nodes, rect);
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  ctx.lineCap = 'round';
+  for (const e of edges) {
+    const a = byId.get(e.source);
+    const b = byId.get(e.target);
+    if (!a || !b) continue;
+    const as = project(a, tx);
+    const bs = project(b, tx);
+    const alpha = e.adopted ? 0.18 : 0.34;
+    ctx.strokeStyle = colorForRole(b.role, alpha);
+    ctx.lineWidth = e.adopted ? 1.1 : 1.4;
+    if (e.adopted) ctx.setLineDash([5, 5]);
+    else ctx.setLineDash([]);
+    ctx.beginPath();
+    const mx = (as.x + bs.x) / 2;
+    const my = (as.y + bs.y) / 2;
+    const dx = bs.x - as.x;
+    const dy = bs.y - as.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const off = Math.min(38, len * 0.16);
+    ctx.moveTo(as.x, as.y);
+    ctx.quadraticCurveTo(mx - (dy / len) * off, my + (dx / len) * off, bs.x, bs.y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  for (const n of nodes) {
+    const p = project(n, tx);
+    const r = Math.max(3.5, Math.min(17, (n.r || 5) * tx.scale));
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.4);
+    glow.addColorStop(0, colorForRole(n.role, 0.34));
+    glow.addColorStop(1, colorForRole(n.role, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r * 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = colorForRole(n.role, 0.95);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    if (n.isHub || n.hasError) {
+      ctx.strokeStyle = n.hasError ? 'rgba(255, 90, 90, 0.88)' : 'rgba(255, 215, 120, 0.72)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (n.role === 'tool_use' && n.toolName && r >= 5) {
+      ctx.fillStyle = 'rgba(18, 11, 4, 0.92)';
+      ctx.font = `700 ${Math.max(10, Math.round(r * 1.05))}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(toolIcon(n.toolName), p.x, p.y + 0.5);
+    }
+  }
+
+  drawGraphLabels(ctx, nodes, tx, rect, model.includeSnippets);
+  ctx.restore();
+}
+
+function drawGraphLabels(ctx, nodes, tx, rect, includeSnippets) {
+  let drawn = 0;
+  const maxLabels = includeSnippets ? 14 : 18;
+  const candidates = nodes
+    .filter(n => includeSnippets ? n.snippet : (n.role === 'tool_use' && n.toolName))
+    .sort((a, b) => (b.isHub === true) - (a.isHub === true) || (b.textLen || 0) - (a.textLen || 0));
+  for (const n of candidates) {
+    if (drawn >= maxLabels) break;
+    const p = project(n, tx);
+    if (p.x < rect.x + 8 || p.x > rect.x + rect.w - 8 || p.y < rect.y + 8 || p.y > rect.y + rect.h - 8) continue;
+    const text = includeSnippets ? n.snippet : n.toolName;
+    if (!text) continue;
+    const label = includeSnippets ? clipToWidth(ctx, text, 190) : clipToWidth(ctx, text, 86);
+    ctx.font = includeSnippets ? '10px ui-monospace, Consolas, monospace' : '700 9px ui-monospace, Consolas, monospace';
+    const padX = 7;
+    const w = Math.min(includeSnippets ? 214 : 106, ctx.measureText(label).width + padX * 2);
+    const h = includeSnippets ? 22 : 18;
+    const x = Math.min(rect.x + rect.w - w - 8, Math.max(rect.x + 8, p.x + 10));
+    const y = Math.min(rect.y + rect.h - h - 8, Math.max(rect.y + 8, p.y - h / 2));
+    roundedFill(ctx, x, y, w, h, 5, includeSnippets ? 'rgba(8, 12, 24, 0.84)' : 'rgba(236, 160, 64, 0.16)');
+    ctx.strokeStyle = includeSnippets ? 'rgba(123, 170, 240, 0.28)' : 'rgba(236, 160, 64, 0.36)';
+    ctx.lineWidth = 1;
+    roundedPath(ctx, x, y, w, h, 5);
+    ctx.stroke();
+    ctx.fillStyle = includeSnippets ? 'rgba(207, 230, 255, 0.82)' : 'rgba(255, 221, 170, 0.9)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + padX, y + h / 2 + 0.5);
+    drawn++;
+  }
+}
+
+function drawPanel(ctx, model, rect) {
+  ctx.save();
+  const panelGrad = ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+  panelGrad.addColorStop(0, 'rgba(12, 18, 36, 0.92)');
+  panelGrad.addColorStop(1, 'rgba(7, 10, 22, 0.92)');
+  roundedFill(ctx, rect.x, rect.y, rect.w, rect.h, 12, panelGrad);
+  ctx.strokeStyle = 'rgba(123, 170, 240, 0.28)';
+  ctx.lineWidth = 1.4;
+  roundedPath(ctx, rect.x, rect.y, rect.w, rect.h, 12);
+  ctx.stroke();
+
+  let y = rect.y + 32;
+  y = drawArchetype(ctx, model, rect.x + 24, y, rect.w - 48);
+  y += 22;
+  y = drawMetricGrid(ctx, model, rect.x + 24, y, rect.w - 48);
+  y += 18;
+  y = drawRoleBreakdown(ctx, model, rect.x + 24, y, rect.w - 48);
+  y += 18;
+  y = drawToolList(ctx, model, rect.x + 24, y, rect.w - 48);
+  if (model.models.length) {
+    y += 16;
+    drawModelLine(ctx, model, rect.x + 24, y, rect.w - 48);
+  }
+  ctx.restore();
+}
+
+function drawArchetype(ctx, model, x, y, w) {
+  ctx.font = '10px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(123, 170, 240, 0.82)';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(t('session_card.archetype').toUpperCase(), x, y);
+  const label = t(model.archetype.labelKey).toUpperCase();
+  const badgeH = 40;
+  const badgeY = y + 11;
+  const badgeGrad = ctx.createLinearGradient(x, badgeY, x + w, badgeY);
+  badgeGrad.addColorStop(0, 'rgba(80, 212, 181, 0.22)');
+  badgeGrad.addColorStop(1, 'rgba(236, 160, 64, 0.18)');
+  roundedFill(ctx, x, badgeY, w, badgeH, 8, badgeGrad);
+  ctx.strokeStyle = 'rgba(80, 212, 181, 0.5)';
+  ctx.lineWidth = 1;
+  roundedPath(ctx, x, badgeY, w, badgeH, 8);
+  ctx.stroke();
+  ctx.font = '700 20px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = '#f4fbff';
+  ctx.fillText(clipToWidth(ctx, label, w - 24), x + 12, badgeY + 27);
+  return badgeY + badgeH;
+}
+
+function drawMetricGrid(ctx, model, x, y, w) {
+  const c = model.counts;
+  const metrics = [
+    [t('session_card.events'), formatNumber(c.events)],
+    [t('session_card.duration'), formatDuration(c.durationSec || 0)],
+    [t('session_card.tokens'), '~' + formatTokens(c.tokens || 0)],
+    [t('session_card.tool_use'), formatNumber(c.toolUseTotal)],
+    [t('session_card.subagents'), formatNumber(c.subagentCount)],
+    [t('session_card.hubs'), formatNumber(c.hubs)],
+  ];
+  const colW = (w - 12) / 2;
+  const rowH = 45;
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < metrics.length; i++) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const bx = x + col * (colW + 12);
+    const by = y + row * rowH;
+    roundedFill(ctx, bx, by, colW, 36, 6, 'rgba(123, 170, 240, 0.06)');
+    ctx.font = '9px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = 'rgba(123, 170, 240, 0.7)';
+    ctx.fillText(metrics[i][0].toUpperCase(), bx + 9, by + 13);
+    ctx.font = '700 17px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = '#e8f7ff';
+    ctx.fillText(clipToWidth(ctx, metrics[i][1], colW - 18), bx + 9, by + 30);
+  }
+  return y + Math.ceil(metrics.length / 2) * rowH - 9;
+}
+
+function drawRoleBreakdown(ctx, model, x, y, w) {
+  ctx.font = '10px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(123, 170, 240, 0.82)';
+  ctx.fillText(t('session_card.roles').toUpperCase(), x, y);
+  const roles = model.roles.slice(0, 6);
+  const max = Math.max(1, ...roles.map(r => r.count));
+  let yy = y + 18;
+  for (const item of roles) {
+    const labelW = 106;
+    ctx.font = '10px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = colorForRole(item.role, 0.92);
+    ctx.fillText(item.role, x, yy + 10);
+    ctx.fillStyle = 'rgba(207, 230, 255, 0.82)';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(item.count), x + labelW - 8, yy + 10);
+    ctx.textAlign = 'left';
+    roundedFill(ctx, x + labelW, yy + 1, w - labelW, 9, 4, 'rgba(123, 170, 240, 0.08)');
+    roundedFill(ctx, x + labelW, yy + 1, (w - labelW) * item.count / max, 9, 4, colorForRole(item.role, 0.62));
+    yy += 18;
+  }
+  return yy;
+}
+
+function drawToolList(ctx, model, x, y, w) {
+  ctx.font = '10px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(123, 170, 240, 0.82)';
+  ctx.fillText(t('session_card.top_tools').toUpperCase(), x, y);
+  let yy = y + 18;
+  const tools = model.topTools.length ? model.topTools : [{ name: t('session_card.no_tools'), count: 0 }];
+  for (const tool of tools.slice(0, 5)) {
+    const label = tool.count ? `${toolIcon(tool.name)} ${tool.name}` : tool.name;
+    const count = tool.count ? '×' + tool.count : '';
+    roundedFill(ctx, x, yy - 2, w, 24, 6, 'rgba(236, 160, 64, 0.08)');
+    ctx.font = '11px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = 'rgba(255, 221, 170, 0.92)';
+    ctx.fillText(clipToWidth(ctx, label, w - 54), x + 9, yy + 14);
+    if (count) {
+      ctx.fillStyle = 'rgba(207, 230, 255, 0.72)';
+      ctx.textAlign = 'right';
+      ctx.fillText(count, x + w - 9, yy + 14);
+      ctx.textAlign = 'left';
+    }
+    yy += 30;
+  }
+  return yy;
+}
+
+function drawModelLine(ctx, model, x, y, w) {
+  ctx.font = '10px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(123, 170, 240, 0.82)';
+  ctx.fillText(t('session_card.models').toUpperCase(), x, y);
+  ctx.font = '12px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(207, 230, 255, 0.86)';
+  ctx.fillText(clipToWidth(ctx, model.models.join(', '), w), x, y + 19);
+}
+
+function drawWatermark(ctx, W, H) {
+  ctx.save();
+  ctx.font = '11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(207, 230, 255, 0.52)';
+  ctx.textAlign = 'right';
+  ctx.fillText('ai-conversation-viz · andromanpro', W - 34, H - 22);
+  ctx.restore();
+}
+
+function graphTransform(nodes, rect) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    const r = n.r || 5;
+    minX = Math.min(minX, n.x - r);
+    minY = Math.min(minY, n.y - r);
+    maxX = Math.max(maxX, n.x + r);
+    maxY = Math.max(maxY, n.y + r);
+  }
+  const bw = Math.max(1, maxX - minX);
+  const bh = Math.max(1, maxY - minY);
+  const scale = Math.min(rect.w / bw, rect.h / bh) * 0.84;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return {
+    scale,
+    x: rect.x + rect.w / 2 - cx * scale,
+    y: rect.y + rect.h / 2 - cy * scale,
+  };
+}
+
+function project(n, tx) {
+  return { x: n.x * tx.scale + tx.x, y: n.y * tx.scale + tx.y };
+}
+
+function colorForRole(role, alpha) {
+  const hex = ROLE_COLORS[role] || '#50D4B5';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function roundedPath(ctx, x, y, w, h, r) {
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    return;
+  }
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
+
+function roundedFill(ctx, x, y, w, h, r, fillStyle) {
+  ctx.fillStyle = fillStyle;
+  roundedPath(ctx, x, y, w, h, r);
+  ctx.fill();
+}
+
+function clipToWidth(ctx, value, maxWidth) {
+  const text = String(value || '');
+  if (!text || ctx.measureText(text).width <= maxWidth) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(text.slice(0, mid) + '...').width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo).trimEnd() + '...';
+}
+
+function formatNumber(n) {
+  return String(Math.max(0, Math.round(n || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+    return { initSessionCard, renderSessionCardCanvas };
   })();
 
   // --- src/ui/diff-mode.js ---
@@ -7951,265 +9765,6 @@ function fnv1a(s) {
 }
 
     return { initDiffMode, applyDiffText, mergeDiff, clearDiff, hashNode, fnv1a };
-  })();
-
-  // --- src/ui/session-picker.js ---
-  __M["src/ui/session-picker.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-    const { parseJSONL } = __M["src/core/parser.js"];
-    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
-    const { safeFetch } = __M["src/core/url-safety.js"];
-    const { t } = __M["src/core/i18n.js"];
-// Session picker — in-memory список JSONL-сессий. Пользователь кидает
-// несколько файлов одновременно (или указывает ?sessions=<index.json>),
-// и может переключаться между ними через боковую панель.
-//
-// Локальный режим: каждая загруженная сессия хранится в state.sessions как
-//   { id, name, size, content, meta: { nodes?, edges?, firstTs?, lastTs? } }
-// Контент храним прямо в памяти — это JSONL-строка, после parseJSONL её
-// можно заново превращать в граф. Для 30MB сессии это ~30MB в RAM,
-// на 5 сессий = 150MB — приемлемо для браузерного UX.
-//
-// Remote режим: URL параметр ?sessions=<url> указывает на JSON-индекс
-//   { sessions: [{ id, title, url, mtime?, size? }, ...] }
-// Контент подгружается по требованию (fetch() при клике на элемент).
-
-
-let _loadText = null;
-let _panel = null;
-let _toggleBtn = null;
-let _activeId = null;
-
-/**
- * @param {(text: string) => void} loadTextFn — колбэк из loader.js
- */
-function initSessionPicker(loadTextFn) {
-  _loadText = loadTextFn;
-  _panel = document.getElementById('sessions-panel');
-  _toggleBtn = document.getElementById('btn-sessions');
-  if (_toggleBtn) _toggleBtn.addEventListener('click', togglePanel);
-  if (!state.sessions) state.sessions = [];
-  render();
-}
-
-function toggleSessions() { togglePanel(); }
-
-function togglePanel() {
-  if (!_panel) return;
-  state.sessionsOpen = !state.sessionsOpen;
-  _panel.classList.toggle('open', !!state.sessionsOpen);
-  if (_toggleBtn) _toggleBtn.classList.toggle('active-sessions', !!state.sessionsOpen);
-}
-
-/**
- * Добавить локальные файлы в список сессий (вызывается из loader.js
- * при drag-drop или file-input с multi).
- *
- * @param {FileList | Array<File>} files
- * @param {{ autoLoadFirst?: boolean }} opts
- */
-// Лимит на количество сессий с content в памяти. Выше — старые теряют
-// .content (meta остаётся, при клике re-load из File если локальная или
-// из remoteUrl если удалённая). Не даст 50-ти 30MB-файлам съесть 1.5GB RAM.
-const MAX_SESSIONS_WITH_CONTENT = 20;
-
-function evictOldestContent(keepId) {
-  // Простой LRU по touchedAt — но мы его не храним. Альтернатива:
-  // сохраняем порядок добавления (индекс массива) и сбрасываем content
-  // у самых старых (кроме активной).
-  const withContent = state.sessions.filter(s => s.content && s.id !== keepId);
-  while (withContent.length > MAX_SESSIONS_WITH_CONTENT - 1 && withContent.length) {
-    const victim = withContent.shift();
-    victim.content = null; // meta остаётся
-  }
-}
-
-async function addSessionFiles(files, opts = {}) {
-  if (!files || !files.length) return;
-  const added = [];
-  for (const f of Array.from(files)) {
-    if (!f) continue;
-    // Читаем как текст
-    const content = await f.text();
-    const session = createSession({
-      id: 'local:' + f.name + ':' + f.size + ':' + (f.lastModified || 0),
-      name: f.name,
-      size: f.size,
-      content,
-    });
-    added.push(session);
-  }
-  // Дедуп по id — если повторно тот же файл
-  for (const s of added) {
-    const existing = state.sessions.findIndex(x => x.id === s.id);
-    if (existing >= 0) state.sessions[existing] = s;
-    else state.sessions.push(s);
-  }
-  // LRU eviction — держим в памяти только MAX_SESSIONS_WITH_CONTENT
-  evictOldestContent(added.length ? added[0].id : null);
-  render();
-  if (opts.autoLoadFirst && added.length) {
-    selectSession(added[0].id);
-    if (!state.sessionsOpen && state.sessions.length > 1) togglePanel();
-  }
-}
-
-/**
- * Добавить удалённые сессии из index.json.
- * @param {Array<{id, title, url, mtime?, size?}>} items
- */
-function addRemoteSessions(items) {
-  if (!Array.isArray(items)) return;
-  for (const it of items) {
-    if (!it || !it.url) continue;
-    const id = 'remote:' + (it.id || it.url);
-    if (state.sessions.some(s => s.id === id)) continue;
-    state.sessions.push({
-      id,
-      name: it.title || it.id || it.url,
-      size: it.size || 0,
-      content: null, // lazy load
-      remoteUrl: it.url,
-      mtime: it.mtime || null,
-    });
-  }
-  render();
-}
-
-/**
- * Загрузить индекс с сервера и добавить сессии.
- * @param {string} url
- */
-async function loadSessionIndex(url) {
-  try {
-    const res = await safeFetch(url, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const items = Array.isArray(data) ? data : (data.sessions || []);
-    addRemoteSessions(items);
-    // Показать панель чтобы пользователь сразу увидел
-    if (!state.sessionsOpen) togglePanel();
-  } catch (e) {
-    console.warn('[sessions] не смог загрузить индекс', url, e.message);
-  }
-}
-
-function createSession({ id, name, size, content }) {
-  const meta = computeMeta(content);
-  return { id, name, size, content, meta };
-}
-
-function computeMeta(content) {
-  try {
-    const norm = normalizeToClaudeJsonl(content || '');
-    const parsed = parseJSONL(norm.text);
-    const tsList = parsed.nodes.map(n => n.ts).filter(Number.isFinite).sort((a, b) => a - b);
-    return {
-      format: norm.format,
-      nodes: parsed.nodes.length,
-      firstTs: tsList[0] || null,
-      lastTs: tsList[tsList.length - 1] || null,
-    };
-  } catch (e) {
-    return { format: 'unknown', nodes: 0, firstTs: null, lastTs: null };
-  }
-}
-
-async function selectSession(id) {
-  const s = state.sessions.find(x => x.id === id);
-  if (!s || !_loadText) return;
-  // Ленивая загрузка удалённых сессий
-  if (!s.content && s.remoteUrl) {
-    try {
-      const res = await safeFetch(s.remoteUrl, { credentials: 'same-origin' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      s.content = await res.text();
-      s.meta = computeMeta(s.content);
-    } catch (e) {
-      console.warn('[sessions] не могу загрузить', s.remoteUrl, e.message);
-      return;
-    }
-  }
-  if (s.content) {
-    _activeId = id;
-    _loadText(s.content);
-    render();
-  }
-}
-
-function removeSession(id) {
-  state.sessions = state.sessions.filter(s => s.id !== id);
-  if (_activeId === id) _activeId = null;
-  render();
-}
-
-function render() {
-  if (!_panel) return;
-  const listEl = _panel.querySelector('.sessions-list');
-  const hintEl = _panel.querySelector('.sessions-hint');
-  if (!listEl) return;
-  listEl.innerHTML = '';
-  if (!state.sessions.length) {
-    if (hintEl) hintEl.style.display = '';
-    if (_toggleBtn) updateBadge();
-    return;
-  }
-  if (hintEl) hintEl.style.display = 'none';
-  for (const s of state.sessions) {
-    const item = document.createElement('div');
-    item.className = 'session-item' + (s.id === _activeId ? ' active' : '');
-    const title = document.createElement('div');
-    title.className = 'session-title';
-    title.textContent = s.name;
-    const meta = document.createElement('div');
-    meta.className = 'session-meta';
-    const parts = [];
-    if (s.meta?.nodes) parts.push(`${s.meta.nodes} nodes`);
-    if (s.meta?.format && s.meta.format !== 'claude-jsonl') parts.push(s.meta.format);
-    if (s.size) parts.push(formatBytes(s.size));
-    if (s.meta?.firstTs) parts.push(formatShortDate(s.meta.firstTs));
-    meta.textContent = parts.join(' · ');
-    const rm = document.createElement('button');
-    rm.className = 'session-remove';
-    rm.textContent = '×';
-    rm.title = 'Удалить из списка';
-    rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeSession(s.id); });
-    item.appendChild(title);
-    item.appendChild(meta);
-    item.appendChild(rm);
-    item.addEventListener('click', () => selectSession(s.id));
-    listEl.appendChild(item);
-  }
-  updateBadge();
-}
-
-function updateBadge() {
-  if (!_toggleBtn) return;
-  const n = state.sessions.length;
-  _toggleBtn.textContent = '📚';
-  _toggleBtn.title = n ? t('tip.sessions_loaded', { n }) : t('tip.sessions_empty');
-  if (n > 0) _toggleBtn.dataset.badge = String(n);
-  else delete _toggleBtn.dataset.badge;
-}
-
-if (typeof window !== 'undefined') window.addEventListener('languagechange', updateBadge);
-
-function formatBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-  return (b / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-function formatShortDate(ts) {
-  try {
-    const d = new Date(ts);
-    return d.toISOString().slice(0, 10);
-  } catch {
-    return '';
-  }
-}
-
-    return { initSessionPicker, toggleSessions, addRemoteSessions, addSessionFiles, loadSessionIndex };
   })();
 
   // --- src/ui/lang-toggle.js ---
@@ -8646,409 +10201,6 @@ function onKey(ev) {
     return { initInteraction, isPanning, isDraggingNode };
   })();
 
-  // --- src/ui/loader.js ---
-  __M["src/ui/loader.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-    const { CFG } = __M["src/core/config.js"];
-    const { parseJSONL } = __M["src/core/parser.js"];
-    const { buildGraph, detectTreeShape } = __M["src/core/graph.js"];
-    const { fitToView, prewarm, createSim, computeSwimLanes, computeRadialLayout } = __M["src/core/layout.js"];
-    const { SAMPLE_JSONL } = __M["src/core/sample.js"];
-    const { MULTI_AGENT_ORCHESTRATION_JSONL, DEEP_ORCHESTRATION_JSONL } = __M["src/core/samples-embedded.js"];
-    const { t } = __M["src/core/i18n.js"];
-    const { normalizeToClaudeJsonl } = __M["src/core/adapters.js"];
-    const { hideDetail } = __M["src/ui/detail-panel.js"];
-    const { hideTooltip } = __M["src/ui/tooltip.js"];
-    const { resetTimeline } = __M["src/ui/timeline.js"];
-    const { addSessionFiles } = __M["src/ui/session-picker.js"];
-    const { saveSessionForHandoff, loadSessionForHandoff, clearSessionForHandoff } = __M["src/core/session-bridge.js"];
-    const { loadAnnotationsForSession } = __M["src/ui/annotations.js"];
-    const { updateBadge: updateBookmarksBadge } = __M["src/ui/bookmarks.js"];
-
-// Sample, который грузится по умолчанию при первом открытии страницы.
-// Раньше был SAMPLE_JSONL (basic, ~40 линейных нод) — он не показывает
-// ни ветвление графа, ни 3D-объём. Deep orchestration с 60 нодами и
-// 2-уровневым subagent spawn — самый наглядный для wow-эффекта.
-const DEFAULT_SAMPLE = DEEP_ORCHESTRATION_JSONL;
-
-let _getViewport;
-let _onReady = () => {};
-
-// ==== Examples ▾ dropdown menu ====
-
-const SAMPLE_OPTIONS = [
-  { id: 'basic', i18n: 'sample.basic', text: () => SAMPLE_JSONL },
-  { id: 'orchestration', i18n: 'sample.orchestration', text: () => MULTI_AGENT_ORCHESTRATION_JSONL },
-  { id: 'deep_orchestration', i18n: 'sample.deep_orchestration', text: () => DEEP_ORCHESTRATION_JSONL },
-];
-
-function toggleSamplesMenu(anchor) {
-  const existing = document.getElementById('samples-menu');
-  if (existing) { existing.remove(); anchor.setAttribute('aria-expanded', 'false'); return; }
-  const menu = document.createElement('div');
-  menu.id = 'samples-menu';
-  menu.className = 'samples-menu';
-  menu.setAttribute('role', 'menu');
-  const rect = anchor.getBoundingClientRect();
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
-
-  let outsideHandler = null;
-  const closeMenu = () => {
-    menu.remove();
-    anchor.setAttribute('aria-expanded', 'false');
-    if (outsideHandler) {
-      document.removeEventListener('click', outsideHandler);
-      document.removeEventListener('keydown', escHandler);
-      outsideHandler = null;
-    }
-  };
-  const escHandler = (ev) => { if (ev.key === 'Escape') closeMenu(); };
-
-  for (const opt of SAMPLE_OPTIONS) {
-    const item = document.createElement('button');
-    item.className = 'samples-menu-item';
-    item.setAttribute('role', 'menuitem');
-    item.textContent = t(opt.i18n);
-    item.addEventListener('click', () => {
-      closeMenu();
-      clearSessionForHandoff();
-      loadText(opt.text());
-    });
-    menu.appendChild(item);
-  }
-
-  document.body.appendChild(menu);
-  anchor.setAttribute('aria-expanded', 'true');
-
-  setTimeout(() => {
-    outsideHandler = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== anchor) closeMenu();
-    };
-    document.addEventListener('click', outsideHandler);
-    document.addEventListener('keydown', escHandler);
-  }, 0);
-}
-
-function initLoader(getViewportFn, onReady) {
-  _getViewport = getViewportFn;
-  if (onReady) _onReady = onReady;
-
-  const fileInput = document.getElementById('file-input');
-  // multiple=true ставится динамически, чтобы можно было выбирать несколько
-  if (fileInput) fileInput.setAttribute('multiple', 'true');
-  document.getElementById('btn-file').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (ev) => {
-    const files = ev.target.files;
-    if (files && files.length) handleFiles(files);
-    fileInput.value = '';
-  });
-
-  // Examples ▾ dropdown — на клик открывает меню с тремя примерами.
-  // Закрытие при клике вне или повторном клике по кнопке. Hover/focus
-  // не используется — только явный клик, чтобы не мешать туториал-скриншотам.
-  const sampleBtn = document.getElementById('btn-sample');
-  if (sampleBtn) {
-    sampleBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      toggleSamplesMenu(sampleBtn);
-    });
-  }
-  document.getElementById('btn-reset').addEventListener('click', resetView);
-
-  initDragDrop();
-
-  // Если пришли из 3D режима с уже загруженным файлом — восстановим его
-  const handoff = loadSessionForHandoff();
-  if (handoff && handoff.text) {
-    loadText(handoff.text);
-  } else {
-    loadText(DEFAULT_SAMPLE);
-  }
-}
-
-function initDragDrop() {
-  const dropHint = document.getElementById('drop-hint');
-  let depth = 0;
-  window.addEventListener('dragenter', (ev) => { ev.preventDefault(); depth++; dropHint.classList.add('show'); });
-  window.addEventListener('dragover', (ev) => ev.preventDefault());
-  window.addEventListener('dragleave', (ev) => {
-    ev.preventDefault();
-    depth--;
-    if (depth <= 0) { depth = 0; dropHint.classList.remove('show'); }
-  });
-  window.addEventListener('drop', (ev) => {
-    ev.preventDefault();
-    depth = 0;
-    dropHint.classList.remove('show');
-    const files = ev.dataTransfer && ev.dataTransfer.files;
-    if (files && files.length) handleFiles(files);
-  });
-}
-
-/**
- * Обрабатывает один или несколько файлов: все кладём в session-picker,
- * а первый сразу загружаем для отображения.
- */
-function handleFiles(files) {
-  if (files.length === 1) {
-    const f = files[0];
-    loadFile(f);
-    // также добавить в список сессий без autoLoad (уже загружается)
-    addSessionFiles([f], { autoLoadFirst: false });
-    return;
-  }
-  // Multi: все в picker, первый авто-загружается
-  addSessionFiles(files, { autoLoadFirst: true });
-}
-
-function loadText(text) {
-  try {
-    hideError();
-    const norm = normalizeToClaudeJsonl(text);
-    if (norm.format !== 'claude-jsonl' && norm.format !== 'unknown') {
-      setLoadFormat(norm.format);
-    } else {
-      setLoadFormat(null);
-    }
-    const parsed = parseJSONL(norm.text);
-    if (!parsed.nodes.length) { showError('No user/assistant messages found.'); return; }
-    const vp = _getViewport();
-    const g = buildGraph(parsed, vp);
-    // Auto-degrade: при больших графах уменьшаем prewarm чтобы не зафризить UI
-    const n = g.nodes.length;
-    if (n >= CFG.perfHeavyThreshold) state.perfMode = 'minimal';
-    else if (n >= CFG.perfDegradeThreshold) state.perfMode = 'degraded';
-    else state.perfMode = 'normal';
-    const prewarmN = state.perfMode === 'minimal' ? CFG.perfMinimalPrewarm
-      : state.perfMode === 'degraded' ? Math.max(40, Math.floor(CFG.prewarmIterations / 3))
-      : CFG.prewarmIterations;
-    // В minimal режиме — более быстрое охлаждение (physics быстрее дойдёт до settled)
-    const simOpts = state.perfMode === 'minimal' ? { alphaDecay: CFG.perfMinimalAlphaDecay } : {};
-    state.sim = createSim(simOpts);
-    prewarm(g.nodes, g.edges, vp, state.sim, prewarmN);
-    state.nodes = g.nodes;
-    state.edges = g.edges;
-    state.pairEdges = g.pairEdges || [];
-    state.byId = g.byId;
-    state.selected = null;
-    state.hover = null;
-    state.pathSet = new Set();
-    state.cameraTarget = null;
-    state.searchMatches = new Set();
-    state.searchActive = null;
-    state.collapsed = new Set();
-    state.stats = parsed.stats;
-    // Auto-detect tree-shape — если граф похож на дерево с 2+ fan-out
-    // точками и глубиной >=3, переключаемся в radial. Только при первом
-    // load (или если пользователь не закрепил выбор через localStorage).
-    const userPickedLayout = (() => {
-      try { return localStorage.getItem('viz:layoutMode'); } catch { return null; }
-    })();
-    if (!userPickedLayout && detectTreeShape(state.nodes, state.edges)) {
-      state.layoutMode = 'radial';
-    }
-    // Если активен не-force layout — применяем его сразу к новым нодам
-    if (state.layoutMode === 'swim') {
-      const pos = computeSwimLanes(state.nodes, vp);
-      for (const [id, p] of pos) {
-        const n = state.byId.get(id);
-        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
-      }
-    } else if (state.layoutMode === 'radial') {
-      const pos = computeRadialLayout(state.nodes, state.byId, vp);
-      for (const [id, p] of pos) {
-        const n = state.byId.get(id);
-        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
-      }
-    }
-    const cam = fitToView(state.nodes, vp);
-    state.camera.scale = cam.scale;
-    state.camera.x = cam.x;
-    state.camera.y = cam.y;
-    resetTimeline();
-    hideDetail();
-    hideTooltip();
-    updateStatsHUD();
-    // Восстановим сохранённые аннотации (звёзды и заметки) для этой сессии
-    loadAnnotationsForSession();
-    updateBookmarksBadge();
-    _onReady();
-    // Запомним текст для возможного перехода в 3D. Sample-ы не сохраняем —
-    // пусть 3D при первом открытии тоже покажет default sample.
-    const isSample = text === SAMPLE_JSONL || text === MULTI_AGENT_ORCHESTRATION_JSONL || text === DEEP_ORCHESTRATION_JSONL;
-    if (!isSample) saveSessionForHandoff(text);
-  } catch (e) {
-    showError('Parse error: ' + e.message);
-    console.error(e);
-  }
-}
-
-function loadFile(file) {
-  const reader = new FileReader();
-  reader.onload = () => loadText(String(reader.result));
-  reader.onerror = () => showError('Read error: ' + reader.error);
-  reader.readAsText(file);
-}
-
-function resetView() {
-  if (!state.nodes.length) return;
-  const cam = fitToView(state.nodes, _getViewport());
-  state.camera.scale = cam.scale;
-  state.camera.x = cam.x;
-  state.camera.y = cam.y;
-}
-
-// Перерисовываем stats при переключении языка
-if (typeof window !== 'undefined') {
-  window.addEventListener('languagechange', () => {
-    if (state.stats) updateStatsHUD();
-  });
-}
-
-function updateStatsHUD() {
-  const s = state.stats;
-  const el = document.getElementById('stats');
-  if (!s) { el.textContent = '—'; return; }
-  const fmtEl = document.getElementById('load-format');
-  const fmtSuffix = fmtEl && fmtEl.textContent ? ' &middot; <span class="fmt-chip">' + fmtEl.textContent + '</span>' : '';
-  const perfSuffix = state.perfMode && state.perfMode !== 'normal'
-    ? ` &middot; <span class="perf-chip" style="color:var(--accent)">${state.perfMode}</span>`
-    : '';
-  el.innerHTML = `<b>${state.nodes.length}</b> ${t('stats.nodes')} &middot; <b>${state.edges.length}</b> ${t('stats.edges')} &middot; <span>${s.parsed} ${t('stats.lines')}</span>${fmtSuffix}${perfSuffix}`;
-  const compLine = s.compactions ? `\n${t('stats.compactions')}: ${s.compactions}` : '';
-  el.title = `${t('stats.parsed')}: ${s.parsed}\n${t('stats.kept')}: ${s.kept}\n${t('stats.skipped')}: ${s.skipped}\n${t('stats.errors')}: ${s.errors}${compLine}\nperf: ${state.perfMode}`;
-}
-
-function setLoadFormat(fmt) {
-  let el = document.getElementById('load-format');
-  if (!el) {
-    el = document.createElement('span');
-    el.id = 'load-format';
-    el.style.display = 'none';
-    document.body.appendChild(el);
-  }
-  el.textContent = fmt || '';
-}
-
-function showError(msg) {
-  const el = document.getElementById('error');
-  el.textContent = msg;
-  el.classList.add('show');
-  setTimeout(hideError, 5000);
-}
-function hideError() {
-  const el = document.getElementById('error');
-  if (el) el.classList.remove('show');
-}
-
-    return { initLoader, loadText };
-  })();
-
-  // --- src/ui/share.js ---
-  __M["src/ui/share.js"] = (function () {
-    const { state } = __M["src/view/state.js"];
-    const { loadText } = __M["src/ui/loader.js"];
-    const { safeFetch, isSafeHttpUrl } = __M["src/core/url-safety.js"];
-
-let toastEl, btnShare;
-
-function initShare() {
-  btnShare = document.getElementById('btn-share');
-  toastEl = document.getElementById('toast');
-  if (btnShare) btnShare.addEventListener('click', shareCurrent);
-}
-
-function buildShareUrl() {
-  const params = new URLSearchParams();
-  params.set('t', String(Math.round(state.timelineMax * 100)));
-  if (state.selected && state.selected.id) params.set('n', state.selected.id);
-  const hidden = [...state.hiddenRoles];
-  if (hidden.length) params.set('hide', hidden.join(','));
-  return window.location.origin + window.location.pathname + '?' + params.toString();
-}
-
-function parseUrlParams(search) {
-  const out = {};
-  const p = new URLSearchParams(search || '');
-  if (p.has('jsonl')) out.jsonl = p.get('jsonl');
-  if (p.has('t')) {
-    const t = parseFloat(p.get('t'));
-    if (!isNaN(t)) out.t = Math.max(0, Math.min(1, t / 100));
-  }
-  if (p.has('n')) out.nodeId = p.get('n');
-  if (p.has('hide')) {
-    out.hide = p.get('hide').split(',').map(r => r.trim()).filter(Boolean);
-  }
-  return out;
-}
-
-async function shareCurrent() {
-  const url = buildShareUrl();
-  try {
-    await navigator.clipboard.writeText(url);
-    showToast('Link copied to clipboard');
-  } catch {
-    prompt('Copy URL:', url);
-  }
-}
-
-function showToast(msg) {
-  if (!toastEl) return;
-  toastEl.textContent = msg;
-  toastEl.classList.add('show');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2000);
-}
-
-async function applyUrlParamsLate() {
-  const params = parseUrlParams(window.location.search);
-
-  if (params.jsonl) {
-    try {
-      if (!isSafeHttpUrl(params.jsonl)) {
-        console.warn('[share] отклонён небезопасный URL:', params.jsonl);
-        return;
-      }
-      const resp = await safeFetch(params.jsonl, { cache: 'no-store' });
-      if (resp.ok) {
-        const text = await resp.text();
-        loadText(text);
-      }
-    } catch (e) {
-      console.warn('[share] failed to fetch jsonl param:', e.message);
-    }
-  }
-
-  if (params.t != null) {
-    state.timelineMax = params.t;
-    const slider = document.getElementById('timeline');
-    if (slider) {
-      slider.value = String(Math.round(state.timelineMax * 100));
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
-
-  // Whitelist ролей — не принимаем произвольный текст из ?hide=
-  const KNOWN_ROLES = new Set(['user', 'assistant', 'tool_use', 'tool_result', 'subagent_input', 'thinking']);
-  if (Array.isArray(params.hide)) {
-    for (const r of params.hide) {
-      if (!KNOWN_ROLES.has(r)) continue;
-      state.hiddenRoles.add(r);
-      const btn = document.querySelector(`.btn-role[data-role="${r}"]`);
-      if (btn) btn.classList.remove('active');
-    }
-  }
-
-  if (params.nodeId && state.byId) {
-    const node = state.byId.get(params.nodeId);
-    if (node) state.selected = node;
-  }
-}
-
-    return { initShare, buildShareUrl, parseUrlParams, applyUrlParamsLate };
-  })();
-
   // --- src/main.js ---
   __M["src/main.js"] = (function () {
     const { state } = __M["src/view/state.js"];
@@ -9077,6 +10229,7 @@ async function applyUrlParamsLate() {
     const { initSpeedControl } = __M["src/ui/speed-control.js"];
     const { initOrphansToggle } = __M["src/ui/orphans-toggle.js"];
     const { initSnapshot } = __M["src/ui/snapshot.js"];
+    const { initSessionCard } = __M["src/ui/session-card.js"];
     const { initSettingsModal } = __M["src/ui/settings-modal.js"];
     const { initTopicsToggle } = __M["src/ui/topics-toggle.js"];
     const { initDiffMode } = __M["src/ui/diff-mode.js"];
@@ -9142,6 +10295,7 @@ initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
 initSnapshot();
+initSessionCard();
 initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);

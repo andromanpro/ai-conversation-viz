@@ -19,7 +19,9 @@ export function computeStats(nodes) {
   let longest = null;
   let hubs = 0;
   const toolCounts = new Map();
+  const roleCounts = new Map();
   for (const n of nodes) {
+    roleCounts.set(n.role, (roleCounts.get(n.role) || 0) + 1);
     if (typeof n.textLen === 'number') totalChars += n.textLen;
     if (n.ts < tsMin) tsMin = n.ts;
     if (n.ts > tsMax) tsMax = n.ts;
@@ -34,6 +36,8 @@ export function computeStats(nodes) {
     durationSec: (tsMax - tsMin) / 1000,
     longest,
     hubs,
+    roleCounts,
+    toolCounts,
     topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
   };
 }
