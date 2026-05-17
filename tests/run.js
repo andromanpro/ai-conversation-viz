@@ -18,6 +18,8 @@ import { toolIcon } from '../src/view/tool-icons.js';
 import { matchNodes } from '../src/ui/search.js';
 import { computeStats, formatDuration, formatTokens, initStats, recomputeStats } from '../src/ui/stats-hud.js';
 import { parseUrlParams } from '../src/ui/share.js';
+import { initSnapshot } from '../src/ui/snapshot.js';
+import { openSessionCard } from '../src/ui/session-card.js';
 import { hashNode, fnv1a, mergeDiff } from '../src/ui/diff-mode.js';
 import { isSafeHttpUrl, isLikelyIntranet } from '../src/core/url-safety.js';
 import { deriveArchetype, buildCardModel } from '../src/core/session-archetype.js';
@@ -1678,6 +1680,88 @@ test('annotations: listStarred и listAnnotated', () => {
   eq(starred.sort().join(','), 'a,c');
   const all = listAnnotated();
   eq(all.sort().join(','), 'a,b,c');
+});
+
+// ==== SNAPSHOT / SESSION CARD ENTRY ====
+test('snapshot: sessionCard option adds a menu item after recorder', () => {
+  const origLang = getLanguage();
+  setLanguage('en');
+  assert(typeof openSessionCard === 'function', 'openSessionCard export must be available');
+
+  const makeEl = () => ({
+    id: '',
+    className: '',
+    textContent: '',
+    style: {},
+    children: [],
+    listeners: {},
+    parentNode: null,
+    appendChild(child) {
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    },
+    remove() {
+      if (!this.parentNode) return;
+      this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+      this.parentNode = null;
+    },
+    contains(target) {
+      return target === this || this.children.includes(target);
+    },
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    },
+    getBoundingClientRect() {
+      return { left: 0, bottom: 0 };
+    },
+  });
+
+  const snapBtn = makeEl();
+  const body = makeEl();
+  const fakeDoc = {
+    body,
+    getElementById(id) {
+      if (id === 'btn-snapshot') return snapBtn;
+      if (id === 'snapshot-menu') return body.children.find(el => el.id === 'snapshot-menu') || null;
+      return null;
+    },
+    createElement: () => makeEl(),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  const origDoc = globalThis.document;
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.document = fakeDoc;
+  globalThis.setTimeout = () => 0;
+  try {
+    let opened = 0;
+    initSnapshot({
+      supportSvg: false,
+      singleClickPng: true,
+      videoRecorder: { toggle: () => {}, isActive: () => false },
+      sessionCard: { open: () => { opened++; } },
+    });
+    assert(typeof snapBtn.listeners.click === 'function', 'snapshot click handler should be wired');
+    snapBtn.listeners.click();
+    const menu = body.children.find(el => el.id === 'snapshot-menu');
+    assert(menu, 'snapshot menu should open instead of single-click PNG when sessionCard exists');
+    const labels = menu.children.map(el => el.textContent);
+    const recorderIdx = labels.indexOf(t('snapshot.video_start'));
+    const cardIdx = labels.indexOf(t('snapshot.session_card'));
+    assert(recorderIdx >= 0, 'recorder menu item should be present');
+    assert(cardIdx === recorderIdx + 1, 'session card item should follow recorder item');
+    const cardItem = menu.children[cardIdx];
+    assert(cardItem, 'session card menu item should be present');
+    cardItem.listeners.click();
+    eq(opened, 1, 'session card opener should run from menu item');
+    assert(!body.children.find(el => el.id === 'snapshot-menu'), 'menu should close after card click');
+  } finally {
+    setLanguage(origLang);
+    if (origDoc === undefined) delete globalThis.document;
+    else globalThis.document = origDoc;
+    globalThis.setTimeout = origSetTimeout;
+  }
 });
 
 // ==== I18N ====

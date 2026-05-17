@@ -2137,6 +2137,7 @@ const DICT = {
     'snapshot.svg': '⬇ SVG (nodes + edges)',
     'snapshot.video_start': '🎥 Start video recording',
     'snapshot.video_stop': '⏹ Stop video recording',
+    'snapshot.session_card': 'Session card (PNG)',
 
     // Session card
     'session_card.title': 'Session card',
@@ -2367,6 +2368,7 @@ const DICT = {
     'snapshot.svg': '⬇ SVG (ноды + рёбра)',
     'snapshot.video_start': '🎥 Начать запись видео',
     'snapshot.video_stop': '⏹ Остановить запись',
+    'snapshot.session_card': 'Карточка сессии (PNG)',
 
     'session_card.title': 'Карточка сессии',
     'session_card.redacted_topology': 'обезличенная топология · роли · инструменты · агрегаты',
@@ -2836,11 +2838,21 @@ function buildCardModel(session, opts = {}) {
   const includeSnippets = !!opts.includeSnippets;
   const snippetMaxChars = Math.max(12, Math.min(DEFAULT_SNIPPET_MAX, opts.snippetMaxChars || DEFAULT_SNIPPET_MAX));
   const roles = roleBreakdown(nodes);
-  const topTools = collectToolCounts(nodes, stats)
+  const toolPairs = collectToolCounts(nodes, stats);
+  const topTools = toolPairs
     .map(([name, count]) => ({ name: sanitizeCardText(name, { max: 36 }), count }))
     .filter(item => item.name && item.count > 0)
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
     .slice(0, 5);
+  // In Claude Code the `Task` tool IS the sub-agent spawn mechanism. When
+  // the parser produced no separate `subagent_input` nodes (some samples),
+  // raw subagent_input count is 0 even though N agents were spawned — which
+  // looked self-contradictory next to an "agent swarm" archetype. Report
+  // the truthful spawn count: max(explicit subagent nodes, Task calls).
+  const taskToolCount = toolPairs.reduce(
+    (sum, [name, count]) => sum + (normalizeToolName(name) === 'task' ? count : 0),
+    0,
+  );
   const roleCount = role => roles.find(r => r.role === role)?.count || 0;
   const longest = stats && stats.longest;
   const durationSec = stats && typeof stats.durationSec === 'number'
@@ -2860,7 +2872,7 @@ function buildCardModel(session, opts = {}) {
       tokens: stats && typeof stats.tokens === 'number' ? stats.tokens : 0,
       durationSec,
       toolUseTotal: roleCount('tool_use'),
-      subagentCount: roleCount('subagent_input'),
+      subagentCount: Math.max(roleCount('subagent_input'), taskToolCount),
       hubs: stats && typeof stats.hubs === 'number' ? stats.hubs : nodes.filter(n => n.isHub).length,
       longestTextLen: longest && typeof longest.textLen === 'number' ? longest.textLen : 0,
     },
@@ -7981,6 +7993,7 @@ let _singleClickPng = false;
 // "Start/Stop video recording". Не подтягиваем recorder напрямую как
 // import чтобы не плодить cross-deps; передаём через opts.
 let _videoRecorder = null;
+let _sessionCard = null;
 
 function initSnapshot(opts) {
   if (opts && typeof opts.getCanvas === 'function') _getCanvas = opts.getCanvas;
@@ -7989,11 +8002,14 @@ function initSnapshot(opts) {
   if (opts && opts.videoRecorder && typeof opts.videoRecorder.toggle === 'function') {
     _videoRecorder = opts.videoRecorder;
   }
+  if (opts && opts.sessionCard && typeof opts.sessionCard.open === 'function') {
+    _sessionCard = opts.sessionCard;
+  }
   _snapBtn = document.getElementById('btn-snapshot');
   if (!_snapBtn) return;
-  // Если есть videoRecorder integration — singleClick не имеет смысла
-  // (нужен popup для выбора между PNG / video). Иначе — соблюдаем флаг.
-  const useSingleClick = _singleClickPng && !_videoRecorder;
+  // Если есть menu integrations — singleClick не имеет смысла
+  // (нужен popup для выбора между PNG / video / card). Иначе — соблюдаем флаг.
+  const useSingleClick = _singleClickPng && !_videoRecorder && !_sessionCard;
   _snapBtn.addEventListener('click', useSingleClick ? () => savePng(1) : showMenu);
 }
 
@@ -8034,6 +8050,7 @@ function showMenu() {
     const label = isRec ? t('snapshot.video_stop') : t('snapshot.video_start');
     mkBtn(label, () => _videoRecorder.toggle());
   }
+  if (_sessionCard) mkBtn(t('snapshot.session_card'), () => _sessionCard.open());
   document.body.appendChild(menu);
 
   // Закрытие при клике вне меню (с задержкой чтобы не поймать current click)
@@ -8879,10 +8896,15 @@ function initSessionCard(opts = {}) {
   if (typeof opts.getShareUrl === 'function') _getShareUrl = opts.getShareUrl;
   btnEl = document.getElementById('btn-session-card');
   if (!btnEl) return;
-  btnEl.addEventListener('click', openDialog);
+  btnEl.addEventListener('click', openSessionCard);
 }
 
-function openDialog() {
+/**
+ * Open the redacted session-card dialog.
+ *
+ * @returns {void}
+ */
+function openSessionCard() {
   if (modalEl) { closeDialog(); return; }
   aspectKey = 'og';
   currentCanvas = null;
@@ -9115,12 +9137,6 @@ function drawBackground(ctx, W, H) {
     ctx.lineTo(W, y);
     ctx.stroke();
   }
-  ctx.strokeStyle = 'rgba(236, 160, 64, 0.18)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(W * 0.12, H);
-  ctx.lineTo(W * 0.58, 0);
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -9139,11 +9155,10 @@ function drawHeader(ctx, model, x, y) {
   ctx.moveTo(x, y + 34);
   ctx.lineTo(x + 260, y + 34);
   ctx.stroke();
-  if (model.shareUrl) {
-    ctx.font = '11px ui-monospace, Consolas, monospace';
-    ctx.fillStyle = 'rgba(207, 230, 255, 0.58)';
-    ctx.fillText(clipToWidth(ctx, model.shareUrl, 430), x + 292, y + 24);
-  }
+  // The share URL is intentionally NOT drawn on the card: it is almost
+  // always redacted to non-clickable noise ("https://[path]?t=..."), and
+  // the image itself is what gets shared, not a link. (model.shareUrl is
+  // still produced/sanitized for any non-card consumer.)
   ctx.restore();
 }
 
@@ -9489,7 +9504,7 @@ function showToast(msg) {
   showToast._t = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
-    return { initSessionCard, renderSessionCardCanvas };
+    return { initSessionCard, openSessionCard, renderSessionCardCanvas };
   })();
 
   // --- src/ui/diff-mode.js ---
@@ -10229,7 +10244,7 @@ function onKey(ev) {
     const { initSpeedControl } = __M["src/ui/speed-control.js"];
     const { initOrphansToggle } = __M["src/ui/orphans-toggle.js"];
     const { initSnapshot } = __M["src/ui/snapshot.js"];
-    const { initSessionCard } = __M["src/ui/session-card.js"];
+    const { openSessionCard } = __M["src/ui/session-card.js"];
     const { initSettingsModal } = __M["src/ui/settings-modal.js"];
     const { initTopicsToggle } = __M["src/ui/topics-toggle.js"];
     const { initDiffMode } = __M["src/ui/diff-mode.js"];
@@ -10294,8 +10309,7 @@ initRecorder();
 initFreezeToggle();
 initSpeedControl();
 initOrphansToggle();
-initSnapshot();
-initSessionCard();
+initSnapshot({ sessionCard: { open: openSessionCard } });
 initSettingsModal();
 initTopicsToggle();
 initDiffMode(getViewport);
